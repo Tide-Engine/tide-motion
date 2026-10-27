@@ -1,0 +1,129 @@
+name: Build and release
+
+on:
+  push:
+    branches: [dev]
+    tags: ['v*']
+  pull_request:
+    branches: [dev]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  TIDE_HIDDEN: '1'
+
+jobs:
+  build:
+    name: ${{ matrix.platform }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-x64
+            runner: windows-2025
+          - platform: linux-x64
+            runner: ubuntu-24.04
+          - platform: linux-arm64
+            runner: ubuntu-24.04-arm
+          - platform: macos-arm64
+            runner: macos-15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Check release version
+        run: |
+          version=$(sed -n 's/^project(tide-motion VERSION \([0-9.]*\) .*/\1/p' CMakeLists.txt)
+          test -n "$version"
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            test "$GITHUB_REF_NAME" = "v$version"
+          fi
+      - name: Configure Windows
+        if: runner.os == 'Windows'
+        run: cmake -S . -B build -G 'Visual Studio 17 2022' -A x64 -T ClangCL -DMOTION_VULKAN=OFF
+      - name: Configure Linux
+        if: runner.os == 'Linux'
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc-13 -DCMAKE_CXX_COMPILER=g++-13 -DMOTION_VULKAN=OFF
+      - name: Configure macOS
+        if: runner.os == 'macOS'
+        run: |
+          llvm=$(brew --prefix llvm@18)
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER="$llvm/bin/clang" -DCMAKE_CXX_COMPILER="$llvm/bin/clang++" -DMOTION_VULKAN=OFF
+      - name: Build
+        run: cmake --build build --config Release --target tide-motion motion-tests --parallel 3
+      - name: Test contracts
+        run: ctest --test-dir build -C Release --output-on-failure
+      - name: Package
+        run: |
+          cpack --config build/CPackConfig.cmake -C Release -B dist
+          cmake -DDIRECTORY="$PWD/dist" -P .github/scripts/checksums.cmake
+      - name: Test Windows installation
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $archive = @(Get-ChildItem dist/*.zip)
+          if ($archive.Count -ne 1) { throw 'Expected one archive' }
+          ./tests/install.ps1 -Archive $archive[0].FullName
+      - name: Test Unix installation
+        if: runner.os != 'Windows'
+        run: sh tests/install.sh dist/*.tar.gz
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ matrix.platform }}
+          path: |
+            dist/*.zip
+            dist/*.tar.gz
+            dist/*.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Publish all tested platforms together
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=${RELEASE_TAG#v}
+          for platform in windows-x64 linux-x64 linux-arm64 macos-arm64; do
+            extension=tar.gz
+            if [[ "$platform" == windows-x64 ]]; then extension=zip; fi
+            archive="dist/tide-motion-$version-$platform.$extension"
+            test -f "$archive"
+            (cd dist && sha256sum -c "$(basename "$archive").sha256")
+          done
+          # Re-runs may resume a draft, but never replace a published release.
+          if gh release view "$RELEASE_TAG" --json isDraft > dist/release.json 2>/dev/null; then
+            test "$(jq -r .isDraft dist/release.json)" = true
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --draft --title "Tide Motion $RELEASE_TAG" --generate-notes
+          fi
+          gh release upload "$RELEASE_TAG" dist/*.zip dist/*.tar.gz dist/*.sha256 install.ps1 install.sh --clobber
+          gh release edit "$RELEASE_TAG" --draft=false --latest

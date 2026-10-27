@@ -122,3 +122,47 @@ added to the user PATH. Verified model files are hardlinked from the task's
 download cache into its default model directory, retaining independent directory
 entries without another 10 GB download/copy. No TIDE_HIDDEN variable was set in
 the owner's environment.
+
+## Public repository and automated releases (2026-10-27)
+
+The owner authorized public distribution and platform release workflows. The
+repository is now public at https://github.com/Tide-Engine/tide-motion. A scan of
+every historical Git blob found no weights, evaluation motion data, oversized
+binary payloads or common credential patterns. Apache-2.0 source and dependency
+notices permit publication; selected NVIDIA motion-model terms permit commercial
+use separately, and Meta Llama 3 retains its own terms and attribution. Models
+remain external downloads, never Git or release artifacts.
+
+Version 0.1.2 introduces .github/workflows/release.yml. Pushes to dev and pull
+requests build Windows x64, Linux x64/ARM64 and Apple Silicon macOS natively.
+Every job runs all three model-free CTests, packages only the runtime component,
+writes a SHA-256 sidecar and exercises the installer against that archive. The
+release job runs only for a v<project-version> tag after every build succeeds.
+It verifies all four archives/checksums, creates or resumes a draft, uploads the
+archives/sidecars/installers and publishes together. Published releases are not
+overwritten on rerun. Actions and model/runtime dependencies remain pinned.
+No manual workflow dispatch, publishing credential or model download is needed.
+
+Archive names are tide-motion-<version>-<os>-<arch>.zip on Windows and .tar.gz on
+Unix. Windows keeps app-local MS runtime DLLs. Unix packages carry ONNX libraries
+with executable-relative RPATH; Linux still needs the distribution's compatible
+glibc/libstdc++ (Ubuntu 24.04 is the release baseline). macOS 15 Apple Silicon is
+the first Mac target. The Mac binary is unsigned/unnotarized. Intel Mac needs
+an independently supplied compatible ONNX runtime; Windows ARM64 is not shipped.
+Release builds use CPU inference, with AVX2 required on x64.
+
+The new sh installer verifies the archive SHA-256, bounds archive paths and link
+types, stages beneath the destination, tests the staged executable and replaces
+bin with rollback on a failed move. It preserves models and prints a user PATH
+entry rather than editing shell startup files. Its isolated test covers paths
+with spaces/apostrophes, install/reinstall, model preservation, rejected checksum
+and escaping symlink, and executing without loader-path environment variables.
+
+Local validation: Windows x64 ClangCL Release and Ubuntu 24.04 x64 / GCC 13 under
+WSL build successfully; all three CTests and both runtime archive/installer tests
+pass. Two GCC misleading-indentation warnings were corrected without behavior
+changes. actionlint 1.7.12 accepts the workflow. macOS and Linux ARM64 validation
+is delegated to the workflow, not claimed as locally exercised. This packaging
+change does not repeat the previously recorded 10 GB model/inference tests.
+The Tide engine docs add a standalone tools/motion page and an animation-page
+link with installation, batches, SOMA limits, asset import and license scope.

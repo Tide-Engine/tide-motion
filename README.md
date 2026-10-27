@@ -11,14 +11,39 @@ Automatic rigging, skinning and general retargeting are not implemented.
 
 ## Install
 
-Windows x64 (AVX2 CPU): download the release ZIP and its `.sha256` file, then run:
+Download an archive, its `.sha256` sidecar and the installer from
+[Releases](https://github.com/Tide-Engine/tide-motion/releases/latest).
+
+| Platform | Archive | Requirements |
+|---|---|---|
+| Windows x64 | `windows-x64.zip` | AVX2 CPU, Windows 10/11 |
+| Linux x64 | `linux-x64.tar.gz` | AVX2 CPU, Ubuntu 24.04 or compatible glibc/libstdc++ |
+| Linux ARM64 | `linux-arm64.tar.gz` | Ubuntu 24.04 or compatible glibc/libstdc++ |
+| macOS Apple Silicon | `macos-arm64.tar.gz` | macOS 15 or newer |
+
+Archive names start with `tide-motion-<version>-`. Intel Mac and Windows ARM64
+packages are not currently provided. macOS builds are unsigned and unnotarized;
+macOS may require approval in Privacy & Security for a downloaded executable.
+
+Windows:
 
 ```powershell
-./install.ps1 -Archive ./tide-motion-0.1.1-Windows-AMD64.zip -AddToPath
+./install.ps1 -Archive ./tide-motion-0.1.2-windows-x64.zip -AddToPath
 ```
 
 Reopen the terminal after adding PATH. `-Root <directory>` selects another
-installation. The archive includes the native executable, ONNX Runtime and
+installation. Linux/macOS (select your platform's archive):
+
+```sh
+sh install.sh ./tide-motion-0.1.2-linux-x64.tar.gz
+export PATH="$HOME/.local/share/tide-motion/bin:$PATH"
+```
+
+Persist that PATH entry in your shell profile. A second argument to `install.sh`
+selects another installation directory. Neither installer needs administrator
+access; both verify the archive and test the new binary before replacing it.
+
+The archive includes the native executable, ONNX Runtime and, on Windows,
 required Microsoft runtime files. No Python, PyTorch, Conda, Docker or compiler is
 needed to use a prebuilt package. Model downloading uses the OS `curl` executable,
 as Tide does. Models are separate from the executable and survive reinstalling it.
@@ -137,10 +162,25 @@ which uses ONNX Runtime CPU inference. GPU-enabled builds need separate validati
 See [implementation notes](notes/implementation.md) for exact revisions, current
 validation, remaining gaps and platform coverage.
 
-`tests/install.ps1 -Archive <release.zip>` checks the Windows installer in an
-isolated directory. `tests/inference.ps1 -Models <cache> [-Tide <executable>]`
+`tests/install.ps1 -Archive <release.zip>` and
+`sh tests/install.sh <release.tar.gz>` check installers in isolated directories.
+`tests/inference.ps1 -Models <cache> [-Tide <executable>]`
 runs a real four-action generation/transition batch and verifies model reuse.
 The latter needs the downloaded models and can take several minutes on CPU.
+
+## Releases
+
+The [Build and release workflow](.github/workflows/release.yml) builds all four
+platforms on pushes to `dev` and on pull requests. Each runs the model-free
+contract tests, builds a runtime-only archive and checks the installer with the
+packaged executable. Models are never included in CI artifacts or releases.
+
+To publish, update the version in `CMakeLists.txt`, commit it to `dev`, then push
+the matching `v<version>` tag. A tag/version mismatch fails. Only after every
+platform succeeds does the workflow publish all archives, SHA-256 sidecars and
+both installers together. A failed build publishes nothing; a publish retry can
+resume a draft but cannot overwrite an already published release. Release builds
+use CPU inference; Vulkan remains an opt-in source build.
 
 ## Licenses
 

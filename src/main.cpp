@@ -44,7 +44,8 @@ Meta Llama 3 terms for Kimodo's text encoder. See licenses/ and README.md.
 }
 double number(const std::string& text,double low,double high,const char* label) {
     size_t used=0;double n=std::stod(text,&used);
-    if(used!=text.size()||!std::isfinite(n)||n<low||n>high)throw std::runtime_error(std::string(label)+" is out of range");return n;
+    if(used!=text.size()||!std::isfinite(n)||n<low||n>high)throw std::runtime_error(std::string(label)+" is out of range");
+    return n;
 }
 double integer(const std::string& text,double low,double high,const char* label) {
     double value=number(text,low,high,label);

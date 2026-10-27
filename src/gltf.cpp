@@ -56,7 +56,8 @@ Clip load_glb(const fs::path& path,const std::string& selected) {
         animation=&data->animations[0];
     } else {
         for(size_t i=0;i<data->animations_count;++i)if(data->animations[i].name&&selected==data->animations[i].name) {
-            if(animation)throw std::runtime_error("Ambiguous animation name"); animation=&data->animations[i];
+            if(animation)throw std::runtime_error("Ambiguous animation name");
+            animation=&data->animations[i];
         }
         if(!animation)throw std::runtime_error("Animation not found: "+selected);
     }
