@@ -4,10 +4,11 @@ Native, offline animation authoring using Kimodo for text-to-motion and
 MotionBricks for transitions between clips. It is a separate tool and repository;
 Tide is an optional preview renderer. No Tide CLI or engine changes are required.
 
-This initial implementation targets canonical SOMA-30 human animations. Outputs
-are self-contained GLB files containing an animated skeleton, without a mesh.
-Other rigs need retargeting in an authoring tool before/after this workflow.
-Automatic rigging, skinning and general retargeting are not implemented.
+The models use canonical SOMA-30 human animations. A reusable bone-mapping file
+retargets between SOMA and your humanoid rig, offline and without another model.
+Outputs are self-contained GLB files containing an animated skeleton, without a
+mesh. They drive the character mesh you already have. Automatic bone assignment,
+rigging, skinning and non-humanoid retargeting are not implemented.
 
 ## Install
 
@@ -28,14 +29,14 @@ macOS may require approval in Privacy & Security for a downloaded executable.
 Windows:
 
 ```powershell
-./install.ps1 -Archive ./tide-motion-0.1.2-windows-x64.zip -AddToPath
+./install.ps1 -Archive ./tide-motion-0.2.0-windows-x64.zip -AddToPath
 ```
 
 Reopen the terminal after adding PATH. `-Root <directory>` selects another
 installation. Linux/macOS (select your platform's archive):
 
 ```sh
-sh install.sh ./tide-motion-0.1.2-linux-x64.tar.gz
+sh install.sh ./tide-motion-0.2.0-linux-x64.tar.gz
 export PATH="$HOME/.local/share/tide-motion/bin:$PATH"
 ```
 
@@ -99,10 +100,70 @@ The model normally chooses 8–14 tokens. `--tokens 6..16` fixes the token count
 After trimming boundary frames there are `4*tokens - 6` frames at 30 Hz. Output
 duration is `(frames - 1)/30` seconds.
 
-Inputs must use the canonical SOMA names, hierarchy and proportions, with no
+MotionBricks inputs must use the canonical SOMA names, hierarchy and proportions, with no
 scale tracks, matrix nodes or animated extra nodes. LINEAR and STEP GLB tracks
 are supported; bake cubic tracks before import. A GLB with several animations
 requires `--from-clip NAME` or `--to-clip NAME` (`--clip NAME` for inspect/preview).
+
+## Retarget a humanoid
+
+List your character's bones, copy [the example mapping](examples/humanoid.json),
+and replace its values with your rig's exact bone names:
+
+```sh
+tide-motion inspect character.glb --skeleton
+tide-motion retarget sequence.glb --target character.glb --map humanoid.json -o character-sequence.glb
+```
+
+The mapping's keys are SOMA's anatomical names; values name your character's
+bones. The example uses illustrative pelvis/spine/arm/leg names, not automatic
+rig detection. Required keys are `Hips`, `Chest`, `Head`, and each side's
+`Arm`, `ForeArm`, `Hand`, `Leg`, `Shin`, `Foot` with `Left`/`Right` prefixes.
+Other SOMA bones are optional; map toes and shoulders when the rig has them.
+`inspect --skeleton` lists parent indices, local positions/rotations and scales.
+Bone names and ancestor names must be unique and nonempty. Mapped ancestors must
+remain in anatomical order; extra unmapped helper/twist bones are allowed.
+
+The tool builds a matching reference pose by aiming mapped segments along their
+SOMA reference directions, including A-pose/T-pose differences. World-space
+rotation changes are transferred to the target's bone axes, preserving its local
+bone lengths. Unmapped bones retain their calibrated local reference transform
+and inherit parent movement; twist is not automatically distributed among helpers.
+Optional `referenceRotations` maps character bone names to local `[x,y,z,w]`
+quaternions, replacing automatic aiming for those bones when manual calibration
+is needed. These values describe the matching reference pose, not an additive
+animation rotation.
+
+`rootScale: "auto"` scales root travel by the average leg-length ratio. A positive
+number replaces that ratio (in world units); the reverse operation uses its
+reciprocal. Hip separation establishes the character's heading. `headingDegrees`
+adds a yaw correction, and `groundOffset` adds a vertical offset in character
+world units. Reference feet/toes establish ground height; this is not contact IK.
+Only Hips translation is transferred; non-root translation animation is reported
+and omitted so target bone lengths stay fixed.
+
+To use existing character clips with MotionBricks, convert them to SOMA first:
+
+```sh
+tide-motion retarget existing.glb --to-soma --map humanoid.json -o existing-soma.glb
+```
+
+Connect on SOMA, then retarget the joined sequence back to the character. Both
+directions use the same mapping, preserve frame count/timing, and need no model
+files. `--clip NAME` selects the source animation when there is more than one.
+The exported GLB contains the target skeleton and animation, without mesh,
+materials or textures. In Tide, import it as `Animation` and sample into your
+original character's default pose.
+
+Retarget input is self-contained GLB, sampled at 30 Hz with LINEAR/STEP tracks.
+Static positive uniform scale, including centimetre armature wrappers and affine
+matrices without shear/reflection, is supported. Constant scale tracks are also
+accepted on custom rigs. Changing scale, nonuniform/negative scale, morph tracks
+and cubic interpolation require an appropriate export/bake first. This is a
+humanoid rotation/root-motion retargeter, not foot planting, obstacle avoidance
+or a guarantee of a perfect result on every character.
+
+## Inspect and preview
 
 ```sh
 tide-motion inspect sequence.glb
@@ -142,6 +203,23 @@ The tool validates the manifest and output paths before loading a model. It stop
 at the first failed action and retains completed outputs. A rerun requires new
 output paths or a manifest containing only the unfinished actions.
 
+Retargeting can appear anywhere in the same ordered batch, using a previous
+generated or connected output. It does not load an inference backend:
+
+```json
+{
+  "action": "retarget",
+  "source": "sequence.glb",
+  "target": "character.glb",
+  "map": "humanoid.json",
+  "output": "character-sequence.glb"
+}
+```
+
+For the reverse direction, use `"toSoma": true` and omit `target`. `clip` selects
+a source clip. Mapping schemas and required fields are checked before any batch
+action runs. As with other actions, all file paths are relative to the manifest.
+
 ## Build
 
 Requires CMake 3.25+, Git and a C++23 compiler. Dependencies are fetched at pinned
@@ -149,7 +227,7 @@ revisions. Model conversion is not part of the build.
 
 ```powershell
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -T ClangCL
-cmake --build build --config Release --target tide-motion motion-tests
+cmake --build build --config Release --target tide-motion motion-tests retarget-tests
 ctest --test-dir build -C Release --output-on-failure
 cmake --install build --config Release --component runtime --prefix dist/tide-motion
 ```

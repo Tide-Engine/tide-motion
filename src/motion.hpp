@@ -2,6 +2,7 @@
 #include <array>
 #include <filesystem>
 #include <memory>
+#include <map>
 #include <span>
 #include <string>
 #include <vector>
@@ -28,12 +29,13 @@ Quat rotation6(Vec3, Vec3);
 Transform operator*(Transform, Transform);
 Transform inverse(Transform);
 Transform blend(Transform, Transform, float);
-struct Joint { std::string name; int parent=-1; Transform rest; };
+struct Joint { std::string name; int parent=-1; Transform rest; float scale=1; };
 struct Clip {
     std::string name="motion";
     float fps=30;
     std::vector<Joint> joints;
     std::vector<Transform> poses;
+    size_t motion_root=0;
     size_t frames() const;
     float duration() const;
     std::span<Transform> frame(size_t);
@@ -44,8 +46,17 @@ std::vector<Joint> soma();
 void require_soma(const Clip&);
 std::vector<Transform> world_pose(const Clip&, std::span<const Transform>);
 std::vector<Transform> sample(const Clip&, float);
-Clip load_glb(const fs::path&, const std::string& animation="");
+Clip load_glb(const fs::path&, const std::string& animation="", bool canonical=true);
+Clip load_rig_glb(const fs::path&);
 void save_glb(const Clip&, const fs::path&);
+struct RetargetMapping {
+    std::array<std::string,30> bones;
+    std::map<std::string,Quat> reference_rotations;
+    float root_scale=0, heading_degrees=0, ground_offset=0;
+};
+struct RetargetResult { Clip clip; float scale=1, heading_degrees=0; bool discarded_translations=false; };
+RetargetMapping load_mapping(const fs::path&);
+RetargetResult retarget(const Clip& source, const Clip& target, const RetargetMapping&, bool to_soma=false);
 struct BricksInputs {
     std::array<float,40> root{};
     std::array<float,32> local_root{};

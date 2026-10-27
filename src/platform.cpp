@@ -1,9 +1,12 @@
 #include "motion.hpp"
 #include <nlohmann/json.hpp>
 #include <cstdlib>
+#include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
+#include <set>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
@@ -70,7 +73,10 @@ fs::path model_directory() {
     throw std::runtime_error("Cannot determine model cache; use --models <directory>");
 }
 void preview(const Clip& c,const fs::path& source,const std::string& tide,const fs::path& capture,int frames) {
-    require_soma(c);
+    c.validate();
+    std::set<std::string> names;
+    for(const auto& joint:c.joints)if(joint.name.empty()||!names.insert(joint.name).second)
+        throw std::runtime_error("Skeleton preview needs unique, nonempty bone and ancestor names");
     const char* hidden=std::getenv("TIDE_HIDDEN");
     if(hidden&&*hidden&&std::string(hidden)!="0"&&capture.empty()&&frames==0)throw std::runtime_error("Hidden preview requires --capture or --frames");
     auto root=fs::temp_directory_path()/"tide-motion-preview";
@@ -90,19 +96,25 @@ view Preview(mut PreviewClock clock)
     clock.elapsed += Frame.dt;
     rig.animations.TryGetAt(0, out var animation);
     var pose = animation.Sample(clock.elapsed, Playback.Loop);
-    var center = Math.Transform(pose.Model(rig.skeleton.bones.hips), float3(0));
 )";
+    scene<<"    rig.skeleton.bones.TryGetByName("<<nlohmann::json(c.joints[c.motion_root].name).dump()<<", out var centerBone);\n";
+    scene<<"    var center = Math.Transform(pose.Model(centerBone), float3(0));\n";
+    auto first=world_pose(c,c.frame(0));
+    float low=first.front().p.y,high=low;
+    for(const auto& joint:first) {low=std::min(low,joint.p.y);high=std::max(high,joint.p.y);}
+    float drawing_scale=350/std::max(0.1f,high-low);
     // Project into two 2D panels. This uses Tide's ordinary drawing path and works
     // without depending on a particular game camera or skinned character asset.
-    for(size_t j=1;j<c.joints.size();++j) {
+    for(size_t j=0;j<c.joints.size();++j) {
+        if(c.joints[j].parent<0)continue;
         // Tide adds a synthetic scene root when importing GLB. Bind by the
         // authored joint names instead of reusing GLB node indices.
         scene<<"    rig.skeleton.bones.TryGetByName("<<nlohmann::json(c.joints[j].name).dump()<<", out var b"<<j<<");\n";
         scene<<"    rig.skeleton.bones.TryGetByName("<<nlohmann::json(c.joints[static_cast<size_t>(c.joints[j].parent)].name).dump()<<", out var p"<<j<<");\n";
         scene<<"    var a"<<j<<" = Math.Transform(pose.Model(b"<<j<<"), float3(0)) - float3(center.x, 0, center.z);\n";
         scene<<"    var z"<<j<<" = Math.Transform(pose.Model(p"<<j<<"), float3(0)) - float3(center.x, 0, center.z);\n";
-        scene<<"    Draw.Line(float2(-240 + a"<<j<<".x * 190, -200 + a"<<j<<".y * 190), float2(-240 + z"<<j<<".x * 190, -200 + z"<<j<<".y * 190), 4, Color(0.3, 0.8, 1));\n";
-        scene<<"    Draw.Line(float2(240 + a"<<j<<".z * 190, -200 + a"<<j<<".y * 190), float2(240 + z"<<j<<".z * 190, -200 + z"<<j<<".y * 190), 4, Color(1, 0.7, 0.3));\n";
+        scene<<"    Draw.Line(float2(-240 + a"<<j<<".x * "<<drawing_scale<<", -200 + (a"<<j<<".y - "<<low<<") * "<<drawing_scale<<"), float2(-240 + z"<<j<<".x * "<<drawing_scale<<", -200 + (z"<<j<<".y - "<<low<<") * "<<drawing_scale<<"), 4, Color(0.3, 0.8, 1));\n";
+        scene<<"    Draw.Line(float2(240 + a"<<j<<".z * "<<drawing_scale<<", -200 + (a"<<j<<".y - "<<low<<") * "<<drawing_scale<<"), float2(240 + z"<<j<<".z * "<<drawing_scale<<", -200 + (z"<<j<<".y - "<<low<<") * "<<drawing_scale<<"), 4, Color(1, 0.7, 0.3));\n";
     }
     scene<<"    Draw.Line(float2(-450, -200), float2(-30, -200), 1, Color(0.3, 0.3, 0.3));\n";
     scene<<"    Draw.Line(float2(30, -200), float2(450, -200), 1, Color(0.3, 0.3, 0.3));\n}\n";

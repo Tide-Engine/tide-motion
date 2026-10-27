@@ -64,13 +64,14 @@ float Clip::duration() const { return frames()>0?static_cast<float>(frames()-1)/
 std::span<Transform> Clip::frame(size_t f) { if(f>=frames())throw std::out_of_range("frame"); return {poses.data()+f*joints.size(),joints.size()}; }
 std::span<const Transform> Clip::frame(size_t f) const { if(f>=frames())throw std::out_of_range("frame");return {poses.data()+f*joints.size(),joints.size()}; }
 void Clip::validate() const {
-    if(joints.empty()||joints.size()>1024||poses.empty()||poses.size()%joints.size()||frames()>18000||!std::isfinite(fps)||fps<=0)
+    if(joints.empty()||joints.size()>1024||motion_root>=joints.size()||poses.empty()||poses.size()%joints.size()||frames()>18000||!std::isfinite(fps)||fps<=0)
         throw std::runtime_error("Invalid clip size or frame rate");
     for(size_t i=0;i<joints.size();++i) {
         if(joints[i].parent< -1||joints[i].parent>=static_cast<int>(i))throw std::runtime_error("Skeleton must be ordered parent before child");
         auto t=joints[i].rest;
         if(!std::isfinite(t.p.x)||!std::isfinite(t.p.y)||!std::isfinite(t.p.z))throw std::runtime_error("Nonfinite rest position");
         (void)normalized(t.q);
+        if(!std::isfinite(joints[i].scale)||joints[i].scale<=0)throw std::runtime_error("Joint scale must be finite and positive");
     }
     for(auto t:poses) { if(!std::isfinite(t.p.x)||!std::isfinite(t.p.y)||!std::isfinite(t.p.z))throw std::runtime_error("Nonfinite animation position"); (void)normalized(t.q); }
 }
@@ -85,6 +86,7 @@ void require_soma(const Clip& c) {
     if(c.joints.size()!=rig.size())throw std::runtime_error("MotionBricks currently requires the canonical 30-joint SOMA rig; retarget other rigs before connecting");
     for(size_t i=0;i<rig.size();++i) {
         if(c.joints[i].name!=rig[i].name||c.joints[i].parent!=rig[i].parent)throw std::runtime_error("Clip does not use the canonical SOMA names and hierarchy");
+        if(std::abs(c.joints[i].scale-1)>1e-5f)throw std::runtime_error("Canonical SOMA joint scale must be one");
         if(i&&dot(c.joints[i].rest.p-rig[i].rest.p,c.joints[i].rest.p-rig[i].rest.p)>1e-6f)throw std::runtime_error("Clip has different body proportions; retarget to canonical SOMA first");
         for(size_t f=0;f<c.frames();++f)if(i&&dot(c.frame(f)[i].p-c.joints[i].rest.p,c.frame(f)[i].p-c.joints[i].rest.p)>1e-8f)
             throw std::runtime_error("Animated bone lengths are unsupported; bake/retarget to a rigid SOMA skeleton first");
@@ -93,7 +95,17 @@ void require_soma(const Clip& c) {
 std::vector<Transform> world_pose(const Clip& c,std::span<const Transform> pose) {
     if(pose.size()!=c.joints.size())throw std::runtime_error("Pose has the wrong joint count");
     std::vector<Transform> out(pose.begin(),pose.end());
-    for(size_t j=0;j<out.size();++j)if(c.joints[j].parent>=0)out[j]=out[static_cast<size_t>(c.joints[j].parent)]*out[j];
+    std::vector<float> scales(out.size());
+    for(size_t j=0;j<out.size();++j) {
+        scales[j]=c.joints[j].scale;
+        if(c.joints[j].parent>=0) {
+            auto parent=static_cast<size_t>(c.joints[j].parent);
+            out[j].p=out[j].p*scales[parent];
+            out[j]=out[parent]*out[j];
+            scales[j]*=scales[parent];
+        }
+        if(!std::isfinite(scales[j])||scales[j]<1e-8f||scales[j]>1e8f)throw std::runtime_error("Accumulated skeleton scale is out of range; bake transforms before export");
+    }
     return out;
 }
 std::vector<Transform> sample(const Clip& c,float time) {

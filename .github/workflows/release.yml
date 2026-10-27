@@ -59,7 +59,7 @@ jobs:
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER="$(xcrun --find clang)" -DCMAKE_CXX_COMPILER="$(xcrun --find clang++)" -DMOTION_VULKAN=OFF
       - name: Build
-        run: cmake --build build --config Release --target tide-motion motion-tests --parallel 3
+        run: cmake --build build --config Release --target tide-motion motion-tests retarget-tests --parallel 3
       - name: Test contracts
         run: ctest --test-dir build -C Release --output-on-failure
       - name: Package

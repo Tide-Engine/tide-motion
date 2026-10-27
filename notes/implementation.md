@@ -180,3 +180,84 @@ encoding for punctuation. This does not change console settings or argument/path
 encoding. Windows Release rebuild, the existing cli-help check and an ASCII-only
 output check pass. The rebuilt executable replaces the owner's installed copy;
 model files and PATH are preserved.
+
+## Mapped humanoid retargeting (0.2.0)
+
+Owner decisions: retarget offline in Tide Motion; support humanoids through an
+explicit reusable bone-mapping file, rather than choosing a single named rig.
+No engine/runtime retargeting or added inference dependency is introduced.
+
+`retarget SOURCE.glb --target CHARACTER.glb --map BONES.json -o CLIP.glb` converts
+canonical SOMA motion to the character. `--to-soma` replaces `--target` for the
+reverse conversion, enabling existing clips -> SOMA -> MotionBricks -> character.
+Both directions also work as ordered batch actions. Mapping schemas and paths
+are preflighted before inference; retargeting loads no model and standalone
+retarget/inspect/preview no longer require a model-cache environment. Recipes
+embed the actual mapping and record effective root scale/heading and discarded
+non-root translations. Existing output/partial/recipe paths remain refused.
+
+Mappings have SOMA names as keys and exact character names as values. Fifteen
+anatomical slots are required (Hips, Chest, Head and three per arm/leg); other
+SOMA slots are optional. Unique, nonempty rig/ancestor names and matching nearest
+mapped ancestry are required, with extra unmapped helper/twist nodes supported.
+examples/humanoid.json is an editable naming example, not automatic rig detection.
+
+The reference rig is skin joints plus ancestors, or all nodes for an unskinned
+skeleton file. Import orders parents first and checks cycles. Joint scale is a
+static positive uniform scalar; world-pose evaluation composes ancestor scales.
+Uniform affine matrices are decomposed; shear, reflection and nonuniform scale
+are refused. Constant custom-rig scale tracks are accepted; changing scale,
+cubic interpolation and morph tracks are not. Canonical model inputs retain
+their stricter existing SOMA rules. Bounds remain 512 MiB, 1,024 nodes and 18,000
+frames. inspect --skeleton lists names, parent indices, rest TRS and scales.
+
+Hip separation defines world heading. Calibration aims primary mapped segments
+along aligned SOMA reference directions, correcting A/T pose differences without
+assuming identical local bone axes. Local XYZW referenceRotations overrides skip
+automatic aiming for those character nodes. Per frame, the source world rotation
+delta from its reference is conjugated by the source/target heading and applied
+to the target reference, then converted through the current target parent. Local
+target lengths stay fixed; unmapped nodes inherit parents with their calibrated
+local reference transforms. This does not distribute roll among twist helpers.
+
+Root travel scales by mean leg-length ratio, or explicit rootScale (the reverse
+uses the reciprocal). Reference feet/toes establish ground, headingDegrees adds
+yaw and groundOffset adjusts character-space height; all invert on roundtrip.
+Root/ancestor source motion contributes through world-space evaluation. Non-root
+translation animation is omitted and reported on stderr and in the recipe. This
+is rotation/root-motion retargeting, not stretch transfer or contact IK.
+
+Export retains the target hierarchy, rest transforms/scales and an animation;
+it does not copy skin, mesh, materials or textures. asset.extras.tideMotion stores
+the named motion root for following retargeted skeleton previews. Preview now
+handles named custom skeletons, root-following and height-based framing. Tide
+binds the animation to the original character through its existing APIs.
+
+Validation: all five CTests pass on Windows x64 ClangCL Release and Ubuntu 24.04
+x64/GCC 13 in WSL. New contracts use independently authored A-pose geometry,
+nonuniform body proportions (not node scale), arbitrary bone axes, a rotated
+centimetre armature and an unmapped twist helper. They check world limb
+directions, standing ground/heading, root scaling, reverse position/rotation
+roundtrip, manual reference overrides, optional bones, malformed/duplicate/crossed
+mappings, matrix decomposition, constant/changing scale, preserved target lengths,
+reported translation omission and GLB scale/root metadata roundtrip. CLI checks
+exercise a two-direction batch with an empty model cache, absent cache environment,
+manifest-relative paths with spaces/apostrophes, inspection and overwrite refusal.
+Existing model-free motion and CLI checks pass; model algorithms are unchanged.
+Windows and Linux runtime archives and isolated installers pass; actionlint and
+the Tide docs production build pass. macOS/ARM64 remain native CI checks.
+
+Real integration uses Khronos glTF Sample Assets' Cesium Man (Cesium, CC BY 4.0;
+its logo also carries separate trademark terms), downloaded only to ignored
+.research/retarget. No third-party model, texture or derived animation is committed
+or packaged. A real 60-frame generated walk retargets to its different hierarchy,
+and its original 61-frame animation converts to SOMA (with reported small non-root
+translation omissions). An ordered batch makes an 8-token MotionBricks transition
+to the generated walk and retargets the 145-frame joined sequence back, loading
+MotionBricks once. Bounded native Tide captures of the custom skeleton and original
+skinned character using the retargeted clip pass with no binding diagnostics and
+were visually inspected. The skin and hierarchy are unchanged by this tool.
+
+Remaining limits: manual bone assignment/calibration where needed, no foot locking,
+collision constraints, automatic helper twist distribution or non-humanoid solver.
+Retargeting does not guarantee production-quality contacts on arbitrary proportions.

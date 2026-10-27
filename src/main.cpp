@@ -22,13 +22,16 @@ void help() {
   tide-motion models check [all|kimodo|bricks] [--models DIR]
   tide-motion generate "PROMPT" -o CLIP.glb [--duration 3] [--seed 0] [--steps 50]
   tide-motion connect FROM.glb TO.glb -o BRIDGE.glb [--tokens 6..16] [--joined]
+  tide-motion retarget SOURCE.glb --target CHARACTER.glb --map BONES.json -o CLIP.glb
+  tide-motion retarget SOURCE.glb --to-soma --map BONES.json -o SOMA.glb
   tide-motion batch JOBS.json [--models DIR]
-  tide-motion inspect CLIP.glb [--clip NAME]
+  tide-motion inspect FILE.glb [--clip NAME | --skeleton]
   tide-motion preview CLIP.glb [--tide PATH] [--capture IMAGE.png] [--frames N]
 
 Models are downloaded once and SHA-256 verified. Generation and transitions run
-locally without Python, PyTorch, Conda or a server. The initial rig is SOMA-30;
-GLB output contains animation and a skeleton, without a skinned character mesh.
+locally without Python, PyTorch, Conda or a server. Models use SOMA-30; retarget
+converts mapped humanoids to/from SOMA without loading a model. GLB output
+contains animation and a skeleton, without a skinned character mesh.
 
 --models DIR overrides TIDE_MOTION_MODELS and the OS model cache.
 connect preserves target placement; use --offset X Y Z to place the target clip.
@@ -77,11 +80,24 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
         std::vector<std::string> argv{"tide-motion",type};
         if(type=="generate") { argv.push_back(action.at("prompt").get<std::string>());keys.insert({"prompt","duration","seed","steps"}); }
         else if(type=="connect") { argv.push_back(path(action.at("from")).string());argv.push_back(path(action.at("to")).string());keys.insert({"from","to","tokens","joined","offset","fromClip","toClip"}); }
-        else throw std::runtime_error("Action must be generate or connect");
+        else if(type=="retarget") {
+            argv.push_back(path(action.at("source")).string());
+            auto mapping=path(action.at("map"));(void)load_mapping(mapping);
+            argv.insert(argv.end(),{"--map",mapping.string()});
+            bool to_soma=action.contains("toSoma")&&action["toSoma"].get<bool>();
+            if(to_soma) {
+                if(action.contains("target"))throw std::runtime_error("toSoma does not take a target");
+                argv.push_back("--to-soma");
+            } else argv.insert(argv.end(),{"--target",path(action.at("target")).string()});
+            if(action.contains("clip"))argv.insert(argv.end(),{"--clip",action["clip"].get<std::string>()});
+            keys.insert({"source","target","map","toSoma","clip"});
+        }
+        else throw std::runtime_error("Action must be generate, connect or retarget");
         for(const auto& item:action.items())if(!keys.contains(item.key()))throw std::runtime_error("Unknown action field: "+item.key());
         auto output=path(action.at("output"));
         if(output.extension()!=".glb"||fs::exists(output)||fs::exists(output.string()+".part")||fs::exists(output.string()+".json")||!outputs.insert(output).second)throw std::runtime_error("Output must be a new, distinct .glb path: "+output.string());
-        argv.insert(argv.end(),{"-o",output.string(),"--models",models.string()});
+        argv.insert(argv.end(),{"-o",output.string()});
+        if(type!="retarget")argv.insert(argv.end(),{"--models",models.string()});
         for(const char* key:{"duration","seed","steps","tokens"})if(action.contains(key)) {
             if(!action[key].is_number())throw std::runtime_error(std::string(key)+" must be numeric");
             auto text=action[key].dump();
@@ -122,9 +138,10 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     if(args.size()<2||args[1]=="--help"||args[1]=="help") { help();return 0; }
     if(args[1]=="--version") { std::cout<<"tide-motion "<<MOTION_VERSION<<"\n";return 0; }
     std::string command=args[1],clip_name,from_name,to_name,tide="tide";
-    fs::path models=model_directory(),output,capture;
+    fs::path models,output,capture,target_file,map_file;
+    if(command=="generate"||command=="connect"||command=="models"||command=="batch")models=model_directory();
     double duration=3;uint64_t seed=0;unsigned steps=50;int frames=0,tokens=0;
-    bool accept=false,joined=false;Vec3 offset{};
+    bool accept=false,joined=false,skeleton=false,to_soma=false;Vec3 offset{};
     std::vector<std::string> pos;
     std::vector<std::string> flags;
     for(size_t i=2;i<args.size();++i) {
@@ -147,13 +164,18 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         else if(a=="--capture")capture=utf8path(value());
         else if(a=="--accept-licenses")accept=true;
         else if(a=="--joined")joined=true;
+        else if(a=="--skeleton")skeleton=true;
+        else if(a=="--to-soma")to_soma=true;
+        else if(a=="--target")target_file=utf8path(value());
+        else if(a=="--map")map_file=utf8path(value());
         else if(a.starts_with('-'))throw std::runtime_error("Unknown option: "+a);
         else pos.push_back(a);
     }
     std::set<std::string> allowed;
     if(command=="generate")allowed={"--models","-o","--output","--duration","--seed","--steps"};
     else if(command=="connect")allowed={"--models","-o","--output","--tokens","--joined","--offset","--from-clip","--to-clip"};
-    else if(command=="inspect")allowed={"--clip"};
+    else if(command=="retarget")allowed={"-o","--output","--target","--map","--to-soma","--clip"};
+    else if(command=="inspect")allowed={"--clip","--skeleton"};
     else if(command=="preview")allowed={"--clip","--tide","--capture","--frames"};
     else if(command=="models")allowed={"--models","--accept-licenses"};
     else if(command=="batch")allowed={"--models"};
@@ -174,16 +196,39 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     }
     if(command=="inspect"||command=="preview") {
         if(pos.size()!=1)throw std::runtime_error(command+" takes one GLB file");
-        auto path=utf8path(pos[0]);auto clip=load_glb(path,clip_name);
+        if(skeleton&&!clip_name.empty())throw std::runtime_error("inspect --skeleton does not take --clip");
+        auto path=utf8path(pos[0]);auto clip=skeleton?load_rig_glb(path):load_glb(path,clip_name,false);
         if(command=="preview")preview(clip,path,tide,capture,frames);
-        else std::cout<<nlohmann::json{{"name",clip.name},{"rig","soma30"},{"joints",clip.joints.size()},{"frames",clip.frames()},{"fps",clip.fps},{"duration",clip.duration()}}.dump(2)<<"\n";
+        else {
+            bool canonical=true;try{require_soma(clip);}catch(const std::exception&){canonical=false;}
+            nlohmann::json info={{"name",clip.name},{"rig",canonical?"soma30":"custom"},{"joints",clip.joints.size()},{"frames",clip.frames()},{"fps",clip.fps},{"duration",clip.duration()}};
+            if(skeleton) {
+                info["bones"]=nlohmann::json::array();
+                for(const auto& joint:clip.joints)info["bones"].push_back({{"name",joint.name},{"parent",joint.parent},{"translation",{joint.rest.p.x,joint.rest.p.y,joint.rest.p.z}},{"rotation",{joint.rest.q.x,joint.rest.q.y,joint.rest.q.z,joint.rest.q.w}},{"scale",joint.scale}});
+            }
+            std::cout<<info.dump(2)<<"\n";
+        }
         return 0;
     }
-    if(command!="generate"&&command!="connect")throw std::runtime_error("Unknown command: "+command+"; use --help");
+    if(command!="generate"&&command!="connect"&&command!="retarget")throw std::runtime_error("Unknown command: "+command+"; use --help");
     if(output.empty()||output.extension()!=".glb")throw std::runtime_error("Choose a .glb output with -o");
     if(fs::exists(output)||fs::exists(output.string()+".part")||fs::exists(output.string()+".json"))throw std::runtime_error("Output, partial output or recipe already exists: "+output.string());
     Clip clip;
-    if(command=="generate") {
+    nlohmann::json retarget_recipe;
+    if(command=="retarget") {
+        if(pos.size()!=1||map_file.empty()||(!to_soma&&target_file.empty())||(to_soma&&!target_file.empty()))
+            throw std::runtime_error("Use retarget SOURCE.glb --map BONES.json with either --target CHARACTER.glb or --to-soma, and -o CLIP.glb");
+        auto mapping=load_mapping(map_file);
+        auto source=load_glb(utf8path(pos[0]),clip_name,!to_soma);
+        Clip target;
+        if(to_soma) {target.joints=soma();for(const auto& joint:target.joints)target.poses.push_back(joint.rest);}
+        else target=load_rig_glb(target_file);
+        auto result=retarget(source,target,mapping,to_soma);
+        if(result.discarded_translations)std::cerr<<"Note: source has non-root translation animation; target bone lengths are preserved, so those translations are not copied.\n";
+        clip=std::move(result.clip);
+        std::ifstream mapping_stream(map_file);nlohmann::json mapping_json;mapping_stream>>mapping_json;
+        retarget_recipe={{"tool","tide-motion"},{"version",MOTION_VERSION},{"command",command},{"source",pos[0]},{"target",target_file.string()},{"toSoma",to_soma},{"clip",clip_name},{"mapping",mapping_json},{"rootScale",result.scale},{"headingDegrees",result.heading_degrees},{"discardedNonRootTranslations",result.discarded_translations},{"fps",clip.fps},{"frames",clip.frames()}};
+    } else if(command=="generate") {
         if(pos.size()!=1||pos[0].empty())throw std::runtime_error("generate takes one quoted prompt");
         if(!context->kimodo) {
             check_models(models,"kimodo");
@@ -217,6 +262,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     // Store generation settings alongside the asset; no need to rerun inference at build time.
     nlohmann::json recipe={{"tool","tide-motion"},{"version",MOTION_VERSION},{"command",command},{"inputs",pos},{"rig","soma30"},{"fps",30},{"frames",clip.frames()},{"requestedDuration",duration},{"seed",seed},{"steps",steps},{"tokens",tokens},{"joined",joined},{"offset",{offset.x,offset.y,offset.z}},
         {"fromClip",from_name},{"toClip",to_name},{"kimodoNativeRevision","ed8a931aedb132f768190f6931c365855caba74c"},{"motionbricksRevision","54fc563aeaaf819a753d72cc9fdc6713989cdd43"}};
+    if(command=="retarget")recipe=std::move(retarget_recipe);
     std::ofstream metadata(output.string()+".json");metadata<<recipe.dump(2)<<"\n";metadata.close();
     if(!metadata)throw std::runtime_error("Animation saved but could not write its recipe");
     std::cout<<"Saved "<<output.string()<<" ("<<clip.frames()<<" frames, "<<clip.duration()<<" seconds)\n";return 0;

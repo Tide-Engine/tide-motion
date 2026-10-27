@@ -11,8 +11,9 @@ licenses. Never distribute evaluation motion data or research-only checkpoints.
 Run with TIDE_HIDDEN=1. Preview runs must be bounded with --frames or --capture.
 Use only a Tide executable built from the engine checkout being validated.
 
-Generated outputs are ordinary GLB animation assets. SOMA is the initial supported
-rig; do not claim general retargeting or automatic skinning. Model arithmetic is
+Generated outputs are ordinary GLB animation assets. Models use SOMA; mapped
+humanoids can be retargeted offline in either direction. Do not claim automatic
+bone identification, skinning or non-humanoid retargeting. Model arithmetic is
 offline and is not Tide deterministic match simulation.
 
 Use dev, validate locally, commit and push directly. No pull requests or additional
