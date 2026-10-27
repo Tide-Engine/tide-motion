@@ -5,22 +5,22 @@
       "prompt": "A person walks forward slowly",
       "duration": 3,
       "seed": 4,
-      "output": "../output/walk.glb"
+      "output": "../output/example-walk.glb"
     },
     {
       "action": "generate",
       "prompt": "A person stands still and waves",
       "duration": 3,
       "seed": 7,
-      "output": "../output/wave.glb"
+      "output": "../output/example-wave.glb"
     },
     {
       "action": "connect",
-      "from": "../output/walk.glb",
-      "to": "../output/wave.glb",
+      "from": "../output/example-walk.glb",
+      "to": "../output/example-wave.glb",
       "offset": [1.5, 0, 0],
       "joined": true,
-      "output": "../output/sequence.glb"
+      "output": "../output/example-sequence.glb"
     }
   ]
 }

@@ -9,6 +9,9 @@ Set-Content -LiteralPath (Join-Path $root 'models/keep.txt') -Value 'keep'
 & (Join-Path $repoRoot 'install.ps1') -Archive $archivePath -Root $root
 & (Join-Path $repoRoot 'install.ps1') -Archive $archivePath -Root $root
 if ((Get-Content -LiteralPath (Join-Path $root 'models/keep.txt')) -ne 'keep') { throw 'Reinstall changed model data' }
+foreach ($relative in @('examples/jobs.json', 'notes/implementation.md', 'LICENSE')) {
+    if (!(Test-Path -LiteralPath (Join-Path $root $relative))) { throw "Installer omitted $relative" }
+}
 $before = (Get-FileHash -LiteralPath (Join-Path $root 'bin/tide-motion.exe')).Hash
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $unsafe = Join-Path $work 'unsafe.zip'

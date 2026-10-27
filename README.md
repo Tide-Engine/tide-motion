@@ -14,7 +14,7 @@ Automatic rigging, skinning and general retargeting are not implemented.
 Windows x64 (AVX2 CPU): download the release ZIP and its `.sha256` file, then run:
 
 ```powershell
-./install.ps1 -Archive ./tide-motion-0.1.0-Windows-AMD64.zip -AddToPath
+./install.ps1 -Archive ./tide-motion-0.1.1-Windows-AMD64.zip -AddToPath
 ```
 
 Reopen the terminal after adding PATH. `-Root <directory>` selects another

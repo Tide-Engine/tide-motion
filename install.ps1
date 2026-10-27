@@ -59,8 +59,11 @@ try {
         if (Test-Path -LiteralPath $backupPath) { Move-Item -LiteralPath $backupPath -Destination $binPath }
         throw
     }
-    Copy-Item -LiteralPath (Join-Path $payload 'licenses') -Destination $installRoot -Recurse -Force
+    foreach ($folder in @('licenses', 'examples', 'notes')) {
+        Copy-Item -LiteralPath (Join-Path $payload $folder) -Destination $installRoot -Recurse -Force
+    }
     Copy-Item -LiteralPath (Join-Path $payload 'README.md') -Destination $installRoot -Force
+    Copy-Item -LiteralPath (Join-Path $payload 'LICENSE') -Destination $installRoot -Force
     if ($AddToPath) {
         [string]$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
         if (!(($userPath -split ';') -contains $binPath)) {

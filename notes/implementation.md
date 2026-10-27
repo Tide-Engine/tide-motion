@@ -112,3 +112,13 @@ Linux/macOS and optional Vulkan builds have not been run. General retargeting,
 rigging, skinned character export, foot cleanup, collision constraints,
 interactive editing and automatically chosen target placement remain absent.
 The native dependency's constrained/multi-prompt APIs are not exposed yet.
+
+Packaging correction, 0.1.1: the installer now copies examples, notes and the
+root license as well as the runtime and notices; the archive already held them.
+The isolated installer test requires these files. Example output names have an
+example- prefix so the supplied manifest does not collide with validation clips.
+The tool is installed under this machine's LOCALAPPDATA/TideMotion, with its bin
+added to the user PATH. Verified model files are hardlinked from the task's
+download cache into its default model directory, retaining independent directory
+entries without another 10 GB download/copy. No TIDE_HIDDEN variable was set in
+the owner's environment.
