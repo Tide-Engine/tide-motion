@@ -261,3 +261,34 @@ were visually inspected. The skin and hierarchy are unchanged by this tool.
 Remaining limits: manual bone assignment/calibration where needed, no foot locking,
 collision constraints, automatic helper twist distribution or non-humanoid solver.
 Retargeting does not guarantee production-quality contacts on arbitrary proportions.
+
+## Windows GPU generation (0.2.0)
+
+The owner asked for the GPU after a 2-second, 20-step CPU generation took about
+13 minutes on their machine (RTX 4080 SUPER, AVX2 CPU). The Windows release is now
+built with MOTION_VULKAN; the other platforms stay CPU-only until validated. CI
+installs the Vulkan SDK 1.4.363.0 on the Windows runner from LunarG, pinned by
+SHA-256, and the Windows job's timeout is 60 minutes for GGML's shader build.
+
+Kimodo uses the first Vulkan device GGML selects. The CLI decides before loading:
+it asks GGML for its device count (the same call Kimodo makes), and without a
+loader, a driver or a supported device it says why and sets KIMODO_BACKEND=cpu.
+A GPU that passes but fails to load Kimodo, or fails during generation (the text
+encoder allocates then), is dropped: the model is reloaded on the CPU and the
+same prompt and seed rerun; the rest of a batch stays on the CPU. On Windows
+vulkan-1.dll is delay-loaded, so the CLI starts without it, and tide-motion is
+compiled with /EHc- because GGML's C entry points throw, which /EHsc would let
+escape the catch. KIMODO_BACKEND=cpu still forces the CPU. MotionBricks is
+unchanged (ONNX Runtime CPU).
+
+Validation on that machine: Vulkan and CPU-only Windows builds pass all five
+CTests; dumpbin lists vulkan-1.dll as a delay-load import. A 2-second 20-step
+clip took 35 s on the GPU against 778 s on the CPU, and a 4-second 50-step clip
+27 s (whole command, including model hashing). Against the CPU clip of the same
+prompt and seed, the GPU's largest differences were 1.6 mm and 0.004 in a
+quaternion component; disabling Vulkan coopmat/F16 as Kimodo does on Unix was no
+faster and no closer (19 mm), so Windows keeps GGML's defaults. Fallbacks were
+exercised with GGML_VK_VISIBLE_DEVICES=9 (GGML throws), VK_DRIVER_FILES naming a
+missing file (no driver), and GGML_VK_FORCE_MAX_BUFFER_SIZE=1024 (the GPU fails
+during generation, then the CPU completes it). A machine without any Vulkan
+loader was not available to test.

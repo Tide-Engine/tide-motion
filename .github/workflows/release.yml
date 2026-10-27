@@ -21,7 +21,7 @@ jobs:
   build:
     name: ${{ matrix.platform }}
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 35
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -48,9 +48,23 @@ jobs:
           if [[ "$GITHUB_REF_TYPE" == tag ]]; then
             test "$GITHUB_REF_NAME" = "v$version"
           fi
+      - name: Install Vulkan SDK
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $version = '1.4.363.0'
+          $installer = "$env:RUNNER_TEMP/vulkansdk.exe"
+          Invoke-WebRequest "https://sdk.lunarg.com/sdk/download/$version/windows/vulkansdk-windows-X64-$version.exe" -OutFile $installer
+          $hash = (Get-FileHash $installer -Algorithm SHA256).Hash
+          if ($hash -ne '94A82D378F7A5E3E54C9DB7D2FB7016AF136E14AC0A18DBF0F2F67A36352D141') { throw "Unexpected Vulkan SDK hash $hash" }
+          $root = "C:/VulkanSDK/$version"
+          & $installer --root $root --accept-licenses --default-answer --confirm-command install | Out-Host
+          if (-not (Test-Path "$root/Include/vulkan/vulkan.h")) { throw 'Vulkan SDK did not install' }
+          "VULKAN_SDK=$root" >> $env:GITHUB_ENV
+          "$root/Bin" >> $env:GITHUB_PATH
       - name: Configure Windows
         if: runner.os == 'Windows'
-        run: cmake -S . -B build -G 'Visual Studio 17 2022' -A x64 -T ClangCL -DMOTION_VULKAN=OFF
+        run: cmake -S . -B build -G 'Visual Studio 17 2022' -A x64 -T ClangCL -DMOTION_VULKAN=ON
       - name: Configure Linux
         if: runner.os == 'Linux'
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc-13 -DCMAKE_CXX_COMPILER=g++-13 -DMOTION_VULKAN=OFF

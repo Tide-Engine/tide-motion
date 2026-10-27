@@ -17,7 +17,7 @@ Download an archive, its `.sha256` sidecar and the installer from
 
 | Platform | Archive | Requirements |
 |---|---|---|
-| Windows x64 | `windows-x64.zip` | AVX2 CPU, Windows 10/11 |
+| Windows x64 | `windows-x64.zip` | AVX2 CPU, Windows 10/11; uses a Vulkan 1.2 GPU when present |
 | Linux x64 | `linux-x64.tar.gz` | AVX2 CPU, Ubuntu 24.04 or compatible glibc/libstdc++ |
 | Linux ARM64 | `linux-arm64.tar.gz` | Ubuntu 24.04 or compatible glibc/libstdc++ |
 | macOS Apple Silicon | `macos-arm64.tar.gz` | macOS 15 or newer |
@@ -61,6 +61,12 @@ encoder 8.14 GB, tokenizer 7.3 MB, and MotionBricks 758 MB. Install just `bricks
 when connecting existing SOMA clips. Downloads resume and verify pinned SHA-256
 hashes before files become usable. Generation works offline once they are present.
 Allow at least 12 GB of available RAM for CPU text generation.
+
+The Windows package generates with Kimodo on the first Vulkan 1.2 GPU when its
+driver is installed, and on the CPU otherwise; it says which when generating.
+On an RTX 4080 SUPER a 2-second, 20-step clip took 35 seconds instead of 13
+minutes on its CPU. `KIMODO_BACKEND=cpu` forces the CPU. MotionBricks (`connect`)
+always runs on the CPU. Other platforms' packages are CPU-only for now.
 
 `--models DIR` or `TIDE_MOTION_MODELS` selects the model cache. Otherwise it is
 `%LOCALAPPDATA%/TideMotion/models` on Windows, and
@@ -233,9 +239,11 @@ cmake --install build --config Release --component runtime --prefix dist/tide-mo
 ```
 
 On Unix use Ninja and `-DCMAKE_BUILD_TYPE=Release`. CPU inference is the portable
-default. `-DMOTION_VULKAN=ON` enables Kimodo's optional Vulkan backend and requires
-a Vulkan SDK **at build time**. This option does not accelerate MotionBricks,
-which uses ONNX Runtime CPU inference. GPU-enabled builds need separate validation.
+default. `-DMOTION_VULKAN=ON` enables Kimodo's Vulkan backend and requires a Vulkan
+SDK **at build time** (the Windows release uses it). The built CLI falls back to the
+CPU without a usable Vulkan device; on Windows the loader is delay-loaded, so it
+also starts without one. This option does not accelerate MotionBricks, which uses
+ONNX Runtime CPU inference.
 
 See [implementation notes](notes/implementation.md) for exact revisions, current
 validation, remaining gaps and platform coverage.
@@ -257,8 +265,8 @@ To publish, update the version in `CMakeLists.txt`, commit it to `dev`, then pus
 the matching `v<version>` tag. A tag/version mismatch fails. Only after every
 platform succeeds does the workflow publish all archives, SHA-256 sidecars and
 both installers together. A failed build publishes nothing; a publish retry can
-resume a draft but cannot overwrite an already published release. Release builds
-use CPU inference; Vulkan remains an opt-in source build.
+resume a draft but cannot overwrite an already published release. The Windows
+release is built with Vulkan; the others use CPU inference.
 
 ## Licenses
 

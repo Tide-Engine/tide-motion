@@ -12,9 +12,46 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #endif
+#ifdef MOTION_VULKAN
+#include <ggml-vulkan.h>
+#endif
 
 namespace {
 using namespace motion;
+#ifdef MOTION_VULKAN
+// Empty when Kimodo can use Vulkan; otherwise why not. Asks GGML, as Kimodo does,
+// whose initialization throws for an unusable driver. On Windows the loader is
+// delay-loaded, so it must be found before any Vulkan function is called.
+std::string vulkan_unavailable() {
+#ifdef _WIN32
+    if(!LoadLibraryW(L"vulkan-1.dll"))return "no Vulkan loader";
+#endif
+    try { if(ggml_backend_vk_get_device_count()>0)return {}; }
+    catch(const std::exception& e) {return e.what();}
+    return "no supported Vulkan device";
+}
+#endif
+void use_cpu(const std::string& reason) {
+    std::cerr<<reason<<"; generating on the CPU.\n";
+#ifdef _WIN32
+    _putenv_s("KIMODO_BACKEND","cpu");
+#else
+    setenv("KIMODO_BACKEND","cpu",1);
+#endif
+}
+// Whether Kimodo will try the GPU. It takes the first Vulkan device unless
+// KIMODO_BACKEND=cpu, and fails rather than falling back when Vulkan is present
+// but unusable, so check first; a GPU that still fails is retried on the CPU.
+bool kimodo_on_gpu() {
+#ifdef MOTION_VULKAN
+    const char* chosen=std::getenv("KIMODO_BACKEND");
+    if(chosen&&std::string_view(chosen)=="cpu") {std::cerr<<"Generating on the CPU (KIMODO_BACKEND=cpu).\n";return false;}
+    std::string reason=vulkan_unavailable();
+    if(reason.empty())return true;
+    use_cpu("Vulkan unavailable ("+reason+")");
+#endif
+    return false;
+}
 void help() {
     std::cout<<R"(Tide Motion - native offline animation authoring
 
@@ -57,8 +94,33 @@ double integer(const std::string& text,double low,double high,const char* label)
 }
 struct RunContext {
     std::unique_ptr<kimodo::model> kimodo;
+    bool kimodo_gpu=false;
     std::unique_ptr<BricksModel> bricks;
 };
+void load_kimodo(const fs::path& models,RunContext* context) {
+    std::cerr<<"Loading Kimodo SOMA and text encoder (native GGML)...\n";
+    std::string failure;
+    try {
+        auto model=kimodo::model::load((models/"kimodo.gguf").string(),(models/"text/encoder.gguf").string());
+        if(model) {context->kimodo=std::move(*model);return;}
+        failure=model.error();
+    } catch(const std::exception& e) {failure=e.what();}
+    if(!context->kimodo_gpu)throw std::runtime_error(failure);
+    context->kimodo_gpu=false;use_cpu("The GPU could not load Kimodo ("+failure+")");
+    load_kimodo(models,context);
+}
+kimodo::motion_data generate_motion(const fs::path& models,RunContext* context,const std::string& prompt,unsigned frames,unsigned steps,uint64_t seed) {
+    std::string failure;
+    try {
+        auto result=context->kimodo->generate_text(prompt,frames,steps,seed,2,2);
+        if(result)return std::move(*result);
+        failure=result.error();
+    } catch(const std::exception& e) {failure=e.what();}
+    if(!context->kimodo_gpu)throw std::runtime_error(failure);
+    context->kimodo.reset();context->kimodo_gpu=false;use_cpu("GPU generation failed ("+failure+")");
+    load_kimodo(models,context);
+    return generate_motion(models,context,prompt,frames,steps,seed);
+}
 int main_impl(const std::vector<std::string>& args,RunContext* context=nullptr);
 int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
     if(fs::file_size(manifest)>1024*1024)throw std::runtime_error("Batch manifest exceeds 1 MiB");
@@ -232,20 +294,17 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         if(pos.size()!=1||pos[0].empty())throw std::runtime_error("generate takes one quoted prompt");
         if(!context->kimodo) {
             check_models(models,"kimodo");
-            std::cerr<<"Loading Kimodo SOMA and text encoder (native GGML)...\n";
-            auto model=kimodo::model::load((models/"kimodo.gguf").string(),(models/"text/encoder.gguf").string());
-            if(!model)throw std::runtime_error(model.error());
-            context->kimodo=std::move(*model);
+            context->kimodo_gpu=kimodo_on_gpu();
+            load_kimodo(models,context);
         }
         std::cerr<<"Generating motion...\n";
-        auto result=context->kimodo->generate_text(pos[0],static_cast<unsigned>(std::round(duration*30)),steps,seed,2,2);
-        if(!result)throw std::runtime_error(result.error());
-        if(result->joints!=30||result->local_rotations_xyzw.size()!=static_cast<size_t>(result->frames)*30*4||result->root_positions.size()!=static_cast<size_t>(result->frames)*3)throw std::runtime_error("Kimodo returned an unexpected SOMA output layout");
+        auto result=generate_motion(models,context,pos[0],static_cast<unsigned>(std::round(duration*30)),steps,seed);
+        if(result.joints!=30||result.local_rotations_xyzw.size()!=static_cast<size_t>(result.frames)*30*4||result.root_positions.size()!=static_cast<size_t>(result.frames)*3)throw std::runtime_error("Kimodo returned an unexpected SOMA output layout");
         clip.joints=soma();clip.name=output.stem().string();
-        for(size_t f=0;f<result->frames;++f)for(size_t j=0;j<30;++j) {
+        for(size_t f=0;f<result.frames;++f)for(size_t j=0;j<30;++j) {
             size_t index=(f*30+j)*4;Transform t=clip.joints[j].rest;
-            t.q=normalized({result->local_rotations_xyzw[index],result->local_rotations_xyzw[index+1],result->local_rotations_xyzw[index+2],result->local_rotations_xyzw[index+3]});
-            if(j==0)t.p={result->root_positions[f*3],result->root_positions[f*3+1],result->root_positions[f*3+2]};
+            t.q=normalized({result.local_rotations_xyzw[index],result.local_rotations_xyzw[index+1],result.local_rotations_xyzw[index+2],result.local_rotations_xyzw[index+3]});
+            if(j==0)t.p={result.root_positions[f*3],result.root_positions[f*3+1],result.root_positions[f*3+2]};
             clip.poses.push_back(t);
         }
     } else {
