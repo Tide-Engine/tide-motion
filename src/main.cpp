@@ -78,10 +78,11 @@ Generates a SOMA-30 clip from text with Kimodo (30 fps).
   --path X,Z[,YAW]@FRAME      Put the root over ground point X,Z (metres) at output
                               FRAME, optionally facing YAW degrees (0 faces +Z,
                               90 faces +X); repeat for waypoints
-  --placement auto|world|free Ground placement of poses after frame 0 (see below)
+  --placement auto|world|free
+                              Ground placement of poses after frame 0 (see below)
   --no-correction             Keep the model's poses as generated instead of making
                               full-body poses exact
-  --seed N                  Random seed, 0..4294967295 (default 0)
+  --seed N                    Random seed, 0..4294967295 (default 0)
   --steps N                   Diffusion steps, 1..1000 (default 50)
   --models DIR                Model directory (default: TIDE_MOTION_MODELS or the
                               OS cache)
@@ -117,12 +118,14 @@ of another.
   --to-clip NAME              Animation to use from a multi-animation TO.glb
   --models DIR                Model directory
 )";
-    if(command=="retarget")return R"(tide-motion retarget SOURCE.glb --target CHARACTER.glb --map BONES.json -o CLIP.glb
-tide-motion retarget SOURCE.glb --to-soma --map BONES.json -o SOMA.glb
+    if(command=="retarget")return R"(tide-motion retarget SOURCE.glb --target CHARACTER.glb|.fbx --map BONES.json -o CLIP.glb
+tide-motion retarget SOURCE.glb|.fbx --to-soma --map BONES.json -o SOMA.glb
 
 Converts animation between SOMA and a mapped humanoid without loading a model.
+Characters and source clips may be GLB or FBX (read as Tide imports FBX: Y-up
+metres); examples/synty-polygon.json maps Synty POLYGON characters.
 
-  --target CHARACTER.glb      Character skeleton to receive SOMA motion
+  --target CHARACTER.glb|.fbx Character skeleton to receive SOMA motion
   --to-soma                   Convert the source character's animation to SOMA
   --map BONES.json            SOMA-to-character bone names (see examples/)
   --clip NAME                 Animation to use from a multi-animation SOURCE.glb
@@ -134,24 +137,34 @@ Runs ordered generate, connect and retarget actions, loading each model once.
 The whole manifest and every output path are checked before anything runs.
 Paths are relative to the manifest. README.md lists every action field.
 )";
-    if(command=="inspect")return R"(tide-motion inspect FILE.glb [--clip NAME | --skeleton]
+    if(command=="inspect")return R"(tide-motion inspect FILE.glb|FILE.fbx [--clip NAME | --skeleton]
 
 Prints a clip's rig, joints, frames and duration as JSON.
 
   --clip NAME                 Animation to inspect from a multi-animation GLB
   --skeleton                  List bone names, parents, rest transforms and scales
 )";
-    if(command=="preview")return R"(tide-motion preview CLIP.glb [options]
+    if(command=="preview")return R"(tide-motion preview CLIP.glb|CLIP.fbx [options]
 
-Draws a clip's skeleton (front and side views) in a temporary Tide project.
+Plays a clip in a temporary Tide project, lit, facing the camera on the left and
+in profile on the right, following its root over a tiled floor.
 
+  --mannequin                 On a built-in SOMA-30 mannequin (the default for
+                              SOMA clips; left limbs blue, right limbs orange)
+  --character MODEL.glb|.fbx  On your skinned character instead
+  --map BONES.json            Retarget a SOMA clip onto --character first (as
+                              retarget --target does); leave it out for a clip
+                              already on the character's rig
+  --texture IMAGE.png|.jpg    The character's texture (default: plain clay)
+  --skeleton                  Draw bones as lines (the default for other rigs
+                              when no --character is given)
   --tide PATH                 Tide executable (default: tide on PATH)
   --capture IMAGE.png         Save the last frame as a PNG
   --gif OUT.gif               Record the clip once from its first frame as a GIF
                               (needs Tide 0.5.0-nightly.45 or later)
   --frames N                  Stop after N frames at 60 fps (with --gif the
                               default covers the clip exactly once)
-  --clip NAME                 Animation to preview from a multi-animation GLB
+  --clip NAME                 Animation to preview from a multi-animation file
 
 With TIDE_HIDDEN set, give --capture, --gif or --frames.
 )";
@@ -179,12 +192,13 @@ void help(std::string_view command={}) {
       [--path X,Z[,YAW]@FRAME]...
   tide-motion connect FROM.glb TO.glb -o BRIDGE.glb [--tokens 6..16] [--joined]
       [--offset X Y Z] [--from-clip NAME] [--to-clip NAME]
-  tide-motion retarget SOURCE.glb --target CHARACTER.glb --map BONES.json -o CLIP.glb
-  tide-motion retarget SOURCE.glb --to-soma --map BONES.json -o SOMA.glb [--clip NAME]
+  tide-motion retarget SOURCE.glb --target CHARACTER.glb|.fbx --map BONES.json -o CLIP.glb
+  tide-motion retarget SOURCE.glb|.fbx --to-soma --map BONES.json -o SOMA.glb [--clip NAME]
   tide-motion batch JOBS.json [--models DIR]
-  tide-motion inspect FILE.glb [--clip NAME | --skeleton]
-  tide-motion preview CLIP.glb [--tide PATH] [--capture IMAGE.png] [--gif OUT.gif]
-      [--frames N] [--clip NAME]
+  tide-motion inspect FILE.glb|FILE.fbx [--clip NAME | --skeleton]
+  tide-motion preview CLIP.glb [--mannequin | --skeleton | --character MODEL.glb|.fbx
+      [--map BONES.json] [--texture IMAGE.png]] [--tide PATH] [--capture IMAGE.png]
+      [--gif OUT.gif] [--frames N] [--clip NAME]
   tide-motion help [COMMAND]       one command's options (also COMMAND --help)
   tide-motion --version
 
@@ -199,8 +213,9 @@ and --path hold the motion to SOMA poses and ground points.
 connect preserves target placement; use --offset X Y Z to place the target clip.
 --from-clip NAME / --to-clip NAME select clips from multi-animation GLBs.
 --joined exports source, generated bridge and target as one animation.
-preview uses an installed Tide separately; --tide selects its executable and
---gif records the clip once as an animated GIF.
+preview uses an installed Tide separately (--tide selects it) to play a clip on a
+built-in mannequin, your GLB/FBX character or as lines; --gif records it once.
+retarget, inspect and preview read FBX characters and clips as Tide imports them.
 batch runs ordered actions and keeps each inference model loaded until completion.
 Existing outputs are refused. Use a new output path.
 
@@ -423,7 +438,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     if(args[1]=="--version") { std::cout<<"tide-motion "<<MOTION_VERSION<<"\n";return 0; }
     std::string command=args[1],clip_name,from_name,to_name,tide="tide";
     for(size_t i=2;i<args.size();++i)if(args[i]=="--help"||args[i]=="-h") {help(command);return 0;}
-    fs::path models,output,capture,gif,target_file,map_file;
+    fs::path models,output,capture,gif,target_file,map_file,character_file,texture_file;bool mannequin=false;
     if(command=="generate"||command=="connect"||command=="models"||command=="batch")models=model_directory();
     double duration=3;uint64_t seed=0;unsigned steps=50,transition=5;int frames=0,tokens=0;
     bool accept=false,joined=false,skeleton=false,to_soma=false,correct=true;Vec3 offset{};
@@ -471,6 +486,9 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         else if(a=="--accept-licenses")accept=true;
         else if(a=="--joined")joined=true;
         else if(a=="--skeleton")skeleton=true;
+        else if(a=="--mannequin")mannequin=true;
+        else if(a=="--character")character_file=utf8path(value());
+        else if(a=="--texture")texture_file=utf8path(value());
         else if(a=="--to-soma")to_soma=true;
         else if(a=="--target")target_file=utf8path(value());
         else if(a=="--map")map_file=utf8path(value());
@@ -482,7 +500,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     else if(command=="connect")allowed={"--models","-o","--output","--tokens","--joined","--offset","--from-clip","--to-clip"};
     else if(command=="retarget")allowed={"-o","--output","--target","--map","--to-soma","--clip"};
     else if(command=="inspect")allowed={"--clip","--skeleton"};
-    else if(command=="preview")allowed={"--clip","--tide","--capture","--gif","--frames"};
+    else if(command=="preview")allowed={"--clip","--tide","--capture","--gif","--frames","--mannequin","--skeleton","--character","--map","--texture"};
     else if(command=="models")allowed={"--models","--accept-licenses"};
     else if(command=="batch")allowed={"--models"};
     for(const auto& flag:flags)if(!allowed.contains(flag))throw std::runtime_error(command+" does not take "+flag);
@@ -501,11 +519,37 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         return 0;
     }
     if(command=="inspect"||command=="preview") {
-        if(pos.size()!=1)throw std::runtime_error(command+" takes one GLB file");
+        if(pos.size()!=1)throw std::runtime_error(command+" takes one GLB or FBX file");
+        auto path=utf8path(pos[0]);
+        if(command=="preview") {
+            PreviewOptions options;options.tide=tide;options.capture=capture;options.gif=gif;options.frames=frames;
+            auto clip=load_glb(path,clip_name,false);
+            bool canonical=true;try{require_soma(clip);}catch(const std::exception&){canonical=false;}
+            if(canonical)options.facing=kimodo_heading(clip,clip.frame(0));
+            if(!character_file.empty()) {
+                if(skeleton||mannequin)throw std::runtime_error("Use one of --character, --mannequin and --skeleton");
+                options.body=PreviewBody::character;options.character=character_file;options.texture=texture_file;
+                if(!map_file.empty()) {
+                    // A SOMA clip is retargeted onto the character here, as retarget --target does.
+                    if(!canonical)throw std::runtime_error("preview --map retargets SOMA-30 clips; this clip already uses another rig, so leave out --map");
+                    auto result=retarget(clip,load_rig_glb(character_file),load_mapping(map_file));
+                    if(result.discarded_translations)std::cerr<<"Note: source has non-root translation animation that retargeting does not copy.\n";
+                    clip=std::move(result.clip);
+                } else if(canonical)throw std::runtime_error("Give --map BONES.json to retarget this SOMA clip onto the character");
+            } else if(!map_file.empty()||!texture_file.empty())throw std::runtime_error("--map and --texture go with --character");
+            else if(skeleton&&mannequin)throw std::runtime_error("Use one of --mannequin and --skeleton");
+            else if(skeleton)options.body=PreviewBody::skeleton;
+            else if(!canonical) {
+                if(mannequin)throw std::runtime_error("The mannequin is SOMA-30; preview this clip with --character MODEL or --skeleton");
+                std::cerr<<"Not a SOMA-30 clip: drawing its skeleton (give --character MODEL to see it on a body).\n";
+                options.body=PreviewBody::skeleton;
+            }
+            preview(clip,path,options);
+            return 0;
+        }
         if(skeleton&&!clip_name.empty())throw std::runtime_error("inspect --skeleton does not take --clip");
-        auto path=utf8path(pos[0]);auto clip=skeleton?load_rig_glb(path):load_glb(path,clip_name,false);
-        if(command=="preview")preview(clip,path,tide,capture,frames,gif);
-        else {
+        auto clip=skeleton?load_rig_glb(path):load_glb(path,clip_name,false);
+        {
             bool canonical=true;try{require_soma(clip);}catch(const std::exception&){canonical=false;}
             nlohmann::json info={{"name",clip.name},{"rig",canonical?"soma30":"custom"},{"joints",clip.joints.size()},{"frames",clip.frames()},{"fps",clip.fps},{"duration",clip.duration()}};
             if(skeleton) {

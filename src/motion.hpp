@@ -48,6 +48,9 @@ std::vector<Transform> world_pose(const Clip&, std::span<const Transform>);
 std::vector<Transform> sample(const Clip&, float);
 Clip load_glb(const fs::path&, const std::string& animation="", bool canonical=true);
 Clip load_rig_glb(const fs::path&);
+// .fbx through ufbx with Tide's import conventions (Y-up metres); used by the GLB loaders.
+bool is_fbx(const fs::path&);
+Clip read_fbx(const fs::path&, const std::string& animation, bool rest_only);
 void save_glb(const Clip&, const fs::path&);
 struct RetargetMapping {
     std::array<std::string,30> bones;
@@ -112,12 +115,21 @@ public:
     Clip generate(const Clip&, const Clip&, int tokens=0);
 };
 Clip join(const Clip&, const Clip& bridge, const Clip&);
+// A procedural SOMA-30 preview body (skinned GLB, no third-party content).
+void save_mannequin(const fs::path&);
 // Runs and waits; a nonempty output path receives the child's stdout and stderr.
 int run_process(const std::vector<std::string>& args, const fs::path& output={});
 fs::path model_directory();
 void setup_models(const fs::path&, const std::string& selection);
 void check_models(const fs::path&, const std::string& selection);
 std::string sha256_file(const fs::path&);
-void preview(const Clip&, const fs::path& source, const std::string& tide,
-    const fs::path& capture, int frames, const fs::path& gif={});
+// skeleton draws lines; mannequin a procedural SOMA body (the clip must be SOMA-30);
+// character a skinned GLB/FBX whose rig the clip already animates (retargeted).
+enum class PreviewBody { skeleton, mannequin, character };
+struct PreviewOptions {
+    std::string tide="tide"; fs::path capture, gif; int frames=0;
+    PreviewBody body=PreviewBody::mannequin; fs::path character, texture;
+    float facing=0; // radians, the first frame's heading (0 faces +Z)
+};
+void preview(const Clip&, const fs::path& source, const PreviewOptions&);
 }

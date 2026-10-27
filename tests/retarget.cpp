@@ -84,6 +84,33 @@ void rewrite(const fs::path& input,const fs::path& output,const std::function<vo
     write(static_cast<uint32_t>(bin.size()));write(0x004e4942);out.write(bin.data(),static_cast<std::streamsize>(bin.size()));
 }
 }
+// Writes a rig as an ASCII FBX 7.4 the way a Z-up centimetre package would: the
+// whole rig turned from Y-up to Z-up and the top node unscaled, so reading it back
+// with Tide's conventions (Y-up metres) must undo both. No third-party content.
+void write_fbx(const Clip& rig,const fs::path& path) {
+    const Quat up{std::sin(0.785398163f),0,0,std::cos(0.785398163f)}; // +90 degrees about X: Y-up to Z-up
+    std::ofstream out(path);out.precision(9);
+    out<<"; FBX 7.4.0 project file\nFBXHeaderExtension:  {\n\tFBXHeaderVersion: 1003\n\tFBXVersion: 7400\n}\n"
+         "GlobalSettings:  {\n\tVersion: 1000\n\tProperties70:  {\n"
+         "\t\tP: \"UpAxis\", \"int\", \"Integer\", \"\",2\n\t\tP: \"UpAxisSign\", \"int\", \"Integer\", \"\",1\n"
+         "\t\tP: \"FrontAxis\", \"int\", \"Integer\", \"\",1\n\t\tP: \"FrontAxisSign\", \"int\", \"Integer\", \"\",-1\n"
+         "\t\tP: \"CoordAxis\", \"int\", \"Integer\", \"\",0\n\t\tP: \"CoordAxisSign\", \"int\", \"Integer\", \"\",1\n"
+         "\t\tP: \"UnitScaleFactor\", \"double\", \"Number\", \"\",1\n\t}\n}\nObjects:  {\n";
+    for(size_t j=0;j<rig.joints.size();++j) {
+        auto t=rig.joints[j].rest;
+        if(rig.joints[j].parent<0) {t.p=rotate(up,t.p)*100;t.q=normalized(up*t.q);} // metres to centimetres
+        auto q=t.q;
+        float m00=1-2*(q.y*q.y+q.z*q.z),m10=2*(q.x*q.y+q.w*q.z),m20=2*(q.x*q.z-q.w*q.y),m21=2*(q.y*q.z+q.w*q.x),m22=1-2*(q.x*q.x+q.y*q.y);
+        const double degrees=57.29577951308232;
+        double ex=std::atan2(m21,m22)*degrees,ey=std::asin(std::clamp(-m20,-1.0f,1.0f))*degrees,ez=std::atan2(m10,m00)*degrees;
+        out<<"\tModel: "<<1000+j<<", \"Model::"<<rig.joints[j].name<<"\", \"LimbNode\" {\n\t\tVersion: 232\n\t\tProperties70:  {\n"
+           <<"\t\t\tP: \"Lcl Translation\", \"Lcl Translation\", \"\", \"A\","<<t.p.x<<","<<t.p.y<<","<<t.p.z<<"\n"
+           <<"\t\t\tP: \"Lcl Rotation\", \"Lcl Rotation\", \"\", \"A\","<<ex<<","<<ey<<","<<ez<<"\n\t\t}\n\t}\n";
+    }
+    out<<"}\nConnections:  {\n";
+    for(size_t j=0;j<rig.joints.size();++j)out<<"\tC: \"OO\","<<1000+j<<","<<(rig.joints[j].parent<0?0:1000+rig.joints[j].parent)<<"\n";
+    out<<"}\n";
+}
 int main(int argc,char** argv) try {
     auto f=fixture();
     auto dir=fs::temp_directory_path()/"tide-motion-retarget-tests";
@@ -162,7 +189,23 @@ int main(int argc,char** argv) try {
     scale_track(0.01f);check(load_glb(changed,"",false).frames()==1,"Constant scale tracks are accepted");
     scale_track(0.02f);refuses([&]{(void)load_glb(changed,"",false);},"Changing scale rejected");
     fs::remove(changed);
+    // The same centimetre rig as a Z-up FBX reads back in Y-up metres, and retargets alike.
+    auto fbx=dir/"target.fbx";write_fbx(target,fbx);
+    check(is_fbx(fbx)&&is_fbx(dir/"TARGET.FBX"),"FBX extension detection");
+    auto from_fbx=load_rig_glb(fbx);
+    check(from_fbx.joints.size()==target.joints.size()&&std::abs(from_fbx.joints[0].scale-0.01f)<1e-6f,"FBX rig keeps every node, its unit scale folded into the top node");
+    auto fbx_world=world_pose(from_fbx,from_fbx.frame(0)),glb_world=world_pose(target,target.frame(0));
+    auto named=[](const Clip& c,const std::string& name){for(size_t j=0;j<c.joints.size();++j)if(c.joints[j].name==name)return j;throw std::runtime_error("FBX lost bone "+name);};
+    for(size_t j=0;j<target.joints.size();++j)check(close(fbx_world[named(from_fbx,target.joints[j].name)].p,glb_world[j].p,1e-4f),"FBX rig converts Z-up centimetres to Y-up metres");
+    auto via_fbx=retarget(f.source,from_fbx,map).clip;
+    for(size_t frame=0;frame<out.frames();++frame) {
+        auto a=world_pose(via_fbx,via_fbx.frame(frame)),b=world_pose(out,out.frame(frame));
+        for(size_t j=0;j<out.joints.size();++j)check(close(a[named(via_fbx,out.joints[j].name)].p,b[j].p,1e-4f),"Retargeting onto the FBX rig matches the GLB rig");
+    }
+    refuses([&]{(void)load_glb(fbx,"",false);},"FBX without a take has no animation");
+    refuses([&]{(void)load_glb(fbx,"",true);},"SOMA clips must be GLB");
     if(argc==3)return 0;
+    fs::remove(fbx);
     for(const char* name:{"source.glb","target.glb","retargeted.glb","bones.json"})fs::remove(dir/name);
     fs::remove(dir);
     std::cout<<"Retarget contracts passed\n";return 0;

@@ -196,6 +196,19 @@ tide-motion inspect character.glb --skeleton
 tide-motion retarget sequence.glb --target character.glb --map humanoid.json -o character-sequence.glb
 ```
 
+Characters and source clips can be FBX as well as GLB (`inspect --skeleton`,
+`retarget --target`, `retarget --to-soma`, `preview --character`). FBX is read
+with the same ufbx revision and options as Tide's own importer, so axes and units
+become Y-up metres the way a Tide game sees the file (a centimetre rig keeps a
+0.01 scale on its top bone) and bone names match what the game binds. A Synty
+POLYGON character works with [examples/synty-polygon.json](examples/synty-polygon.json):
+
+```sh
+tide-motion inspect PolygonSyntyCharacter.fbx --skeleton
+tide-motion retarget swing.glb --target PolygonSyntyCharacter.fbx --map examples/synty-polygon.json -o swing-synty.glb
+tide-motion retarget A_Idle_Base_Sword.fbx --to-soma --map examples/synty-polygon.json -o idle-soma.glb
+```
+
 The mapping's keys are SOMA's anatomical names; values name your character's
 bones. The example uses illustrative pelvis/spine/arm/leg names, not automatic
 rig detection. Required keys are `Hips`, `Chest`, `Head`, and each side's
@@ -248,19 +261,39 @@ or a guarantee of a perfect result on every character.
 
 ```sh
 tide-motion inspect sequence.glb
-tide-motion preview sequence.glb
-tide-motion preview sequence.glb --tide /path/to/tide --capture preview.png --frames 90
 tide-motion preview sequence.glb --gif sequence.gif
+tide-motion preview swing.glb --character fighter.fbx --map examples/synty-polygon.json \
+  --texture fighter.png --gif swing-fighter.gif
+tide-motion preview fighter-swing.glb --character fighter.fbx --capture swing.png --frames 40
+tide-motion preview sequence.glb --skeleton --tide /path/to/tide --capture preview.png --frames 90
 ```
 
-Preview makes a temporary Tide project and draws the animated skeleton from front
-and side. It uses a separately installed Tide; no engine is bundled. Captures use
-Tide's ordinary bounded capture mode. `--gif OUT.gif` records the clip exactly
-once, from its first frame to its last, at 30 fps and 960 by 540 (headless, so it
-works with `TIDE_HIDDEN`); it needs Tide 0.5.0-nightly.45 or later for
-`tide run --record`, and says so otherwise. With `--frames N` the GIF loops the
-clip for `N` frames at 60 fps instead. `TIDE_HIDDEN` previews require `--frames`,
-`--capture` or `--gif`. General game-character previews remain future work.
+Preview makes a temporary Tide project and plays the clip lit, through one camera
+that shows it twice: facing the camera on the left and from its right side on the
+right, turned by the clip's first-frame heading. Each copy is centred on the motion
+root over a tiled floor that slides as the root travels, so root motion stays
+visible. It uses a separately installed Tide; no engine is bundled.
+
+- **Mannequin** (default for SOMA-30 clips, `--mannequin`): a body Tide Motion
+  builds itself, a capsule along each SOMA bone rigidly skinned to it, with a nose
+  to show the head's facing. Left limbs are blue and right limbs orange, so a
+  crossed or mirrored limb is obvious. No third-party art is involved.
+- **Your character** (`--character MODEL.glb|.fbx`): with `--map BONES.json`, a SOMA
+  clip is retargeted onto the character first, exactly as `retarget --target`
+  does; without it, the clip must already animate that character's rig (an output
+  of `retarget`, or one of the character's own clips). Tide imports the model and
+  plays the clip on it with its documented `SkinnedMesh`/`Animation` assets.
+  `--texture IMAGE` paints it; otherwise it is plain clay (vertex colours are
+  ignored, as FBX packs often carry unrelated ones).
+- **Lines** (`--skeleton`, and the default for other rigs without `--character`):
+  the original front/side bone drawing.
+
+Captures use Tide's ordinary bounded capture mode. `--gif OUT.gif` records the
+clip exactly once, from its first frame to its last, at 30 fps and 960 by 540
+(headless, so it works with `TIDE_HIDDEN`); it needs Tide 0.5.0-nightly.45 or
+later for `tide run --record`, and says so otherwise. With `--frames N` the GIF
+loops the clip for `N` frames at 60 fps instead. `TIDE_HIDDEN` previews require
+`--frames`, `--capture` or `--gif`.
 
 Existing output files are refused. Every generated GLB has a JSON recipe beside
 it recording prompt/input paths and generation settings: for `generate`, each

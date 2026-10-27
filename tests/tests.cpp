@@ -2,6 +2,10 @@
 #include "motion_decode.hpp"
 #include "skeleton.hpp"
 #include <algorithm>
+#include <cstring>
+#include <fstream>
+#include <iterator>
+#include <nlohmann/json.hpp>
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
@@ -21,7 +25,43 @@ std::vector<Transform> test_pose(float seed,Vec3 root,float facing) {
     }
     return pose;
 }
+// The preview mannequin is a valid skinned GLB on the SOMA-30 skeleton: its rig reads
+// back as SOMA, every corner is rigidly bound to a SOMA joint, indices are in range,
+// and the closed surface winds outward (positive enclosed volume, glTF front faces).
+void mannequin_contracts() {
+    auto path=fs::temp_directory_path()/"tide-motion-mannequin-test.glb";
+    save_mannequin(path);
+    auto rig=load_rig_glb(path);require_soma(rig);
+    std::ifstream in(path,std::ios::binary);std::vector<char> bytes((std::istreambuf_iterator<char>(in)),std::istreambuf_iterator<char>());in.close();
+    auto u32=[&](size_t at){uint32_t v;std::memcpy(&v,bytes.data()+at,4);return v;};
+    check(u32(0)==0x46546c67&&u32(8)==bytes.size(),"Mannequin GLB header");
+    size_t json_length=u32(12);auto doc=nlohmann::json::parse(std::string(bytes.data()+20,json_length));
+    const char* bin=bytes.data()+20+json_length+8;
+    check(doc["skins"][0]["joints"].size()==30&&doc["meshes"].size()==1,"Mannequin has one mesh skinned to 30 joints");
+    auto attribute=[&](const char* name){return doc["accessors"][doc["meshes"][0]["primitives"][0]["attributes"][name].get<size_t>()];};
+    auto data=[&](const nlohmann::json& accessor){const auto& view=doc["bufferViews"][accessor["bufferView"].get<size_t>()];return bin+view["byteOffset"].get<size_t>();};
+    size_t count=attribute("POSITION")["count"];
+    const float* p=reinterpret_cast<const float*>(data(attribute("POSITION")));
+    const float* n=reinterpret_cast<const float*>(data(attribute("NORMAL")));
+    const uint16_t* j=reinterpret_cast<const uint16_t*>(data(attribute("JOINTS_0")));
+    const float* w=reinterpret_cast<const float*>(data(attribute("WEIGHTS_0")));
+    for(size_t i=0;i<count;++i) {
+        check(j[i*4]<30&&w[i*4]==1&&w[i*4+1]==0,"Rigid binding to a SOMA joint");
+        check(std::abs(n[i*3]*n[i*3]+n[i*3+1]*n[i*3+1]+n[i*3+2]*n[i*3+2]-1)<1e-4f,"Unit normals");
+    }
+    const auto& indices=doc["accessors"][doc["meshes"][0]["primitives"][0]["indices"].get<size_t>()];
+    const uint32_t* index=reinterpret_cast<const uint32_t*>(data(indices));
+    double volume=0;
+    for(size_t t=0;t<indices["count"].get<size_t>();t+=3) {
+        Vec3 a{p[index[t]*3],p[index[t]*3+1],p[index[t]*3+2]},b{p[index[t+1]*3],p[index[t+1]*3+1],p[index[t+1]*3+2]},c{p[index[t+2]*3],p[index[t+2]*3+1],p[index[t+2]*3+2]};
+        check(index[t]<count&&index[t+1]<count&&index[t+2]<count,"Indices in range");
+        volume+=dot(a,cross(b,c))/6;
+    }
+    check(volume>0.02&&volume<0.2,"Closed outward surface with a body-sized volume");
+    fs::remove(path);
+}
 void kimodo_contracts() {
+    mannequin_contracts();
     Clip rig;rig.joints=soma();
     // Encoding a pose and decoding it with Kimodo's own decoder (identity statistics,
     // whose eps-adjusted scale is exactly one) returns the same local pose.

@@ -2,6 +2,11 @@
 #include <nlohmann/json.hpp>
 #include <cstdlib>
 #include <algorithm>
+#include <cctype>
+#include <iomanip>
+#include <locale>
+#include <numbers>
+#include <sstream>
 #include <cmath>
 #include <fstream>
 #include <iostream>
@@ -86,7 +91,109 @@ fs::path model_directory() {
 #endif
     throw std::runtime_error("Cannot determine model cache; use --models <directory>");
 }
-void preview(const Clip& c,const fs::path& source,const std::string& tide,const fs::path& capture,int frames,const fs::path& gif) {
+// A lit skinned body: the procedural mannequin or the user's character, drawn twice
+// through one camera, facing it and in profile, each centred on the motion root with
+// a floor of tiles that slides under it as the root travels.
+static void body_scene(const Clip& c,const fs::path& root,const PreviewOptions& options,bool once) {
+    std::string model="character.glb",texture;
+    if(options.body==PreviewBody::mannequin) {
+        require_soma(c);
+        save_mannequin(root/model);
+    } else {
+        auto ext=options.character.extension().string();for(auto& ch:ext)ch=static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        if(ext!=".glb"&&ext!=".fbx")throw std::runtime_error("--character must be a .glb or .fbx model");
+        model="character"+ext;
+        fs::copy_file(options.character,root/model,fs::copy_options::overwrite_existing);
+        if(!options.texture.empty()) {
+            auto tex=options.texture.extension().string();for(auto& ch:tex)ch=static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+            if(tex!=".png"&&tex!=".jpg"&&tex!=".jpeg")throw std::runtime_error("--texture must be a .png or .jpg image");
+            texture="skin"+tex;
+            fs::copy_file(options.texture,root/texture,fs::copy_options::overwrite_existing);
+        }
+    }
+    // Framing from the first frame: the body's height and where its feet are.
+    auto first=world_pose(c,c.frame(0));
+    float low=first.front().p.y,high=low;
+    for(const auto& joint:first) {low=std::min(low,joint.p.y);high=std::max(high,joint.p.y);}
+    float height=std::max(0.5f,high-low);
+    // Generated and retargeted clips stand on y=0 with joints (toes, ankles) above their
+    // soles; keep that ground unless the first frame is clearly elsewhere (a jump).
+    if(low>-0.05f&&low<0.15f)low=0;
+    auto num=[](float v){std::ostringstream o;o.imbue(std::locale::classic());o<<std::setprecision(6)<<std::fixed<<v;return o.str();};
+    std::ofstream scene(root/"preview.tide");
+    scene<<R"(struct Corner
+{
+    float3 position;
+    float3 normal;
+    float2 uv;
+    Color color = Color.white;
+}
+
+asset SkinnedMesh<Corner> body = ")"<<model<<R"(";
+asset Animation motion = "motion.glb";
+)";
+    if(!texture.empty())scene<<"asset Texture skin = \""<<texture<<"\";\n";
+    scene<<"const float HEIGHT = "<<num(height)<<";\nconst float FLOOR = "<<num(low)<<";\n";
+    scene<<R"(const float TILE = HEIGHT * 0.22;
+const float SPREAD = HEIGHT * 0.66;
+
+local singleton PreviewClock { float elapsed; }
+local scene Main { }
+
+// A sun from above the camera's left and a sky from above.
+)";
+    // The mannequin is painted by its vertex colours; a character by its texture or
+    // in plain clay (FBX vertex colours are often unrelated authoring data).
+    if(options.body==PreviewBody::mannequin)scene<<"frag Lit(Corner corner, out Color color, Instance instance)\n{\n    var paint = corner.color;\n";
+    else if(texture.empty())scene<<"frag Lit(Corner corner, out Color color, Instance instance)\n{\n    var paint = Color(0.82, 0.8, 0.76);\n";
+    else scene<<"frag Lit(Corner corner, out Color color, Texture skin, Instance instance)\n{\n    var paint = skin.Sample(corner.uv);\n";
+    scene<<R"(    var normal = Math.Normalize(instance.Normal(corner.normal));
+    var sun = Math.Normalize(float3(-0.45, 0.8, -0.55));
+    var light = 0.3 + 0.2 * (0.5 + 0.5 * normal.y) + 0.6 * Math.Max(0, Math.Dot(normal, sun));
+    color = Color(paint.r * light, paint.g * light, paint.b * light, 1);
+}
+
+// One copy of the body at a place on screen, turned about its own centre.
+void Panel(Pose pose, float3 centre, float3 at, float turn)
+{
+    var spin = quaternion.Euler(0, turn, 0);
+    var place = Math.Mul(float4x4.TRS(at, spin, float3(1)), float4x4.Translate(float3(-centre.x, 0, -centre.z)));
+    for (int i = -2; i <= 2; i++)
+    {
+        for (int k = -2; k <= 2; k++)
+        {
+            var tx = Math.Floor(centre.x / TILE) + i;
+            var tz = Math.Floor(centre.z / TILE) + k;
+            var odd = (tx + tz) - 2 * Math.Floor((tx + tz) / 2);
+            var local = float3((tx + 0.5) * TILE - centre.x, FLOOR - 0.002, (tz + 0.5) * TILE - centre.z);
+            Draw.Plane(at + Math.Rotate(spin, local), float2(TILE, TILE), spin, odd < 0.5 ? Color(0.36, 0.37, 0.4) : Color(0.28, 0.29, 0.32));
+        }
+    }
+)";
+    scene<<(texture.empty()?"    Draw.SkinnedMesh(body, place, pose, Lit);\n}\n":"    Draw.SkinnedMesh(body, place, pose, skin, Lit);\n}\n");
+    scene<<R"(
+view Preview(mut PreviewClock clock)
+{
+    // Sample before advancing so the first rendered frame is the clip's first frame.
+    var seconds = clock.elapsed;
+    clock.elapsed += Frame.dt;
+    mut var pose = body.defaultPose;
+)";
+    scene<<"    pose.Sample(motion, seconds, Playback."<<(once?"Clamp":"Loop")<<");\n";
+    scene<<"    body.skeleton.TryGetByName("<<nlohmann::json(c.joints[c.motion_root].name).dump()<<", out var centreBone);\n";
+    scene<<R"(    var centre = Math.Transform(pose.Model(centreBone), float3(0));
+    Draw.Clear(Color(0.17, 0.18, 0.21));
+    Draw.SetCamera(float3(0, FLOOR + HEIGHT * 0.72, -HEIGHT * 2.7), quaternion.Euler(6deg, 0, 0), 30);
+)";
+    // Turned so the first frame faces the camera on the left and shows its right side,
+    // facing screen right, on the right (the camera looks along +z).
+    float facing=options.facing*180/std::numbers::pi_v<float>;
+    scene<<"    Panel(pose, centre, float3(-SPREAD, 0, 0), "<<num(180-facing)<<"deg);\n";
+    scene<<"    Panel(pose, centre, float3(SPREAD, 0, 0), "<<num(90-facing)<<"deg);\n}\n";
+    scene.close();if(!scene)throw std::runtime_error("Cannot write Tide preview scene");
+}
+void preview(const Clip& c,const fs::path& source,const PreviewOptions& options) {
+    const auto& tide=options.tide;const auto& capture=options.capture;const auto& gif=options.gif;int frames=options.frames;
     c.validate();
     std::set<std::string> names;
     for(const auto& joint:c.joints)if(joint.name.empty()||!names.insert(joint.name).second)
@@ -104,6 +211,13 @@ void preview(const Clip& c,const fs::path& source,const std::string& tide,const 
     fs::path exported=root/"motion.glb";
     if(fs::exists(exported))fs::remove(exported);
     save_glb(c,exported);
+    // Files of an earlier preview of the same clip with another body.
+    for(const auto& entry:fs::directory_iterator(root)) {
+        auto stem=entry.path().stem().string();
+        if(entry.is_regular_file()&&(stem=="character"||stem=="skin"))fs::remove(entry.path());
+    }
+    if(options.body!=PreviewBody::skeleton)body_scene(c,root,options,once);
+    else {
     std::ofstream scene(root/"preview.tide");
     scene<<R"(asset SkinnedMesh<Vertex3> rig = "motion.glb";
 local singleton PreviewClock { float elapsed; }
@@ -138,6 +252,7 @@ view Preview(mut PreviewClock clock)
     scene<<"    Draw.Line(float2(-450, -200), float2(-30, -200), 1, Color(0.3, 0.3, 0.3));\n";
     scene<<"    Draw.Line(float2(30, -200), float2(450, -200), 1, Color(0.3, 0.3, 0.3));\n}\n";
     scene.close();if(!scene)throw std::runtime_error("Cannot write Tide preview scene");
+    }
     std::string executable=tide;
     if(tide.find('/')!=std::string::npos||tide.find('\\')!=std::string::npos)executable=fs::absolute(utf8path(tide)).string();
     std::vector<std::string> args{executable,"run",root.string(),"--size","960","540"};

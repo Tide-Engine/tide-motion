@@ -3,6 +3,7 @@
 #include <cgltf.h>
 #include <nlohmann/json.hpp>
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstring>
 #include <fstream>
@@ -21,8 +22,16 @@ std::array<float,4> read_value(const cgltf_accessor* a,size_t i) {
     return v;
 }
 }
+bool is_fbx(const fs::path& path) {
+    auto ext=path.extension().string();for(auto& ch:ext)ch=static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    return ext==".fbx";
+}
 static Clip read_glb(const fs::path& path,const std::string& selected,bool canonical,bool rest_only) {
-    if(path.extension()!=".glb")throw std::runtime_error("Input must be a self-contained .glb animation; export FBX/glTF to GLB first");
+    if(is_fbx(path)) {
+        if(canonical)throw std::runtime_error("SOMA clips must be GLB; convert an FBX clip with retarget --to-soma first");
+        return read_fbx(path,selected,rest_only);
+    }
+    if(path.extension()!=".glb")throw std::runtime_error("Input must be a self-contained .glb or .fbx; export glTF to GLB first");
     if(fs::file_size(path)>512ULL*1024*1024)throw std::runtime_error("GLB exceeds the 512 MiB input limit");
     std::ifstream input(path,std::ios::binary);
     std::vector<char> bytes(static_cast<size_t>(fs::file_size(path)));

@@ -34,7 +34,7 @@ function(help_lists match)
 endfunction()
 help_lists("--then.*--transition.*--start-pose.*--end-pose.*--keyframe.*--effector.*--path.*--gif.*help \\[COMMAND\\]" --help)
 help_lists("--start-pose.*--end-pose.*--keyframe.*--effector.*--path.*--placement.*--no-correction" generate --help)
-help_lists("--gif.*nightly.45" help preview)
+help_lists("--mannequin.*--character.*--map.*--texture.*--skeleton.*--gif.*nightly.45" help preview)
 help_lists("--to-soma.*--map" retarget -h)
 help_lists("--skeleton" inspect --help)
 # Constraints are resolved before any model is checked or loaded.

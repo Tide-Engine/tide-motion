@@ -391,3 +391,75 @@ dense root paths with its smoothing (sparse waypoints only; many --path points
 approximate one); IK for effectors and foot-skate cleanup; tunable CFG; the
 77-joint output; constraints on non-SOMA rigs without retarget --to-soma. Free
 placement is validated empirically, not by upstream.
+
+## Character previews and FBX input (0.4.0)
+
+Owner request: preview on a character model rather than lines; a built-in
+mannequin needing no third-party asset; FBX characters (bought packs are FBX).
+
+FBX: ufbx v0.23.1 (MIT, licenses/UFBX.txt), pinned by FetchContent to
+26a482ae66871d7de36eb722aa060bce95bce274, the revision Tide's compiler vendors,
+and loaded with the options of Tide's importer (compiler/src/fbx_files.c):
+right-handed Y-up, target_unit_meters 1, ADJUST_TRANSFORMS, geometry and inherit
+helpers as nodes, clamped index errors, embedded content ignored. Node names,
+parents and local transforms therefore equal what a Tide game imports, which is
+what makes a retargeted clip bind to the game's FBX character. Alternatives
+rejected: converting to GLB through another tool (an external dependency, and a
+second interpretation of units/axes) and a hand-written parser. The rig is the
+skin-cluster bones and their ancestors (every non-mesh node without skins); the
+unnamed scene root is left out, as Tide ignores it when binding. Takes are
+evaluated with ufbx_evaluate_transform at 30 Hz from time_begin; --clip selects
+a take by name. Uniform static scale only, as for GLB; .fbx is detected by
+extension in the GLB loaders, so inspect, retarget (--target and --to-soma
+sources), batch and preview accept it. SOMA inputs to generate/connect stay GLB.
+The Synty POLYGON character reads as 50 skin bones with Root scale 0.01.
+
+Preview: --mannequin (default for SOMA clips), --character MODEL.glb|.fbx with
+optional --map (retarget a SOMA clip first, reusing retarget()) and --texture,
+--skeleton (the old lines; default for other rigs without --character). The
+project declares `asset SkinnedMesh<Corner> body`, `asset Animation motion`
+(the clip as GLB) and optionally `asset Texture skin`, samples into
+body.defaultPose and draws with Draw.SkinnedMesh and a sun-and-sky frag, as
+Parry draws its fighter (public documented APIs only). One camera (30 degrees)
+sees two copies: facing it and in right profile, turned by the clip's
+first-frame heading (SOMA hip line; 0 for other rigs). Each copy is centred on
+the motion root above 5x5 floor tiles fixed in the world, so travel shows as the
+floor sliding. Framing comes from the first frame's height; the floor is y=0 for
+grounded clips (joints 2 cm above the soles otherwise sank the feet). Measured:
+turn 180 shows the front (the character's right arm on screen left), -90 the
+left side, so the camera's screen +x is world +x as documented.
+
+Mannequin (src/mannequin.cpp): a GLB written here, SOMA-30 joints with their
+canonical rest, inverse binds from the rest translations, one mesh of capsules
+(14 sides, 5 cap rings) along each bone rigidly weighted to its parent bone, a
+head and a nose; left limbs blue, right orange, centre clay; vertex colours.
+Character renders ignore FBX vertex colours: Synty's are dark and blackened the
+mesh when multiplied in.
+
+Validation: Parry's PolygonSyntyCharacter.fbx (copied to scratch; not in Git)
+with examples/synty-polygon.json (generic Synty bone names only) and its dummy
+texture: guard.glb, parry-swing, parry-swing-return and sequence-from-guard
+render on it and on the mannequin pose for pose. Frames were inspected: no
+inverted limbs or twisted wrists, feet on the floor, the mesh follows the bones,
+hands and fingers intact. The guard's apparently sideways mannequin head was
+checked numerically: hips and chest face +Z, the head is turned 55 degrees in
+the clip itself. The Synty sword idle FBX plays directly on the character and
+converts with --to-soma (non-root translations are reported and dropped); its
+SOMA version leans further forward than the FBX, a calibration gap of
+--to-soma on that rig, not of preview.
+
+Tests: motion-tests checks the mannequin GLB (rig reads back as canonical SOMA,
+rigid weights to valid joints, unit normals, indices in range, positive
+enclosed volume, i.e. outward glTF winding). retarget-tests writes its
+independent centimetre test rig as an ASCII FBX turned to Z-up and unscaled
+(no third-party content), reads it back in Y-up metres with identical world
+positions (1e-4) and identical retarget results, and checks the no-take and
+SOMA-must-be-GLB refusals. The CLI tests inspect and retarget onto that FBX and
+write preview projects for all three bodies (with a stand-in Tide), plus the
+option refusals. Both Windows builds and Ubuntu GCC 13 pass.
+
+Gaps: one take per preview; no materials beyond one optional texture (no
+normal maps, multiple materials or embedded textures); no automatic mapping;
+FBX scale animation and non-uniform scale are refused; preview needs the clip
+and character to share names when --map is not used; --to-soma from Synty
+leans the spine (see above).
