@@ -1,0 +1,152 @@
+diff --git a/include/kimodo/kimodo.hpp b/include/kimodo/kimodo.hpp
+index e774e5a..037e6ba 100644
+--- a/include/kimodo/kimodo.hpp
++++ b/include/kimodo/kimodo.hpp
+@@ -27,6 +27,18 @@ struct prompt_segment {
+     unsigned frames = 0;
+ };
+ 
++// Sparse conditioning over the whole output timeline (Tide Motion patch).
++// observed and mask are [frames, motion_dim()] unnormalized motion-representation
++// features, as built by upstream create_conditions: smooth root (x, y, z),
++// heading (cos, sin), root-relative joint positions, global cont6d rotations,
++// velocities and foot contacts. mask holds 0 or 1 per feature. first_heading is
++// the heading of frame 0 in radians (upstream first_heading_angle).
++struct motion_condition {
++    std::vector<float> observed;
++    std::vector<float> mask;
++    float first_heading = 0.f;
++};
++
+ class KIMODO_API model {
+ public:
+     static std::expected<std::unique_ptr<model>, std::string> load(
+@@ -41,6 +53,12 @@ public:
+     std::expected<motion_data, std::string> generate_text_sequence(
+         std::span<const prompt_segment> segments, unsigned transition_frames,
+         unsigned steps, std::uint64_t seed, float text_cfg, float constraint_cfg) const;
++    // One prompt or an ordered sequence, conditioned on observed features.
++    std::expected<motion_data, std::string> generate_text_conditioned(
++        std::span<const prompt_segment> segments, unsigned transition_frames,
++        unsigned steps, std::uint64_t seed, float text_cfg, float constraint_cfg,
++        const motion_condition &condition) const;
++    unsigned motion_dim() const;
+     ~model();
+     model(const model &) = delete;
+     model &operator=(const model &) = delete;
+diff --git a/src/denoiser.hpp b/src/denoiser.hpp
+index 8749607..09cc86f 100644
+--- a/src/denoiser.hpp
++++ b/src/denoiser.hpp
+@@ -70,6 +70,14 @@ std::expected<std::vector<float>, std::string> sample_motion_sequence_from_noise
+     const ggml_motion_weights &weights, std::span<const sampled_sequence_segment> segments,
+     unsigned transition_frames, unsigned steps, float text_weight, float constraint_weight);
+ 
++// Tide Motion patch: the same orchestration with a raw [total frames, motion_dim]
++// condition over the joined timeline (upstream constraint_lst cropped per segment
++// and moved with each transition origin). Empty spans mean no condition.
++std::expected<std::vector<float>, std::string> sample_motion_sequence_conditioned(
++    const ggml_motion_weights &weights, std::span<const sampled_sequence_segment> segments,
++    unsigned transition_frames, unsigned steps, float text_weight, float constraint_weight,
++    std::span<const float> observed, std::span<const float> observed_mask, float first_heading);
++
+ // Build the exact condition consumed by the next `_multiprompt` DDIM run.
+ // Exposed for the raw fixture test as well as the runtime orchestrator.
+ std::expected<sequence_transition, std::string> prepare_sequence_transition(
+diff --git a/src/model.cpp b/src/model.cpp
+index 91d2ec0..8353f25 100644
+--- a/src/model.cpp
++++ b/src/model.cpp
+@@ -117,9 +117,18 @@ std::expected<motion_data, std::string> model::generate_embedding(
+ #endif
+ }
+ 
++unsigned model::motion_dim() const { return static_cast<unsigned>(impl_->skeleton->motion_dim()); }
++
+ std::expected<motion_data, std::string> model::generate_text_sequence(
+     std::span<const prompt_segment> segments, unsigned transition_frames,
+     unsigned steps, std::uint64_t seed, float text_cfg, float constraint_cfg) const {
++    return generate_text_conditioned(segments, transition_frames, steps, seed, text_cfg, constraint_cfg, {});
++}
++
++std::expected<motion_data, std::string> model::generate_text_conditioned(
++    std::span<const prompt_segment> segments, unsigned transition_frames,
++    unsigned steps, std::uint64_t seed, float text_cfg, float constraint_cfg,
++    const motion_condition &condition) const {
+ #ifdef KIMODO_HAVE_GGML
+     if (!impl_->text) return std::unexpected("model was loaded without a native text bundle");
+     if (segments.empty() || segments.size() > 16) return std::unexpected("sequence requires 1..16 prompt segments");
+@@ -136,6 +145,16 @@ std::expected<motion_data, std::string> model::generate_text_sequence(
+         if (!embedding) return std::unexpected(embedding.error());
+         embeddings.push_back(*embedding);
+     }
++    if (!std::isfinite(text_cfg) || !std::isfinite(constraint_cfg) || !std::isfinite(condition.first_heading))
++        return std::unexpected("CFG weights and heading must be finite");
++    if (!condition.observed.empty()) {
++        size_t total=0; for (const auto &segment : segments) total+=segment.frames;
++        if (condition.observed.size()!=total*impl_->skeleton->motion_dim() || condition.mask.size()!=condition.observed.size())
++            return std::unexpected("condition must be [frames, motion_dim] for the whole sequence");
++        for (size_t i=0; i<condition.mask.size(); ++i)
++            if ((condition.mask[i]!=0.f && condition.mask[i]!=1.f) || (condition.mask[i]!=0.f && !std::isfinite(condition.observed[i])))
++                return std::unexpected("condition mask must be 0 or 1 over finite observed values");
++    } else if (!condition.mask.empty()) return std::unexpected("condition mask without observed values");
+     const std::lock_guard inference_lock(impl_->inference_mutex);
+     // Initialize and warm the quantized text backend before the F32 motion
+     // backend applies its process-wide Vulkan parity flags. This preserves
+@@ -160,7 +179,7 @@ std::expected<motion_data, std::string> model::generate_text_sequence(
+         for (float &value : noise.back()) value=normal(rng);
+         sampled.push_back({embeddings[index], noise.back(), segment.frames});
+     }
+-    auto joined=detail::sample_motion_sequence_from_noise(*impl_->weights,sampled,transition_frames,steps,text_cfg,constraint_cfg);
++    auto joined=detail::sample_motion_sequence_conditioned(*impl_->weights,sampled,transition_frames,steps,text_cfg,constraint_cfg,condition.observed,condition.mask,condition.first_heading);
+     if (!joined) return std::unexpected(joined.error());
+     const size_t motion_dim=impl_->skeleton->motion_dim(), body_dim=impl_->skeleton->body_dim();
+     const auto frames=static_cast<unsigned>(joined->size()/motion_dim);
+@@ -176,7 +195,7 @@ std::expected<motion_data, std::string> model::generate_text_sequence(
+     result.local_rotations_xyzw=std::move(decoded->local_xyzw); result.root_positions=std::move(decoded->root_positions);
+     return result;
+ #else
+-    (void) segments; (void) transition_frames; (void) steps; (void) seed; (void) text_cfg; (void) constraint_cfg;
++    (void) segments; (void) transition_frames; (void) steps; (void) seed; (void) text_cfg; (void) constraint_cfg; (void) condition;
+     return std::unexpected("Kimodo was built without GGML support");
+ #endif
+ }
+diff --git a/src/sequence.cpp b/src/sequence.cpp
+index 6dbf6da..7666f83 100644
+--- a/src/sequence.cpp
++++ b/src/sequence.cpp
+@@ -57,16 +57,32 @@ std::expected<sequence_transition, std::string> prepare_sequence_transition(
+ std::expected<std::vector<float>, std::string> sample_motion_sequence_from_noise(
+     const ggml_motion_weights &weights, std::span<const sampled_sequence_segment> segments,
+     unsigned transition_frames, unsigned steps, float text_weight, float constraint_weight) {
++    return sample_motion_sequence_conditioned(weights,segments,transition_frames,steps,text_weight,constraint_weight,{},{},0.F);
++}
++
++std::expected<std::vector<float>, std::string> sample_motion_sequence_conditioned(
++    const ggml_motion_weights &weights, std::span<const sampled_sequence_segment> segments,
++    unsigned transition_frames, unsigned steps, float text_weight, float constraint_weight,
++    std::span<const float> condition, std::span<const float> condition_mask, float first_heading) {
+     const size_t D=weights.motion_dim(),body=D-5;
+     if(segments.empty()||!transition_frames||!D)return std::unexpected("sequence requires segments and a transition");
++    size_t total=0;for(const auto&segment:segments)total+=segment.frames;
++    const bool conditioned=!condition.empty();
++    if(conditioned&&(condition.size()!=total*D||condition_mask.size()!=condition.size()))return std::unexpected("condition must cover every sequence frame");
+     auto gm=weights.f32_values("stats.global_root.mean"),gs=weights.f32_values("stats.global_root.std");
+     auto bm=weights.f32_values("stats.body.mean"),bs=weights.f32_values("stats.body.std");
+     if(!gm||!gs||!bm||!bs||gm->size()!=5||gs->size()!=5||bm->size()!=body||bs->size()!=body)return std::unexpected("motion GGUF lacks compatible motion statistics");
+     auto scale=[](float stddev){return std::sqrt(stddev*stddev+1.e-5F);};
+     auto unnormalize=[&](std::vector<float>&motion){for(size_t row=0;row<motion.size()/D;++row){auto*v=motion.data()+row*D;for(size_t d=0;d<5;++d)v[d]=v[d]*scale((*gs)[d])+(*gm)[d];for(size_t d=0;d<body;++d)v[5+d]=v[5+d]*scale((*bs)[d])+(*bm)[d];}};
+     auto normalize=[&](std::vector<float>&motion){for(size_t row=0;row<motion.size()/D;++row){auto*v=motion.data()+row*D;for(size_t d=0;d<5;++d)v[d]=(v[d]-(*gm)[d])/scale((*gs)[d]);for(size_t d=0;d<body;++d)v[5+d]=(v[5+d]-(*bm)[d])/scale((*bs)[d]);}};
+-    std::vector<float> joined,previous;
+-    for(size_t index=0;index<segments.size();++index){const auto&segment=segments[index];const size_t sampled_frames=segment.frames+(index?transition_frames:0);if(segment.frames<2||segment.embedding.size()!=4096||segment.initial_noise.size()!=sampled_frames*D)return std::unexpected("invalid sampled sequence segment");std::vector<float>current;if(!index){auto sampled=sample_motion_from_noise(weights,segment.initial_noise,segment.embedding,sampled_frames,steps,text_weight,constraint_weight);if(!sampled)return std::unexpected(sampled.error());current=std::move(*sampled);unnormalize(current);}else{const size_t overlap=transition_frames;if(overlap>=segment.frames||previous.size()<overlap*D)return std::unexpected("transition must be shorter than every following segment");auto transition=prepare_sequence_transition(weights,previous,segment.frames,transition_frames);if(!transition)return std::unexpected(transition.error());const float origin_x=transition->origin_x,origin_z=transition->origin_z;normalize(transition->observed);auto sampled=sample_motion_from_noise_conditioned(weights,segment.initial_noise,segment.embedding,transition->observed,transition->observed_mask,transition->first_heading,sampled_frames,steps,text_weight,constraint_weight);if(!sampled)return std::unexpected(sampled.error());current=std::move(*sampled);unnormalize(current);for(size_t frame=0;frame<sampled_frames;++frame){auto*row=current.data()+frame*D;row[0]+=origin_x;row[2]+=origin_z;}const size_t start=joined.size()-overlap*D;for(size_t frame=0;frame<overlap;++frame){const float alpha=overlap==1?.5F:1.F-float(frame)/float(overlap-1);for(size_t d=0;d<D;++d)joined[start+frame*D+d]=alpha*joined[start+frame*D+d]+(1.F-alpha)*current[frame*D+d];}joined.insert(joined.end(),current.begin()+static_cast<std::ptrdiff_t>(overlap*D),current.end());}if(!index)joined=current;previous=std::move(current);}
++    // Rows of the caller condition for one segment, beginning at output frame first and
++    // written after offset rows; x/z move with the segment origin as upstream translate_2d.
++    auto crop=[&](size_t first,size_t frames,size_t offset,float origin_x,float origin_z,std::vector<float>&observed,std::vector<float>&mask){bool any=false;for(size_t frame=0;frame<frames;++frame){const size_t from=(first+frame)*D,to=(offset+frame)*D;for(size_t d=0;d<D;++d){const float m=condition_mask[from+d];if(m==0.F)continue;any=true;mask[to+d]=m;observed[to+d]=condition[from+d]-(d==0?origin_x:d==2?origin_z:0.F);}}return any;};
++    std::vector<float> joined,previous;size_t current_frame=0;
++    for(size_t index=0;index<segments.size();++index){const auto&segment=segments[index];const size_t sampled_frames=segment.frames+(index?transition_frames:0);if(segment.frames<2||segment.embedding.size()!=4096||segment.initial_noise.size()!=sampled_frames*D)return std::unexpected("invalid sampled sequence segment");std::vector<float>current;
++        if(!index){std::vector<float>observed(sampled_frames*D),mask(observed.size());const bool any=conditioned&&crop(0,segment.frames,0,0.F,0.F,observed,mask);std::expected<std::vector<float>,std::string>sampled;if(any){normalize(observed);sampled=sample_motion_from_noise_conditioned(weights,segment.initial_noise,segment.embedding,observed,mask,first_heading,sampled_frames,steps,text_weight,constraint_weight);}else sampled=sample_motion_from_noise(weights,segment.initial_noise,segment.embedding,sampled_frames,steps,text_weight,constraint_weight);if(!sampled)return std::unexpected(sampled.error());current=std::move(*sampled);unnormalize(current);}
++        else{const size_t overlap=transition_frames;if(overlap>=segment.frames||previous.size()<overlap*D)return std::unexpected("transition must be shorter than every following segment");auto transition=prepare_sequence_transition(weights,previous,segment.frames,transition_frames);if(!transition)return std::unexpected(transition.error());const float origin_x=transition->origin_x,origin_z=transition->origin_z;if(conditioned)crop(current_frame,segment.frames,overlap,origin_x,origin_z,transition->observed,transition->observed_mask);normalize(transition->observed);auto sampled=sample_motion_from_noise_conditioned(weights,segment.initial_noise,segment.embedding,transition->observed,transition->observed_mask,transition->first_heading,sampled_frames,steps,text_weight,constraint_weight);if(!sampled)return std::unexpected(sampled.error());current=std::move(*sampled);unnormalize(current);for(size_t frame=0;frame<sampled_frames;++frame){auto*row=current.data()+frame*D;row[0]+=origin_x;row[2]+=origin_z;}const size_t start=joined.size()-overlap*D;for(size_t frame=0;frame<overlap;++frame){const float alpha=overlap==1?.5F:1.F-float(frame)/float(overlap-1);for(size_t d=0;d<D;++d)joined[start+frame*D+d]=alpha*joined[start+frame*D+d]+(1.F-alpha)*current[frame*D+d];}joined.insert(joined.end(),current.begin()+static_cast<std::ptrdiff_t>(overlap*D),current.end());}
++        if(!index)joined=current;previous=std::move(current);current_frame+=segment.frames;}
+     return joined;
+ }
+ } // namespace kimodo::detail

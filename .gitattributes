@@ -3,3 +3,4 @@
 *.yml text eol=lf
 licenses/** -text -whitespace
 LICENSE -text -whitespace
+*.patch text eol=lf

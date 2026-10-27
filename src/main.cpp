@@ -6,6 +6,8 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <map>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #ifdef _WIN32
@@ -52,18 +54,139 @@ bool kimodo_on_gpu() {
 #endif
     return false;
 }
-void help() {
+// Usage of one command; the global text lists every command and option.
+const char* command_help(std::string_view command) {
+    if(command=="generate")return R"(tide-motion generate "PROMPT" -o CLIP.glb [options]
+
+Generates a SOMA-30 clip from text with Kimodo (30 fps).
+
+  -o, --output FILE.glb       New output (a FILE.glb.json recipe is written beside it)
+  --duration SECONDS          Length of the prompt before it, 0.2..10 (default 3)
+  --then "PROMPT"             Continue with another prompt (up to 16 in total); a
+                              --duration after it sets that prompt's length
+  --transition FRAMES         Frames blended between prompts, 1..60 (default 5)
+  --start-pose FILE.glb[@F]   Begin in frame F of a SOMA clip (default: its last
+                              frame, so the output continues from it)
+  --end-pose FILE.glb[@F]     End in frame F of a SOMA clip (default: its first
+                              frame, so the output leads into it)
+  --keyframe FRAME FILE.glb[@F]
+                              Reach frame F (default first) at output FRAME
+  --effector PARTS FRAME FILE.glb[@F]
+                              Reach only the hands/feet of frame F (default first)
+                              at output FRAME; PARTS is a comma list of left-hand,
+                              right-hand, left-foot and right-foot
+  --path X,Z[,YAW]@FRAME      Put the root over ground point X,Z (metres) at output
+                              FRAME, optionally facing YAW degrees (0 faces +Z,
+                              90 faces +X); repeat for waypoints
+  --placement auto|world|free Ground placement of poses after frame 0 (see below)
+  --no-correction             Keep the model's poses as generated instead of making
+                              full-body poses exact
+  --seed N                  Random seed, 0..4294967295 (default 0)
+  --steps N                   Diffusion steps, 1..1000 (default 50)
+  --models DIR                Model directory (default: TIDE_MOTION_MODELS or the
+                              OS cache)
+
+F is a frame of the pose file; negative counts from its end (-1 is the last),
+and "first" or "last" also work. Output FRAME is 0-based at 30 fps; negative
+counts from the end. Pose files must be SOMA-30 clips (convert other rigs with
+retarget --to-soma).
+
+Placement: a start pose (or a path point at frame 0) fixes where the output
+begins, in that clip's world. world also pins later poses to their ground
+positions in their files; free keeps their body, height and facing but lets the
+motion choose where on the ground they happen. auto (default) is world when the
+first frame or a path fixes the world, otherwise free, and then moves the whole
+output so its last pose lands where it is in its file (so an end pose leads
+straight into that clip). Without a start pose the output begins facing +Z.
+
+Kimodo reaches poses closely but not exactly; the model's error at each
+constraint is printed and stored in the recipe. Full-body poses are then made
+exact, fading the correction out over up to 10 frames either side (effector
+targets and path points are left as generated).
+)";
+    if(command=="connect")return R"(tide-motion connect FROM.glb TO.glb -o BRIDGE.glb [options]
+
+Generates a MotionBricks transition from the end of one SOMA clip to the start
+of another.
+
+  -o, --output FILE.glb       New output
+  --tokens N                  Transition length in tokens, 6..16 (default: model)
+  --joined                    Export source, bridge and target as one animation
+  --offset X Y Z              Move the target clip before connecting (metres)
+  --from-clip NAME            Animation to use from a multi-animation FROM.glb
+  --to-clip NAME              Animation to use from a multi-animation TO.glb
+  --models DIR                Model directory
+)";
+    if(command=="retarget")return R"(tide-motion retarget SOURCE.glb --target CHARACTER.glb --map BONES.json -o CLIP.glb
+tide-motion retarget SOURCE.glb --to-soma --map BONES.json -o SOMA.glb
+
+Converts animation between SOMA and a mapped humanoid without loading a model.
+
+  --target CHARACTER.glb      Character skeleton to receive SOMA motion
+  --to-soma                   Convert the source character's animation to SOMA
+  --map BONES.json            SOMA-to-character bone names (see examples/)
+  --clip NAME                 Animation to use from a multi-animation SOURCE.glb
+  -o, --output FILE.glb       New output
+)";
+    if(command=="batch")return R"(tide-motion batch JOBS.json [--models DIR]
+
+Runs ordered generate, connect and retarget actions, loading each model once.
+The whole manifest and every output path are checked before anything runs.
+Paths are relative to the manifest. README.md lists every action field.
+)";
+    if(command=="inspect")return R"(tide-motion inspect FILE.glb [--clip NAME | --skeleton]
+
+Prints a clip's rig, joints, frames and duration as JSON.
+
+  --clip NAME                 Animation to inspect from a multi-animation GLB
+  --skeleton                  List bone names, parents, rest transforms and scales
+)";
+    if(command=="preview")return R"(tide-motion preview CLIP.glb [options]
+
+Draws a clip's skeleton (front and side views) in a temporary Tide project.
+
+  --tide PATH                 Tide executable (default: tide on PATH)
+  --capture IMAGE.png         Save the last frame as a PNG
+  --gif OUT.gif               Record the clip once from its first frame as a GIF
+                              (needs Tide 0.5.0-nightly.45 or later)
+  --frames N                  Stop after N frames at 60 fps (with --gif the
+                              default covers the clip exactly once)
+  --clip NAME                 Animation to preview from a multi-animation GLB
+
+With TIDE_HIDDEN set, give --capture, --gif or --frames.
+)";
+    if(command=="models")return R"(tide-motion models install [all|kimodo|bricks] --accept-licenses [--models DIR]
+tide-motion models check [all|kimodo|bricks] [--models DIR]
+
+Downloads (resumably) and verifies the pinned model files by SHA-256.
+
+  --accept-licenses           Accept the model licences in licenses/ (install)
+  --models DIR                Model directory (default: TIDE_MOTION_MODELS or the
+                              OS cache)
+)";
+    return nullptr;
+}
+void help(std::string_view command={}) {
+    if(const char* text=command_help(command)) {std::cout<<text;return;}
     std::cout<<R"(Tide Motion - native offline animation authoring
 
   tide-motion models install [all|kimodo|bricks] --accept-licenses [--models DIR]
   tide-motion models check [all|kimodo|bricks] [--models DIR]
   tide-motion generate "PROMPT" -o CLIP.glb [--duration 3] [--seed 0] [--steps 50]
+      [--then "PROMPT" [--duration S]]... [--transition 5]
+      [--start-pose FILE.glb[@F]] [--end-pose FILE.glb[@F]]
+      [--keyframe FRAME FILE.glb[@F]]... [--effector PARTS FRAME FILE.glb[@F]]...
+      [--path X,Z[,YAW]@FRAME]...
   tide-motion connect FROM.glb TO.glb -o BRIDGE.glb [--tokens 6..16] [--joined]
+      [--offset X Y Z] [--from-clip NAME] [--to-clip NAME]
   tide-motion retarget SOURCE.glb --target CHARACTER.glb --map BONES.json -o CLIP.glb
-  tide-motion retarget SOURCE.glb --to-soma --map BONES.json -o SOMA.glb
+  tide-motion retarget SOURCE.glb --to-soma --map BONES.json -o SOMA.glb [--clip NAME]
   tide-motion batch JOBS.json [--models DIR]
   tide-motion inspect FILE.glb [--clip NAME | --skeleton]
-  tide-motion preview CLIP.glb [--tide PATH] [--capture IMAGE.png] [--frames N]
+  tide-motion preview CLIP.glb [--tide PATH] [--capture IMAGE.png] [--gif OUT.gif]
+      [--frames N] [--clip NAME]
+  tide-motion help [COMMAND]       one command's options (also COMMAND --help)
+  tide-motion --version
 
 Models are downloaded once and SHA-256 verified. Generation and transitions run
 locally without Python, PyTorch, Conda or a server. Models use SOMA-30; retarget
@@ -71,10 +194,13 @@ converts mapped humanoids to/from SOMA without loading a model. GLB output
 contains animation and a skeleton, without a skinned character mesh.
 
 --models DIR overrides TIDE_MOTION_MODELS and the OS model cache.
+generate --then chains prompts; --start-pose, --end-pose, --keyframe, --effector
+and --path hold the motion to SOMA poses and ground points.
 connect preserves target placement; use --offset X Y Z to place the target clip.
 --from-clip NAME / --to-clip NAME select clips from multi-animation GLBs.
 --joined exports source, generated bridge and target as one animation.
-preview uses an installed Tide separately; --tide selects its executable.
+preview uses an installed Tide separately; --tide selects its executable and
+--gif records the clip once as an animated GIF.
 batch runs ordered actions and keeps each inference model loaded until completion.
 Existing outputs are refused. Use a new output path.
 
@@ -109,17 +235,49 @@ void load_kimodo(const fs::path& models,RunContext* context) {
     context->kimodo_gpu=false;use_cpu("The GPU could not load Kimodo ("+failure+")");
     load_kimodo(models,context);
 }
-kimodo::motion_data generate_motion(const fs::path& models,RunContext* context,const std::string& prompt,unsigned frames,unsigned steps,uint64_t seed) {
+// One unconditioned prompt keeps the original sampler; sequences and constraints use
+// the patched conditioned one, which matches upstream _multiprompt.
+kimodo::motion_data generate_motion(const fs::path& models,RunContext* context,const std::vector<kimodo::prompt_segment>& segments,unsigned transition,unsigned steps,uint64_t seed,const kimodo::motion_condition* condition) {
     std::string failure;
     try {
-        auto result=context->kimodo->generate_text(prompt,frames,steps,seed,2,2);
+        auto result=segments.size()==1&&!condition?context->kimodo->generate_text(segments[0].prompt,segments[0].frames,steps,seed,2,2)
+            :context->kimodo->generate_text_conditioned(segments,transition,steps,seed,2,2,condition?*condition:kimodo::motion_condition{});
         if(result)return std::move(*result);
         failure=result.error();
     } catch(const std::exception& e) {failure=e.what();}
     if(!context->kimodo_gpu)throw std::runtime_error(failure);
     context->kimodo.reset();context->kimodo_gpu=false;use_cpu("GPU generation failed ("+failure+")");
     load_kimodo(models,context);
-    return generate_motion(models,context,prompt,frames,steps,seed);
+    return generate_motion(models,context,segments,transition,steps,seed,condition);
+}
+// FILE.glb[@F]: F is an integer (negative from the end), first or last.
+struct PoseRef { std::string file; std::optional<long> frame; };
+PoseRef pose_ref(const std::string& text) {
+    PoseRef ref{text,std::nullopt};
+    auto at=text.rfind('@');
+    if(at!=std::string::npos&&at>0) {
+        auto suffix=text.substr(at+1);
+        if(suffix=="first")ref.frame=0;
+        else if(suffix=="last")ref.frame=-1;
+        else if(!suffix.empty()&&suffix.find_first_not_of("-0123456789")==std::string::npos&&suffix.find('-',1)==std::string::npos&&suffix!="-")
+            ref.frame=static_cast<long>(integer(suffix,-18000,17999,"pose frame"));
+        if(ref.frame)ref.file=text.substr(0,at);
+    }
+    if(ref.file.empty())throw std::runtime_error("Pose needs a SOMA .glb file: "+text);
+    return ref;
+}
+long frame_index(const std::string& text,const char* label) { return static_cast<long>(integer(text,-18000,17999,label)); }
+PathConstraint path_point(const std::string& text,long* frame) {
+    auto at=text.rfind('@');
+    if(at==std::string::npos)throw std::runtime_error("Use --path X,Z[,YAW]@FRAME");
+    std::vector<std::string> parts;size_t start=0;auto values=text.substr(0,at);
+    while(true) {auto comma=values.find(',',start);parts.push_back(values.substr(start,comma-start));if(comma==std::string::npos)break;start=comma+1;}
+    if(parts.size()<2||parts.size()>3)throw std::runtime_error("Use --path X,Z[,YAW]@FRAME");
+    PathConstraint p;
+    p.x=static_cast<float>(number(parts[0],-10000,10000,"path X"));p.z=static_cast<float>(number(parts[1],-10000,10000,"path Z"));
+    if(parts.size()==3) {p.has_heading=true;p.heading=static_cast<float>(number(parts[2],-3600,3600,"path yaw"));}
+    *frame=frame_index(text.substr(at+1),"path frame");
+    return p;
 }
 int main_impl(const std::vector<std::string>& args,RunContext* context=nullptr);
 int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
@@ -140,7 +298,70 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
         auto type=action.at("action").get<std::string>();
         std::set<std::string> keys{"action","output"};
         std::vector<std::string> argv{"tide-motion",type};
-        if(type=="generate") { argv.push_back(action.at("prompt").get<std::string>());keys.insert({"prompt","duration","seed","steps"}); }
+        if(type=="generate") {
+            keys.insert({"prompt","prompts","duration","seed","steps","transition","startPose","endPose","keyframes","effectors","path","placement","correct"});
+            if(action.contains("placement")) {
+                auto value=action["placement"].get<std::string>();
+                if(value!="auto"&&value!="world"&&value!="free")throw std::runtime_error("placement is auto, world or free");
+                argv.insert(argv.end(),{"--placement",value});
+            }
+            if(action.contains("correct")&&!action["correct"].get<bool>())argv.push_back("--no-correction");
+            auto numeric=[](const nlohmann::json& value,const char* label) {
+                if(!value.is_number())throw std::runtime_error(std::string(label)+" must be numeric");
+                return value.dump();
+            };
+            if(action.contains("prompts")) {
+                const auto& prompts=action["prompts"];
+                if(action.contains("prompt")||action.contains("duration"))throw std::runtime_error("Use prompts or prompt/duration, not both");
+                if(!prompts.is_array()||prompts.empty()||prompts.size()>16)throw std::runtime_error("prompts must hold 1..16 objects");
+                for(size_t i=0;i<prompts.size();++i) {
+                    const auto& item=prompts[i];
+                    if(!item.is_object())throw std::runtime_error("Each prompts entry must be an object");
+                    for(const auto& field:item.items())if(field.key()!="prompt"&&field.key()!="duration")throw std::runtime_error("Unknown prompts field: "+field.key());
+                    if(i)argv.push_back("--then");
+                    argv.push_back(item.at("prompt").get<std::string>());
+                    if(item.contains("duration")) {auto text=numeric(item["duration"],"duration");number(text,0.2,10,"duration");argv.insert(argv.end(),{"--duration",text});}
+                }
+            } else argv.push_back(action.at("prompt").get<std::string>());
+            // Pose files may be outputs of earlier actions, so only their paths are checked here.
+            auto pose=[&](const nlohmann::json& value,const char* frame_key) {
+                if(value.is_string())return path(value).string();
+                if(!value.is_object())throw std::runtime_error("A pose is a file path or an object with file");
+                auto text=path(value.at("file")).string();
+                if(value.contains(frame_key))text+="@"+std::to_string(frame_index(numeric(value[frame_key],frame_key),frame_key));
+                return text;
+            };
+            auto fields=[](const nlohmann::json& item,std::set<std::string> allowed) {
+                if(!item.is_object())throw std::runtime_error("Constraint entries must be objects");
+                for(const auto& field:item.items())if(!allowed.contains(field.key()))throw std::runtime_error("Unknown constraint field: "+field.key());
+            };
+            if(action.contains("transition")) {auto text=numeric(action["transition"],"transition");integer(text,1,60,"transition");argv.insert(argv.end(),{"--transition",text});}
+            for(auto pair:{std::pair{"startPose","--start-pose"},std::pair{"endPose","--end-pose"}})if(action.contains(pair.first)) {
+                if(action[pair.first].is_object())fields(action[pair.first],{"file","frame"});
+                argv.insert(argv.end(),{pair.second,pose(action[pair.first],"frame")});
+            }
+            for(const char* key:{"keyframes","effectors","path"})if(action.contains(key)&&(!action[key].is_array()||action[key].empty()))throw std::runtime_error(std::string(key)+" must be a nonempty array");
+            if(action.contains("keyframes"))for(const auto& item:action["keyframes"]) {
+                fields(item,{"frame","file","sourceFrame"});
+                argv.insert(argv.end(),{"--keyframe",std::to_string(frame_index(numeric(item.at("frame"),"frame"),"frame")),pose(item,"sourceFrame")});
+            }
+            if(action.contains("effectors"))for(const auto& item:action["effectors"]) {
+                fields(item,{"effectors","frame","file","sourceFrame"});
+                std::string parts;
+                if(item.at("effectors").is_array()) {for(const auto& part:item["effectors"]) {if(!parts.empty())parts+=',';parts+=part.get<std::string>();}}
+                else parts=item["effectors"].get<std::string>();
+                (void)parse_effectors(parts);
+                argv.insert(argv.end(),{"--effector",parts,std::to_string(frame_index(numeric(item.at("frame"),"frame"),"frame")),pose(item,"sourceFrame")});
+            }
+            if(action.contains("path"))for(const auto& item:action["path"]) {
+                fields(item,{"frame","x","z","yaw"});
+                std::string text=numeric(item.at("x"),"x")+","+numeric(item.at("z"),"z");
+                if(item.contains("yaw"))text+=","+numeric(item["yaw"],"yaw");
+                text+="@"+numeric(item.at("frame"),"frame");
+                long frame=0;(void)path_point(text,&frame);
+                argv.insert(argv.end(),{"--path",text});
+            }
+        }
         else if(type=="connect") { argv.push_back(path(action.at("from")).string());argv.push_back(path(action.at("to")).string());keys.insert({"from","to","tokens","joined","offset","fromClip","toClip"}); }
         else if(type=="retarget") {
             argv.push_back(path(action.at("source")).string());
@@ -197,23 +418,46 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
 }
 int main_impl(const std::vector<std::string>& args,RunContext* context) {
     RunContext owned;if(!context)context=&owned;
-    if(args.size()<2||args[1]=="--help"||args[1]=="help") { help();return 0; }
+    if(args.size()<2||args[1]=="--help"||args[1]=="-h") { help();return 0; }
+    if(args[1]=="help") { help(args.size()>2?args[2]:"");return 0; }
     if(args[1]=="--version") { std::cout<<"tide-motion "<<MOTION_VERSION<<"\n";return 0; }
     std::string command=args[1],clip_name,from_name,to_name,tide="tide";
-    fs::path models,output,capture,target_file,map_file;
+    for(size_t i=2;i<args.size();++i)if(args[i]=="--help"||args[i]=="-h") {help(command);return 0;}
+    fs::path models,output,capture,gif,target_file,map_file;
     if(command=="generate"||command=="connect"||command=="models"||command=="batch")models=model_directory();
-    double duration=3;uint64_t seed=0;unsigned steps=50;int frames=0,tokens=0;
-    bool accept=false,joined=false,skeleton=false,to_soma=false;Vec3 offset{};
+    double duration=3;uint64_t seed=0;unsigned steps=50,transition=5;int frames=0,tokens=0;
+    bool accept=false,joined=false,skeleton=false,to_soma=false,correct=true;Vec3 offset{};
+    Placement placement=Placement::automatic;std::string placement_name="auto";
     std::vector<std::string> pos;
     std::vector<std::string> flags;
+    // Prompt durations; index 0 is the positional prompt, later ones come from --then.
+    std::vector<std::pair<std::string,double>> segments{{"",3.0}};
+    struct PoseSpec { std::string kind; long frame=0; std::string ref; unsigned effectors=0; };
+    std::vector<PoseSpec> pose_specs;
+    std::vector<std::pair<PathConstraint,long>> path_specs;
     for(size_t i=2;i<args.size();++i) {
         auto value=[&]() { if(++i>=args.size()||args[i].empty())throw std::runtime_error("Missing value for "+args[i-1]);return args[i]; };
         const auto& a=args[i];
-        if(a=="--help") {help();return 0;}
         if(a.starts_with('-'))flags.push_back(a);
         if(a=="--models")models=utf8path(value());
         else if(a=="-o"||a=="--output")output=utf8path(value());
-        else if(a=="--duration")duration=number(value(),0.2,10,"duration");
+        else if(a=="--duration") {duration=number(value(),0.2,10,"duration");segments.back().second=duration;}
+        else if(a=="--then")segments.push_back({value(),3.0});
+        else if(a=="--transition")transition=static_cast<unsigned>(integer(value(),1,60,"transition"));
+        else if(a=="--start-pose")pose_specs.push_back({"start-pose",0,value()});
+        else if(a=="--end-pose")pose_specs.push_back({"end-pose",-1,value()});
+        else if(a=="--keyframe") {long f=frame_index(value(),"keyframe frame");pose_specs.push_back({"keyframe",f,value()});}
+        else if(a=="--effector") {unsigned bits=parse_effectors(value());long f=frame_index(value(),"effector frame");pose_specs.push_back({"effector",f,value(),bits});}
+        else if(a=="--path") {long f=0;auto p=path_point(value(),&f);path_specs.push_back({p,f});}
+        else if(a=="--gif")gif=utf8path(value());
+        else if(a=="--placement") {
+            placement_name=value();
+            if(placement_name=="auto")placement=Placement::automatic;
+            else if(placement_name=="world")placement=Placement::world;
+            else if(placement_name=="free")placement=Placement::free;
+            else throw std::runtime_error("--placement is auto, world or free");
+        }
+        else if(a=="--no-correction")correct=false;
         else if(a=="--steps")steps=static_cast<unsigned>(integer(value(),1,1000,"steps"));
         else if(a=="--seed")seed=static_cast<uint64_t>(integer(value(),0,4294967295.0,"seed"));
         else if(a=="--frames")frames=static_cast<int>(integer(value(),1,18000,"frames"));
@@ -234,11 +478,11 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         else pos.push_back(a);
     }
     std::set<std::string> allowed;
-    if(command=="generate")allowed={"--models","-o","--output","--duration","--seed","--steps"};
+    if(command=="generate")allowed={"--models","-o","--output","--duration","--seed","--steps","--then","--transition","--start-pose","--end-pose","--keyframe","--effector","--path","--placement","--no-correction"};
     else if(command=="connect")allowed={"--models","-o","--output","--tokens","--joined","--offset","--from-clip","--to-clip"};
     else if(command=="retarget")allowed={"-o","--output","--target","--map","--to-soma","--clip"};
     else if(command=="inspect")allowed={"--clip","--skeleton"};
-    else if(command=="preview")allowed={"--clip","--tide","--capture","--frames"};
+    else if(command=="preview")allowed={"--clip","--tide","--capture","--gif","--frames"};
     else if(command=="models")allowed={"--models","--accept-licenses"};
     else if(command=="batch")allowed={"--models"};
     for(const auto& flag:flags)if(!allowed.contains(flag))throw std::runtime_error(command+" does not take "+flag);
@@ -260,7 +504,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         if(pos.size()!=1)throw std::runtime_error(command+" takes one GLB file");
         if(skeleton&&!clip_name.empty())throw std::runtime_error("inspect --skeleton does not take --clip");
         auto path=utf8path(pos[0]);auto clip=skeleton?load_rig_glb(path):load_glb(path,clip_name,false);
-        if(command=="preview")preview(clip,path,tide,capture,frames);
+        if(command=="preview")preview(clip,path,tide,capture,frames,gif);
         else {
             bool canonical=true;try{require_soma(clip);}catch(const std::exception&){canonical=false;}
             nlohmann::json info={{"name",clip.name},{"rig",canonical?"soma30":"custom"},{"joints",clip.joints.size()},{"frames",clip.frames()},{"fps",clip.fps},{"duration",clip.duration()}};
@@ -276,7 +520,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     if(output.empty()||output.extension()!=".glb")throw std::runtime_error("Choose a .glb output with -o");
     if(fs::exists(output)||fs::exists(output.string()+".part")||fs::exists(output.string()+".json"))throw std::runtime_error("Output, partial output or recipe already exists: "+output.string());
     Clip clip;
-    nlohmann::json retarget_recipe;
+    nlohmann::json retarget_recipe,generate_recipe;
     if(command=="retarget") {
         if(pos.size()!=1||map_file.empty()||(!to_soma&&target_file.empty())||(to_soma&&!target_file.empty()))
             throw std::runtime_error("Use retarget SOURCE.glb --map BONES.json with either --target CHARACTER.glb or --to-soma, and -o CLIP.glb");
@@ -292,20 +536,89 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         retarget_recipe={{"tool","tide-motion"},{"version",MOTION_VERSION},{"command",command},{"source",pos[0]},{"target",target_file.string()},{"toSoma",to_soma},{"clip",clip_name},{"mapping",mapping_json},{"rootScale",result.scale},{"headingDegrees",result.heading_degrees},{"discardedNonRootTranslations",result.discarded_translations},{"fps",clip.fps},{"frames",clip.frames()}};
     } else if(command=="generate") {
         if(pos.size()!=1||pos[0].empty())throw std::runtime_error("generate takes one quoted prompt");
+        if(segments.size()>16)throw std::runtime_error("generate takes at most 16 prompts");
+        segments[0].first=pos[0];
+        std::vector<kimodo::prompt_segment> parts;size_t total=0;
+        for(size_t i=0;i<segments.size();++i) {
+            auto count=static_cast<unsigned>(std::round(segments[i].second*30));
+            if(i&&transition>=count)throw std::runtime_error("--transition must be shorter than every following prompt ("+std::to_string(count)+" frames)");
+            parts.push_back({segments[i].first,count});total+=count;
+        }
+        // Resolve and load every constraint before any model is loaded.
+        auto resolve=[&](long frame,const char* label) {
+            long resolved=frame<0?static_cast<long>(total)+frame:frame;
+            if(resolved<0||resolved>=static_cast<long>(total))throw std::runtime_error(std::string(label)+" "+std::to_string(frame)+" is outside the "+std::to_string(total)+"-frame output");
+            return static_cast<size_t>(resolved);
+        };
+        MotionConditions conditions;
+        std::map<std::string,Clip> pose_files;
+        for(const auto& spec:pose_specs) {
+            auto ref=pose_ref(spec.ref);
+            auto& source=pose_files[ref.file];
+            if(source.joints.empty()) {source=load_glb(utf8path(ref.file),"",true);require_soma(source);}
+            long wanted=ref.frame?*ref.frame:(spec.kind=="start-pose"?-1:0);
+            long index=wanted<0?static_cast<long>(source.frames())+wanted:wanted;
+            if(index<0||index>=static_cast<long>(source.frames()))throw std::runtime_error(ref.file+" has no frame "+std::to_string(wanted)+" ("+std::to_string(source.frames())+" frames)");
+            PoseConstraint pose{spec.kind,resolve(spec.frame,spec.kind.c_str()),ref.file,index,{},spec.effectors};
+            auto frame=source.frame(static_cast<size_t>(index));pose.pose.assign(frame.begin(),frame.end());
+            conditions.poses.push_back(std::move(pose));
+        }
+        for(auto [point,frame]:path_specs) {point.frame=resolve(frame,"path frame");conditions.path.push_back(point);}
+        bool shift=place_constraints(conditions,placement);
+        std::optional<KimodoCondition> condition;
+        kimodo::motion_condition native;
+        if(!conditions.empty()) {
+            condition=build_condition(conditions,total);
+            native={condition->observed,condition->mask,condition->first_heading};
+        }
         if(!context->kimodo) {
             check_models(models,"kimodo");
             context->kimodo_gpu=kimodo_on_gpu();
             load_kimodo(models,context);
         }
+        if(condition&&context->kimodo->motion_dim()!=kimodo_features)throw std::runtime_error("Constraints need the SOMA-30 Kimodo model");
         std::cerr<<"Generating motion...\n";
-        auto result=generate_motion(models,context,pos[0],static_cast<unsigned>(std::round(duration*30)),steps,seed);
+        auto result=generate_motion(models,context,parts,transition,steps,seed,condition?&native:nullptr);
         if(result.joints!=30||result.local_rotations_xyzw.size()!=static_cast<size_t>(result.frames)*30*4||result.root_positions.size()!=static_cast<size_t>(result.frames)*3)throw std::runtime_error("Kimodo returned an unexpected SOMA output layout");
         clip.joints=soma();clip.name=output.stem().string();
+        // Constraints were expressed relative to the frame-0 origin; return to their world.
+        Vec3 origin=condition?condition->origin:Vec3{};
         for(size_t f=0;f<result.frames;++f)for(size_t j=0;j<30;++j) {
             size_t index=(f*30+j)*4;Transform t=clip.joints[j].rest;
             t.q=normalized({result.local_rotations_xyzw[index],result.local_rotations_xyzw[index+1],result.local_rotations_xyzw[index+2],result.local_rotations_xyzw[index+3]});
-            if(j==0)t.p={result.root_positions[f*3],result.root_positions[f*3+1],result.root_positions[f*3+2]};
+            if(j==0)t.p=Vec3{result.root_positions[f*3],result.root_positions[f*3+1],result.root_positions[f*3+2]}+origin;
             clip.poses.push_back(t);
+        }
+        if(shift)shift_to_last_pose(clip,conditions);
+        generate_recipe["prompts"]=nlohmann::json::array();
+        for(size_t i=0;i<parts.size();++i)generate_recipe["prompts"].push_back({{"prompt",parts[i].prompt},{"duration",segments[i].second},{"frames",parts[i].frames}});
+        generate_recipe["transition"]=parts.size()>1?transition:0;
+        generate_recipe["placement"]=placement_name;generate_recipe["corrected"]=correct&&!conditions.poses.empty();
+        generate_recipe["constraints"]=nlohmann::json::array();
+        auto round=[](float value,float unit){return std::round(value/unit)*unit;};
+        // Errors are the model's own; correction then makes full-body poses exact.
+        for(const auto& pose:conditions.poses) {
+            auto e=constraint_error(clip,pose);
+            nlohmann::json item={{"kind",pose.kind},{"frame",pose.frame},{"file",pose.file},{"sourceFrame",pose.source_frame},{"anchored",pose.anchored},
+                {"modelError",{{"rootMetres",round(e.root,1e-4f)},{"positionMeanMetres",round(e.position_mean,1e-4f)},{"positionMaxMetres",round(e.position_max,1e-4f)},{"rotationMeanDegrees",round(e.rotation_mean,0.01f)},{"rotationMaxDegrees",round(e.rotation_max,0.01f)}}}};
+            if(pose.effectors)item["effectors"]=effector_list(pose.effectors);
+            generate_recipe["constraints"].push_back(item);
+            std::cerr<<pose.kind<<(pose.effectors?" "+effector_list(pose.effectors):std::string())<<" at frame "<<pose.frame<<(pose.anchored?"":" (free on the ground)")<<": root "<<round(e.root*100,0.1f)<<" cm; "<<(pose.effectors?"effector":"joint")<<" positions mean "<<round(e.position_mean*100,0.1f)<<" / max "<<round(e.position_max*100,0.1f)<<" cm; rotations mean "<<round(e.rotation_mean,0.1f)<<" / max "<<round(e.rotation_max,0.1f)<<" degrees"<<(correct&&!pose.effectors?"; corrected to exact":"")<<"\n";
+        }
+        if(correct) {
+            correct_poses(clip,conditions);
+            size_t index=0;
+            for(const auto& pose:conditions.poses) {
+                auto e=constraint_error(clip,pose);
+                generate_recipe["constraints"][index++]["error"]={{"rootMetres",round(e.root,1e-4f)},{"positionMaxMetres",round(e.position_max,1e-4f)},{"rotationMaxDegrees",round(e.rotation_max,0.01f)}};
+            }
+        }
+        for(const auto& point:conditions.path) {
+            float e=path_error(clip,point);
+            nlohmann::json item={{"kind","path"},{"frame",point.frame},{"x",point.x},{"z",point.z},{"error",{{"hipsGroundMetres",round(e,1e-4f)}}}};
+            if(point.has_heading)item["yaw"]=point.heading;
+            generate_recipe["constraints"].push_back(item);
+            std::cerr<<"path at frame "<<point.frame<<": hips "<<round(e*100,0.1f)<<" cm from "<<point.x<<", "<<point.z<<"\n";
         }
     } else {
         if(pos.size()!=2)throw std::runtime_error("connect takes source and target GLB files");
@@ -322,6 +635,11 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     nlohmann::json recipe={{"tool","tide-motion"},{"version",MOTION_VERSION},{"command",command},{"inputs",pos},{"rig","soma30"},{"fps",30},{"frames",clip.frames()},{"requestedDuration",duration},{"seed",seed},{"steps",steps},{"tokens",tokens},{"joined",joined},{"offset",{offset.x,offset.y,offset.z}},
         {"fromClip",from_name},{"toClip",to_name},{"kimodoNativeRevision","ed8a931aedb132f768190f6931c365855caba74c"},{"motionbricksRevision","54fc563aeaaf819a753d72cc9fdc6713989cdd43"}};
     if(command=="retarget")recipe=std::move(retarget_recipe);
+    if(command=="generate") {
+        double requested=0;for(const auto& segment:segments)requested+=segment.second;
+        recipe["requestedDuration"]=requested;
+        for(const auto& item:generate_recipe.items())recipe[item.key()]=item.value();
+    }
     std::ofstream metadata(output.string()+".json");metadata<<recipe.dump(2)<<"\n";metadata.close();
     if(!metadata)throw std::runtime_error("Animation saved but could not write its recipe");
     std::cout<<"Saved "<<output.string()<<" ("<<clip.frames()<<" frames, "<<clip.duration()<<" seconds)\n";return 0;

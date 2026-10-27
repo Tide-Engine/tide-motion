@@ -29,14 +29,14 @@ macOS may require approval in Privacy & Security for a downloaded executable.
 Windows:
 
 ```powershell
-./install.ps1 -Archive ./tide-motion-0.2.0-windows-x64.zip -AddToPath
+./install.ps1 -Archive ./tide-motion-0.3.0-windows-x64.zip -AddToPath
 ```
 
 Reopen the terminal after adding PATH. `-Root <directory>` selects another
 installation. Linux/macOS (select your platform's archive):
 
 ```sh
-sh install.sh ./tide-motion-0.2.0-linux-x64.tar.gz
+sh install.sh ./tide-motion-0.3.0-linux-x64.tar.gz
 export PATH="$HOME/.local/share/tide-motion/bin:$PATH"
 ```
 
@@ -83,6 +83,81 @@ Choose `--seed` to make candidates and `--steps` to control diffusion work (defa
 50). Duration is 0.2–10 seconds. The seed reproduces the backend's random draws;
 identical output across different hardware or runtime versions is not promised.
 Save the resulting assets rather than regenerating them during game builds.
+`tide-motion help generate` (or `generate --help`) lists every option.
+
+### Prompt sequences
+
+```sh
+tide-motion generate "A person walks forward" --duration 2 \
+  --then "A person turns around" --duration 1.5 \
+  --then "A person waves with the right hand" --duration 2 --seed 4 -o sequence.glb
+```
+
+`--then "PROMPT"` adds a segment (up to 16 prompts); a `--duration` applies to the
+prompt before it (default 3 seconds each). Kimodo generates each segment from the
+end of the previous one, as upstream's multi-prompt mode does, and blends the
+`--transition` overlapping frames (default 5, 1–60, shorter than each later
+segment). The clip lasts the sum of the durations.
+
+### Poses, keyframes and paths
+
+Constraints come from SOMA-30 clips (generated ones, or your own animation after
+`retarget --to-soma`). `FILE.glb@F` picks frame `F` of a clip; negative counts from
+its end (`-1` is the last), and `first`/`last` also work.
+
+```sh
+# Continue from a clip: starts in guard.glb's last frame (the default for a start pose).
+tide-motion generate "A person swings a sword horizontally from right to left with both hands" \
+  --duration 2 --start-pose guard.glb -o swing.glb
+# Lead into a clip: ends in guard.glb's first frame (the default for an end pose).
+tide-motion generate "A person walks forward and raises a sword into a guard stance" \
+  --duration 3 --end-pose guard.glb -o walk-to-guard.glb
+# Swing and return to the guard, in place.
+tide-motion generate "A person swings a sword and returns to a guard stance" --duration 2.5 \
+  --start-pose guard.glb --end-pose guard.glb@first -o swing-return.glb
+# Hold a mid-swing pose at output frame 60, and a right-hand target at frame 40.
+tide-motion generate "A person walks forward and swings a sword" --duration 3 \
+  --keyframe 60 side-cut.glb@30 --effector right-hand 40 side-cut.glb@30 -o keyed.glb
+# Walk through ground points (metres), ending at frame -1 facing -X (yaw -90).
+tide-motion generate "A person walks" --duration 4 \
+  --path 0,0@0 --path 1.5,1.5@60 --path 0,3,-90@-1 -o path.glb
+```
+
+| Option | Holds |
+|---|---|
+| `--start-pose FILE.glb[@F]` | Output frame 0 in frame `F` (default: the clip's last) |
+| `--end-pose FILE.glb[@F]` | The last output frame in frame `F` (default: the clip's first) |
+| `--keyframe FRAME FILE.glb[@F]` | Output `FRAME` in frame `F` (default first); repeatable |
+| `--effector PARTS FRAME FILE.glb[@F]` | Only the hands/feet in `PARTS` (`left-hand,right-hand,left-foot,right-foot`) |
+| `--path X,Z[,YAW]@FRAME` | The root over ground point `X,Z`, optionally facing `YAW` degrees (0 faces +Z, 90 faces +X) |
+
+Output frames are 0-based at 30 fps; negative frames count from the end. Constraints
+work with `--then` sequences too; each pose applies at its frame of the whole clip.
+The encoding follows upstream Kimodo: a full-body pose constrains the root
+position, height and heading, every joint's root-relative position, and the
+hand and foot rotations; an effector constrains its chain's positions and base
+rotation with the body's root; a path point constrains the smoothed root.
+
+**Placement.** A start pose (or a path point at frame 0) fixes where the output
+begins, in that clip's world, so the result continues seamlessly from it. Later
+poses are then pinned to their positions in their files too (`world`), which suits
+"swing and come back to guard". Without a start pose, Kimodo begins at the origin,
+so the default (`--placement auto`) lets later poses float: their body, height and
+facing are kept and the model chooses where on the ground they happen, then the
+whole clip is moved so its last pose lands where it is in its file; the
+`walk-to-guard` example walks and ends exactly where `guard.glb` begins. Force
+either behaviour with `--placement world` or `--placement free`. A pinned pose
+that contradicts the prompt is reached less closely (an end pose at the start
+point of "walk forward" was missed by 10 cm before correction).
+
+**Accuracy.** Kimodo reaches poses closely but not exactly. Generation prints the
+model's error at each constraint, and the recipe stores it; on an RTX 4080 SUPER
+full-body poses typically landed within 1–2 cm on average (4–5 cm at the worst
+joint) and 3–8 degrees, effectors within about 5 cm and path points within
+3–10 cm. Full-body poses are then made exact: the residual is faded out over up
+to 10 frames either side, ending before any neighbouring constraint, so clips
+join without a pop. `--no-correction` keeps the model's poses unchanged. Effector
+targets and path points are not corrected.
 
 ## Connect clips
 
@@ -175,16 +250,24 @@ or a guarantee of a perfect result on every character.
 tide-motion inspect sequence.glb
 tide-motion preview sequence.glb
 tide-motion preview sequence.glb --tide /path/to/tide --capture preview.png --frames 90
+tide-motion preview sequence.glb --gif sequence.gif
 ```
 
 Preview makes a temporary Tide project and draws the animated skeleton from front
 and side. It uses a separately installed Tide; no engine is bundled. Captures use
-Tide's ordinary bounded capture mode. `TIDE_HIDDEN` previews require `--frames`
-or `--capture`. General game-character previews remain future work.
+Tide's ordinary bounded capture mode. `--gif OUT.gif` records the clip exactly
+once, from its first frame to its last, at 30 fps and 960 by 540 (headless, so it
+works with `TIDE_HIDDEN`); it needs Tide 0.5.0-nightly.45 or later for
+`tide run --record`, and says so otherwise. With `--frames N` the GIF loops the
+clip for `N` frames at 60 fps instead. `TIDE_HIDDEN` previews require `--frames`,
+`--capture` or `--gif`. General game-character previews remain future work.
 
 Existing output files are refused. Every generated GLB has a JSON recipe beside
-it recording prompt/input paths and generation settings. Paths and prompts remain
-local: this tool sends no telemetry and starts no server.
+it recording prompt/input paths and generation settings: for `generate`, each
+prompt with its duration and frames, the transition, placement, every constraint
+with its source file and frame, the model's error there (`modelError`) and the
+error after correction (`error`). Paths and prompts remain local: this tool sends
+no telemetry and starts no server.
 
 ## Batch actions
 
@@ -226,10 +309,39 @@ For the reverse direction, use `"toSoma": true` and omit `target`. `clip` select
 a source clip. Mapping schemas and required fields are checked before any batch
 action runs. As with other actions, all file paths are relative to the manifest.
 
+Generate actions take `prompt` and `duration`, or `prompts` for a sequence, plus
+every constraint option:
+
+```json
+{
+  "action": "generate",
+  "prompts": [
+    { "prompt": "A person swings a sword horizontally from right to left with both hands", "duration": 1.5 },
+    { "prompt": "A person steps back into a guard stance", "duration": 1.5 }
+  ],
+  "transition": 8,
+  "startPose": "guard.glb",
+  "endPose": { "file": "guard.glb", "frame": 0 },
+  "keyframes": [ { "frame": 45, "file": "side-cut.glb", "sourceFrame": 30 } ],
+  "effectors": [ { "effectors": ["right-hand"], "frame": 30, "file": "side-cut.glb", "sourceFrame": 30 } ],
+  "path": [ { "frame": -1, "x": 0, "z": 0.5, "yaw": 0 } ],
+  "placement": "auto",
+  "correct": true,
+  "seed": 5,
+  "output": "sequence-from-guard.glb"
+}
+```
+
+A pose is a file path (default frame as on the command line) or `{ "file", "frame" }`;
+`effectors` is a list or a comma-separated string. Pose files may be outputs of
+earlier actions, so only their paths are checked before the batch starts; their
+frames are checked when the action runs.
+
 ## Build
 
 Requires CMake 3.25+, Git and a C++23 compiler. Dependencies are fetched at pinned
-revisions. Model conversion is not part of the build.
+revisions; `patches/kimodo-conditioning.patch` is applied to Kimodo when it is
+fetched, exposing its conditioned sampler. Model conversion is not part of the build.
 
 ```powershell
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -T ClangCL
@@ -251,7 +363,9 @@ validation, remaining gaps and platform coverage.
 `tests/install.ps1 -Archive <release.zip>` and
 `sh tests/install.sh <release.tar.gz>` check installers in isolated directories.
 `tests/inference.ps1 -Models <cache> [-Tide <executable>]`
-runs a real four-action generation/transition batch and verifies model reuse.
+runs a real five-action generation/transition/constrained-sequence batch, checks
+the constraint errors in the recipe and model reuse, and with `-Tide` records a
+preview PNG and GIF.
 The latter needs the downloaded models and can take several minutes on CPU.
 
 ## Releases

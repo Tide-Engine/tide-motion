@@ -111,7 +111,7 @@ part of the package. The GitHub repository is initially private.
 Linux/macOS and optional Vulkan builds have not been run. General retargeting,
 rigging, skinned character export, foot cleanup, collision constraints,
 interactive editing and automatically chosen target placement remain absent.
-The native dependency's constrained/multi-prompt APIs are not exposed yet.
+The native dependency's constrained/multi-prompt APIs were not exposed then (see 0.3.0).
 
 Packaging correction, 0.1.1: the installer now copies examples, notes and the
 root license as well as the runtime and notices; the archive already held them.
@@ -292,3 +292,102 @@ exercised with GGML_VK_VISIBLE_DEVICES=9 (GGML throws), VK_DRIVER_FILES naming a
 missing file (no driver), and GGML_VK_FORCE_MAX_BUFFER_SIZE=1024 (the GPU fails
 during generation, then the CPU completes it). A machine without any Vulkan
 loader was not available to test.
+
+## Sequences, pose constraints and GIF previews (0.3.0)
+
+Owner request: make the CLI a complete tool: multi-prompt sequences, pose
+constraints (start/end poses, keyframes, effectors, paths), preview GIFs and
+per-command help.
+
+Kimodo: patches/kimodo-conditioning.patch is applied to the pinned kimodo.cpp
+revision by FetchContent PATCH_COMMAND (cmake/apply-patch.cmake, idempotent via
+git apply --reverse --check). It adds public model::generate_text_conditioned
+(segments, transition, steps, seed, CFG, motion_condition{observed, mask,
+first_heading}) and motion_dim(). observed/mask are raw [frames, 369] features
+over the whole output. The pinned sequence sampler is generalised: segment 0 uses
+the existing conditioned DDIM (or the unchanged unconditioned one when nothing is
+masked); later segments add their cropped rows after the transition rows, moved
+by the transition origin as upstream translate_2d. generate_text_sequence now
+delegates with an empty condition (unchanged results). One unconditioned prompt
+still uses generate_text.
+
+Encoding is native C++ (src/constraints.cpp), adapted from NVIDIA Kimodo
+(Apache-2.0, nv-tlabs/kimodo at e1c219c99b4b94ba48be1fb6a1cbc64ecee4c954, only
+read; licenses/NVIDIA-KIMODO-SOURCE.txt): kimodo_motionrep.py layout (smooth root
+xyz, heading cos/sin from the hip line, root-relative joint positions, global
+cont6d = first two matrix columns, velocities, foot contacts), constraints.py and
+the _multiprompt transition sets. A full-body pose masks root xyz, heading, all
+30 positions and the four end-effector base rotations (upstream's transition
+adds that end-effector set to its full-body set); an effector masks its chain
+positions (Hand+HandMiddleEnd, Foot+ToeBase) and base rotation with the root;
+a path point masks root x/z and optionally heading. A keyframe's smooth root is
+its hips (upstream substitutes the real root). A frame-0 constraint sets the
+origin (subtracted before sampling, restored after) and first_heading; otherwise
+heading 0 (+Z), as upstream. CFG stays 2/2 (upstream separated default).
+
+Placement is a deliberate extension. Upstream refuses positions without the root
+ground position. Kimodo starts at the origin, so an end pose from a clip that
+also starts at the origin asked "walk forward" to return there: anchored, the
+model walked 10 cm (pose error 3.3 cm mean). Leaving root x/z unmasked ("free")
+kept the root-relative pose as accurate (1.6 cm / 7.0 deg vs 1.7 cm / 7.3 deg)
+and the character travelled 84 cm. auto = world when frame 0 or a path fixes the
+world, otherwise free and then the clip is translated so its last pose lands at
+its file position. A pinned pose contradicting the prompt is missed more (10 cm
+in the opt-in test before it was changed to free).
+
+Correction (default, --no-correction / "correct": false): for each full-body
+pose, per-joint local rotation deltas and the root delta (height only when free)
+fade with a raised cosine over up to 10 frames either side, ending before any
+neighbouring constraint frame. This replaces upstream's optional MotionCorrection
+post-process (Eigen trajectory optimiser + IK + foot-skate cleanup), which was
+not ported. Effector targets and path points are reported but not corrected (no
+IK). The recipe stores modelError (before) and error (after) per constraint.
+
+Validation (RTX 4080 SUPER, Vulkan build, 50 steps). An independent Node FK
+checker reading the GLBs agreed with the printed numbers to 0.1 cm / 0.1 deg.
+Model error, mean/max over joints, before correction:
+- swing from guard.glb's last frame: root 0.8 cm, 1.3/3.9 cm, 3.5/8.6 deg; the
+  same prompt unconstrained starts 22.7/59.1 cm, 46.2/97.5 deg away;
+- swing and return (start + end, world): 1.4/3.9 cm, 5.3/19.2 deg and
+  1.5/5.0 cm, 6.9/19.4 deg; two-prompt sequence from guard: 1.3/3.7 cm, 5.1/14.2;
+- free end pose 1.6/4.2 cm, 7.0/18.7 deg; free keyframe at frame 60 1.3/3.0 cm,
+  6.7/13.5 deg; right-hand effector 5.4 cm, 7.5 deg;
+- path points: hips 5.9, 10.0 and 3.2 cm from the waypoints (the smoothed root,
+  not the hips, is constrained); the final yaw -90 was met to 0.1 deg.
+Rotation maxima are wrist/twist rotations positions do not determine. After
+correction every full-body pose matched exactly (0.0 cm / 0.0 deg) and the
+frame-to-frame motion near the seams changed by at most 0.2 cm. A nine-action
+batch (sequences, all constraint kinds) took 67 s with one Kimodo load.
+tests/inference.ps1 adds a two-prompt continuation from idle's last frame to
+walk's first (free) and checks modelError < 6 cm mean and exact correction:
+start 1.4/4.2 cm, end 1.4/5.0 cm; it passes with one load of each backend.
+
+Model-free tests: encode a varied pose, decode with kimodo.cpp's own
+decode_motion (identity statistics) and the native mirror, compare rotations and
+root; encode(decode(x)) = x; heading convention; mask counts per kind; origin and
+first heading; free/world placement; rejected out-of-range, duplicate-frame and
+unknown-effector constraints; correction exactness and window. CLI contracts
+cover per-command help, constraint/transition/placement refusals before any
+model is checked, constrained batch manifests in a quoted path and the GIF
+version probe. Vulkan and CPU Windows builds and Ubuntu GCC 13 (WSL, fresh
+patched FetchContent) build without warnings and pass all five CTests.
+
+Preview: the scene now samples before advancing the clock, so the first frame is
+the clip's frame 0. --gif runs tide run --record with 2(F-1)+1 frames and
+Playback.Clamp. Measured: GIF frame i equals the capture after 2i+1 frames
+(PSNR 66.7 dB against 23 dB for neighbours), i.e. clip frame i; a 90-frame clip
+gives a 90-frame GIF. The probe runs tide help run --record and asks for
+0.5.0-nightly.45 or later when it fails. run_process gained optional output
+redirection for it.
+
+CLI: generate --then/--transition, --start-pose/--end-pose/--keyframe/--effector/
+--path, --placement, --no-correction; batch prompts/transition/startPose/endPose/
+keyframes/effectors/path/placement/correct; preview --gif; help COMMAND and
+COMMAND --help. Version 0.3.0 (CMake project version, --version and recipes).
+
+Left out: raw coordinate hand/foot targets (upstream effector sets need a whole
+pose for rotation and root context, so targets come from SOMA clips); upstream
+dense root paths with its smoothing (sparse waypoints only; many --path points
+approximate one); IK for effectors and foot-skate cleanup; tunable CFG; the
+77-joint output; constraints on non-SOMA rigs without retarget --to-soma. Free
+placement is validated empirically, not by upstream.

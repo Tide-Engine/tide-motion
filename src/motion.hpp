@@ -57,6 +57,40 @@ struct RetargetMapping {
 struct RetargetResult { Clip clip; float scale=1, heading_degrees=0; bool discarded_translations=false; };
 RetargetMapping load_mapping(const fs::path&);
 RetargetResult retarget(const Clip& source, const Clip& target, const RetargetMapping&, bool to_soma=false);
+// Kimodo SOMA-30 motion representation rows (upstream kimodo_motionrep.py): smooth root
+// xyz, heading cos/sin, root-relative joint positions, global cont6d rotations,
+// velocities and foot contacts. Constraints fill the first three blocks.
+inline constexpr size_t kimodo_features=369;
+std::vector<float> encode_kimodo(const Clip& soma_rig, std::span<const Transform> pose);
+Clip decode_kimodo(std::span<const float> raw);
+float kimodo_heading(const Clip& soma_rig, std::span<const Transform> pose);
+unsigned parse_effectors(const std::string&);
+std::string effector_list(unsigned);
+// A SOMA pose required at an output frame: the whole body, or with effector bits
+// (1 left foot, 2 right foot, 4 left hand, 8 right hand) only those chains.
+struct PoseConstraint {
+    std::string kind; size_t frame=0; std::string file; long source_frame=0;
+    std::vector<Transform> pose; unsigned effectors=0; bool anchored=true;
+};
+struct PathConstraint { size_t frame=0; float x=0, z=0; bool has_heading=false; float heading=0; };
+struct MotionConditions {
+    std::vector<PoseConstraint> poses; std::vector<PathConstraint> path;
+    bool empty() const { return poses.empty()&&path.empty(); }
+};
+// world pins every pose to its ground position in its file; free leaves later poses
+// to float (root height, facing and body kept); automatic is world when output frame 0
+// or a path fixes the world, otherwise free. Returns whether the output should then be
+// moved so its last pose lands where it is in its file.
+enum class Placement { automatic, world, free };
+bool place_constraints(MotionConditions&, Placement);
+void shift_to_last_pose(Clip& result, const MotionConditions&);
+// Makes full-body poses exact, fading the residual out over nearby frames.
+void correct_poses(Clip& result, const MotionConditions&);
+struct KimodoCondition { std::vector<float> observed, mask; float first_heading=0; Vec3 origin; };
+KimodoCondition build_condition(const MotionConditions&, size_t frames);
+struct ConstraintError { float root=0, position_mean=0, position_max=0, rotation_mean=0, rotation_max=0; };
+ConstraintError constraint_error(const Clip& result, const PoseConstraint&);
+float path_error(const Clip& result, const PathConstraint&);
 struct BricksInputs {
     std::array<float,40> root{};
     std::array<float,32> local_root{};
@@ -78,11 +112,12 @@ public:
     Clip generate(const Clip&, const Clip&, int tokens=0);
 };
 Clip join(const Clip&, const Clip& bridge, const Clip&);
-int run_process(const std::vector<std::string>& args);
+// Runs and waits; a nonempty output path receives the child's stdout and stderr.
+int run_process(const std::vector<std::string>& args, const fs::path& output={});
 fs::path model_directory();
 void setup_models(const fs::path&, const std::string& selection);
 void check_models(const fs::path&, const std::string& selection);
 std::string sha256_file(const fs::path&);
 void preview(const Clip&, const fs::path& source, const std::string& tide,
-    const fs::path& capture, int frames);
+    const fs::path& capture, int frames, const fs::path& gif={});
 }
