@@ -16,7 +16,7 @@
 namespace {
 using namespace motion;
 void help() {
-    std::cout<<R"(Tide Motion — native offline animation authoring
+    std::cout<<R"(Tide Motion - native offline animation authoring
 
   tide-motion models install [all|kimodo|bricks] --accept-licenses [--models DIR]
   tide-motion models check [all|kimodo|bricks] [--models DIR]

@@ -172,3 +172,11 @@ which cannot configure the chosen VS 2022 generator. Use windows-2022 for that
 toolchain. Homebrew LLVM 18 rejected fixed-enum declarations in Apple's SDK
 headers reached by GGML/Accelerate; the Mac job uses Xcode's own clang/clang++.
 Linux x64's complete build/tests/package/installer job passed on the first run.
+
+Windows help text correction (0.1.3): the owner reported mojibake in the first
+help line because its UTF-8 em dash was printed through a legacy console code
+page. The banner now uses an ASCII hyphen; help text no longer depends on console
+encoding for punctuation. This does not change console settings or argument/path
+encoding. Windows Release rebuild, the existing cli-help check and an ASCII-only
+output check pass. The rebuilt executable replaces the owner's installed copy;
+model files and PATH are preserved.
