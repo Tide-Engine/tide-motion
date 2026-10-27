@@ -166,3 +166,9 @@ is delegated to the workflow, not claimed as locally exercised. This packaging
 change does not repeat the previously recorded 10 GB model/inference tests.
 The Tide engine docs add a standalone tools/motion page and an animation-page
 link with installation, batches, SOMA limits, asset import and license scope.
+
+Initial CI correction: the windows-2025 label resolved to a VS 2026-only image,
+which cannot configure the chosen VS 2022 generator. Use windows-2022 for that
+toolchain. Homebrew LLVM 18 rejected fixed-enum declarations in Apple's SDK
+headers reached by GGML/Accelerate; the Mac job uses Xcode's own clang/clang++.
+Linux x64's complete build/tests/package/installer job passed on the first run.

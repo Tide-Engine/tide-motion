@@ -27,7 +27,7 @@ jobs:
       matrix:
         include:
           - platform: windows-x64
-            runner: windows-2025
+            runner: windows-2022
           - platform: linux-x64
             runner: ubuntu-24.04
           - platform: linux-arm64
@@ -57,8 +57,7 @@ jobs:
       - name: Configure macOS
         if: runner.os == 'macOS'
         run: |
-          llvm=$(brew --prefix llvm@18)
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER="$llvm/bin/clang" -DCMAKE_CXX_COMPILER="$llvm/bin/clang++" -DMOTION_VULKAN=OFF
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER="$(xcrun --find clang)" -DCMAKE_CXX_COMPILER="$(xcrun --find clang++)" -DMOTION_VULKAN=OFF
       - name: Build
         run: cmake --build build --config Release --target tide-motion motion-tests --parallel 3
       - name: Test contracts
