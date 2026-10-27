@@ -1,0 +1,6 @@
+/build/
+/.research/
+/.models/
+/output/
+/dist/
+*.part

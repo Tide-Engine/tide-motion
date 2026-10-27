@@ -1,0 +1,114 @@
+# Native animation authoring
+
+## Scope agreed with the owner
+
+Separate repository, CLI and installer. Native executables with minimal user
+dependencies; no required Python environment. Tide's CLI and engine remain
+independent. Kimodo creates motions; MotionBricks creates clip-to-clip transitions.
+Ordinary exported animation assets are the game interface. Tide can render previews.
+
+## Native contracts
+
+The core is C++23. Kimodo is compiled as a static library from localai-org/kimodo.cpp
+at ed8a931aedb132f768190f6931c365855caba74c, including its GGML submodule at
+8c63e70982c95ceb862e3a1073a2c1beef75d60a. This port supports the older SOMA RP
+v1.1 checkpoint. It does not claim support for the newer v1.2 checkpoint.
+Native output is the compact 30-joint rig, not the 77-joint presentation skeleton.
+
+MotionBricks uses Microsoft's native ONNX Runtime CPU distribution 1.31.1. Pose
+encoding, world alignment, 6D rotation decoding, boundary trimming and endpoint
+correction are adapted from NVlabs/motionbricks at
+54fc563aeaaf819a753d72cc9fdc6713989cdd43, model/soma/kernels.py and
+utils/pose_utils.py. The original copyright and Apache license are retained.
+This avoids depending on the unrelated G1-only native MotionBricks port.
+
+Context: last four source samples; target: first four target samples. Both are
+30 Hz parent-local poses on the canonical SOMA rig. FK gives positions and global
+rotations. Alignment removes the last context root's ground position and turns
+its hip-derived heading to +X. Inputs have the official [1,8,5], [1,8,4],
+[1,8,267], three [1,8] masks and [1,11] duration flags. Context/target derivatives
+at slots 3 and 7 are masked out. Default token counts are 8..14.
+
+Output is [1,64,366] and one token count. Three frames are trimmed at each end.
+Global rotations are reconstructed by orthonormalizing the first two matrix
+columns. Child translations come from the rig; global-to-local rotations use
+the canonical parent indices. Root alignment is restored. Endpoint corrections
+follow the upstream local transform and world root correction rules, then both
+endpoint poses are copied exactly to avoid numerical residue. No generated
+physics or network simulation state is introduced.
+
+The CLI currently accepts SOMA self-contained GLB only. A canonical name lookup
+reorders nodes; duplicate/missing names, changed parents/proportions, nonunit
+scale, matrix nodes, external buffers, nonfinite values and unsupported channels
+are rejected. LINEAR and STEP sampling is at 30 Hz. File size is capped at
+512 MiB, skeleton nodes at 1,024, key counts at one million per sampler and output
+at 18,000 frames. GLB export writes LE F32, complete local translations/quaternions
+and shortest-sign quaternion continuity. Model inference itself is offline visual
+content work and does not promise bitwise cross-platform determinism.
+
+Model downloads use HTTPS-only curl argv without shell evaluation, pinned URLs,
+sizes and SHA-256. Partial files remain resumable; final files appear only after
+verification. The explicit models install command accepts model licenses. Each
+generation verifies its selected models. Prompts and recipes remain local.
+Windows SHA-256 uses BCrypt (an OS dependency) so verification can use hardware
+acceleration; other hosts use the pinned PicoSHA2 fallback. Three resumable curl
+invocations also cover dropped TLS connections that curl's own HTTP retry does
+not retry. A real 8 GB transfer was interrupted twice and completed from the
+existing partial bytes, then matched its pinned digest.
+
+The owner additionally requested batch actions to avoid loading models N times.
+`batch jobs.json` validates a bounded 1 MiB / 1,000-action manifest and all output
+paths before inference, then executes in declared order with one owned RunContext.
+The Kimodo model and ONNX session are each loaded lazily and reused across the
+entire run, including interleaved backend actions. Checksum verification occurs
+only at the first backend load. Text layers are kept resident by setting the
+upstream layer chunk to 32 before loading, unless the operator explicitly set
+KIMODO_TEXT_LAYER_CHUNK. No cross-process daemon or persistent server exists.
+Failure stops the sequence and keeps completed output assets. Manifest paths are
+relative to the manifest, allowing later actions to refer to earlier outputs.
+
+## Validation and remaining work
+
+Windows x64 Release succeeds with Visual Studio ClangCL 18.1.8. All three CTests
+pass: math/GLB/model-contract checks, CLI help, and CLI asset/argument/batch
+preflight/hidden-preview checks. They cover non-grid frame-time roundtrips,
+placement-invariant encoding, derivative/duration masks, boundary trimming,
+exact endpoints, seam frame counts, nonfinite and changed-proportion/animated
+bone-length rejection, paths with spaces/quotes, malformed GLBs, fractional
+integer arguments, refusing existing output, complete manifest preflight before
+loading, and license gating. The final Windows BCrypt path verifies every real
+model against its pinned digest.
+
+Real native inference: an ordered batch generated two 60-frame SOMA clips
+(relaxed idle and walk), then made two 26-frame MotionBricks transitions with
+8 tokens and exported joined 144-frame sequences. The logs contain one Kimodo
+load and one MotionBricks load for the entire four-action process. Kimodo used
+50 diffusion steps, seeds 1/2 and 8 CPU threads. Observed resident memory was
+about 9.4 GB while generating. Another two-action MotionBricks batch consumed
+the first action's output in its second action with one backend load. The
+reproducible opt-in test is tests/inference.ps1; models are installed separately.
+These are functional integration tests, not upstream numerical-parity tests or
+a claim that every generated motion is artist-ready.
+
+The generated GLBs load through Tide built from the engine checkout at
+C:/Users/blenm/.t3/worktrees/PurrEngine/t3-dea14cb9. The native CLI and MinGW
+platform were rebuilt and staged privately. Bounded 960x540 front/side captures
+of the walk and joined transition pass and were visually inspected. Tide adds
+a synthetic scene root, so preview edges bind authored bone names, not GLB node
+indices. Preview follows the root's horizontal position; root travel and contact
+quality still need inspection in the destination game. No engine file changed.
+
+The runtime-only Windows archive is about 8 MB, including ONNX Runtime and
+app-local Microsoft runtime DLLs, excluding models and development libraries.
+tests/install.ps1 passes initial install, reinstall preserving model data,
+spaces/apostrophes in the installation path, archive traversal/checksum refusals
+without replacing the prior executable, and execution with only Windows system
+directories on PATH. The test uses an isolated directory and changes no user
+installation or user PATH. All selected upstream code/model/text licenses and
+notices ship in licenses/; no sample motion data or research-only checkpoint is
+part of the package. The GitHub repository is initially private.
+
+Linux/macOS and optional Vulkan builds have not been run. General retargeting,
+rigging, skinned character export, foot cleanup, collision constraints,
+interactive editing and automatically chosen target placement remain absent.
+The native dependency's constrained/multi-prompt APIs are not exposed yet.
