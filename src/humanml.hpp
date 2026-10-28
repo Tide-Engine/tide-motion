@@ -1,7 +1,7 @@
 #pragma once
 #include "motion.hpp"
 
-// Source-only MoMask representation work. No model loader or generation backend.
+// HumanML representation arithmetic, independent of model loading.
 namespace motion::humanml {
 inline constexpr size_t features=263, joints=22;
 using Row=std::array<float,features>;
@@ -16,6 +16,8 @@ std::vector<Positions> rotation_fk(std::span<const Row>, const Positions& offset
 // RIC positions with 6D edge frames as roll hints, fixed canonical SOMA lengths.
 // Missing facial/finger joints retain rest rotations. This is a lossy conversion.
 Clip to_soma(std::span<const Row>);
+struct Encoded { std::vector<Row> rows; Vec3 origin; float heading=0; };
+Encoded from_soma(const Clip&);
 // A range is [begin,end) on the original canonical 30 Hz timeline. Endpoints
 // within the range must already match; no blending or hidden seam correction.
 Clip splice(const Clip& source, const Clip& generated, size_t begin, size_t end,

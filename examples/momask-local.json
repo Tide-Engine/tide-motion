@@ -1,0 +1,7 @@
+{
+  "schema": 1,
+  "jobs": [
+    {"prompt": "A person walks forward.", "duration": 3, "seed": 7, "output": "momask-example-walk.glb"},
+    {"prompt": "A person stands still in a relaxed pose.", "duration": 3, "seed": 2, "output": "momask-example-idle.glb"}
+  ]
+}

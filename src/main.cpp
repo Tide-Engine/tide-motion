@@ -1,8 +1,10 @@
 #include "motion.hpp"
 #include "author.hpp"
 #include "ardy.hpp"
-
 #include "upgrade.hpp"
+#ifdef MOTION_MOMASK_EXPERIMENTAL
+#include "momask.hpp"
+#endif
 #include <kimodo/kimodo.hpp>
 #include <nlohmann/json.hpp>
 #include <algorithm>
@@ -756,6 +758,9 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
     return 0;
 }
 int main_impl(const std::vector<std::string>& args,RunContext* context) {
+#ifdef MOTION_MOMASK_EXPERIMENTAL
+    if(args.size()>1&&args[1]=="momask")return momask_main(args);
+#endif
     RunContext owned;if(!context)context=&owned;
     if(args.size()<2||args[1]=="--help"||args[1]=="-h") { help();return 0; }
     auto unknown=[](const std::string& name){return std::runtime_error("Unknown command: "+name+"; tide-motion --help lists the commands");};

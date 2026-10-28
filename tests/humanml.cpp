@@ -57,6 +57,15 @@ int main(int argc,char** argv) {
         auto canonical=h::to_soma(rows);require_soma(canonical);
         expect(canonical.fps==30&&canonical.frames()==7,"20 to 30 Hz duration/sample count");
         expect(near(canonical.frame(6)[0].p,{0.4f,1,0}),"root resampling end");
+        auto encoded=h::from_soma(canonical);auto recovered=h::positions(encoded.rows);
+        expect(encoded.rows.size()%4==0&&encoded.rows.size()<=196,"native encoder token alignment");
+        for(size_t f=0;f<encoded.rows.size();++f) {
+            auto pose=sample(canonical,static_cast<float>(f)/20);auto expected_world=world_pose(canonical,pose);
+            for(size_t j=0;j<22;++j) {
+                Vec3 restored=rotate(yaw(encoded.heading),recovered[f][j])+encoded.origin;
+                expect(near(restored,expected_world[mapped[j]].p,2e-5f),"SOMA -> HumanML RIC -> world roundtrip");
+            }
+        }
         auto w=world_pose(canonical,canonical.frame(3));auto expected=world_pose(source,source.frame(2));
         expect(near(normalized(w[24].p-w[23].p),normalized(expected[24].p-expected[23].p)),"articulated knee direction");
         for(size_t f=0;f<canonical.frames();++f)for(size_t j=1;j<30;++j)
@@ -70,6 +79,7 @@ int main(int argc,char** argv) {
         edited.frame(2)[0].p.x+=0.01f;refuses([&]{h::splice(canonical,edited,2,5);});
         refuses([&]{h::splice(canonical,canonical,5,2);});
         expect(h::mask_count(49,0,18)==49&&h::mask_count(49,17,18)==1,"schedule endpoints");
+        expect(h::mask_count(3,2,4)==1,"upstream float32 schedule half-integer boundary");
         for(size_t n=1;n<=49;++n)for(size_t t=1;t<18;++t)
             expect(h::mask_count(n,t,18)<=h::mask_count(n,t-1,18),"schedule monotone");
         refuses([&]{h::mask_count(0,0,18);});

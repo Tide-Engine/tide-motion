@@ -1,0 +1,209 @@
+# Native MoMask local experiment
+
+The owner explicitly authorized local development/use with unresolved pretrained
+checkpoint license scope after the commercial-rights investigation. The source
+code is MIT licensed upstream; the exact pretrained weights/statistics still have
+no verified separate author-issued grant covering commercial use. This experiment
+does not assert commercial clearance. Weights stay private, outside Git/releases.
+The earlier primary-source findings remain in `notes/momask.md`.
+
+## Use on this Windows machine
+
+Installed separately from existing Tide Motion, without changing its executable,
+models, PATH, GPU settings or defaults:
+
+```powershell
+$momask = "$env:LOCALAPPDATA\TideMotion-MoMask-Experimental\bin\tide-momask.exe"
+& $momask generate "A person walks forward." --duration 3 --seed 7 -o walk.glb
+& $momask generate "A person stands still in a relaxed pose." --duration 3 --seed 2 -o idle.glb
+& $momask inpaint "A person waves with the right hand." --source idle.glb --begin 18 --end 66 --seed 3 -o wave.glb
+```
+
+`--begin` and `--end` select `[begin,end)` on the original **30 Hz** source clip.
+The range must span at least 12 frames. Both endpoint poses are retained, with
+the learned interior corrected to them. Every source pose outside the range is
+copied, with no tail truncation. GLB serialization may normalize/negate quaternion
+keys for shortest-sign continuity; the represented outside poses remain unchanged
+(measured worst component roundoff 1.20e-7 after matching quaternion hemispheres).
+Source GLBs must already have Tide's canonical SOMA-30 rig. Use existing explicit
+mapped-humanoid retargeting before/after this tool for other humanoids.
+
+Outputs are ordinary skeleton-animation GLBs plus `.glb.json` recipes. Existing
+output/recipe files are refused. Prompts must be ASCII, without HTML entities or
+special-token strings; non-ASCII is refused rather than tokenized incorrectly.
+No automatic rig identification, fingers/facial prediction, skinning or
+non-humanoid retargeting is introduced. English prompts are examples, not hard
+semantic constraints. Feet can slide/penetrate the floor; contact IK remains a
+separate existing optional Tide Motion operation, not part of this model.
+
+Controls: duration .2..9.8 seconds (generation only), seed 0..4294967295,
+steps 2..1000 (18 default), guidance 0..10 (4), residual-guidance 0..10
+(generation 5 / editing 2), temperature (0,10] (1), topkr [0,1) (.9).
+Motion lengths floor to four native **20 Hz** samples/token. Conversion samples
+the same interval at 30 Hz without a fabricated tail: requested 3 s yields 60
+native samples and 89 exported samples; requested 2 s yields 40 and 59. First
+useful prompt examples are 2–4 s. No Kimodo path/effector/keyframe controls are
+accepted. Native CPU ORT uses four threads. There is no Python, hosted service,
+GPU runtime, daemon or procedural/blended motion generator in this inference path.
+
+`--models BUNDLE` overrides the installed `models` directory. `install PRIVATE_BUNDLE
+--models NEW_DIRECTORY` is a native **local import**, not an Internet model download.
+It verifies the complete pinned bundle and every file before copying to a staging
+directory and renaming. Existing destinations/staging paths are refused; failed
+staging remains available for inspection. Model rights are not changed by import.
+
+## Ordered batches and recipes
+
+`tide-momask batch JOBS.json` accepts schema 1 and 1..64 jobs; see
+`examples/momask-local.json`. Every job has `prompt`, `output`, optional `duration`,
+`seed`, `steps`, `guidance`, `residualGuidance`, `temperature`, `topkr`. Editing jobs
+add `source`, `begin`, `end`. Paths are manifest-relative. All arguments, existing
+sources and output/recipe collisions are checked before loading models. Sources
+must already exist at preflight; a job cannot consume a file generated earlier
+in the same batch. One model context verifies files once and reuses all five ORT
+sessions for every job. A failed job stops and keeps completed outputs.
+
+Recipes record the actual bundle hash, rights status, prompt, seed, sampler/RNG
+version, effective controls, CLIP token IDs, base/final RVQ token IDs, source
+placement/edit range, uncorrected endpoint root errors, postprocessing, frame
+counts and native inference/conversion time. Token IDs are generated data; no
+training/evaluation motion is imported. Prompts and recipes stay local.
+
+## Architecture and conversion
+
+Same exact upstream source/configuration revisions as the earlier study. Developer
+export loads only hash-pinned weights with Torch `weights_only=True`. Pinned
+private inputs are in `notes/momask-private-inputs.json`; exact native runtime
+assets are in `notes/momask-private-bundle.json`. Native code also pins the hash
+of the whole bundle manifest before checking each file. Runtime assets total
+about 473 MB (451 MiB), excluding the original development checkpoints. No weights, ONNX
+graphs, normalization data, tokenizer vocabulary or binary fixtures enter Git.
+
+Native ASCII CLIP byte-BPE follows the official token splitting/merges, lowercases
+ASCII, truncates to 77 tokens including start/end and pads. An exported official
+CLIP ViT-B/32 text tower returns the unnormalized 512-vector. Masked and residual
+transformers run conditional/unconditional step graphs through existing ORT
+1.31.1. All loops, confidence remasking, CFG, top-k, categorical/Gumbel sampling,
+history embeddings and codebook-token orchestration run in C++. The versioned
+SplitMix64 uniform stream intentionally differs from PyTorch's seeded RNG;
+equal seed numbers across backends do not promise equal motion. Real decoder
+outputs are denormalized and converted through native HumanML math to canonical
+SOMA before GLB export/retargeting.
+
+Inpainting samples the canonical source at 20 Hz, pads its end to whole tokens
+and encodes all 263 features natively. The explicit 22-joint correspondence,
+metre units, hip-derived heading, initial world placement and incoming-edge
+rotation conventions are tested independently. This avoids dataset-derived
+example skeletons, SMPL/SMPL-X assets and any body mesh. The current encoder uses
+canonical source proportions and per-frame heading, without upstream's dataset
+skeleton normalization/Gaussian heading preprocessing. It is not claimed as
+bit-identical upstream feature extraction on arbitrary rigs. Source windows are
+bounded at 196 native samples (at most 293 canonical source frames).
+
+Edited base tokens cover the requested range conservatively; residual tokens
+are regenerated across the window, as upstream. Decoded cumulative root drift
+at the two edit endpoints is distributed linearly across the edited interval;
+existing native pose correction then makes the two body endpoints exact over
+10-frame neighbourhoods. The original outside poses are restored last. This is
+documented postprocessing of real learned inference, not replacement generation.
+One walking edit initially had a 1.81 m endpoint root error and 8.49 m/s corrected
+peak speed with short-window root correction alone; distributing drift reduced
+the peak to 2.04 m/s. Neither correction guarantees velocity/acceleration or
+contact continuity. Recipes retain the pre-correction errors.
+
+## Executed validation
+
+Windows x64 ClangCL 18.1.8 Release. Eight CTests pass, including native HumanML
+normalization/root/FK/SOMA-encode RIC roundtrips and CLI/batch preflight/refusals.
+The new CLI test's initial CMake semicolon-list fixture was corrected; its rerun
+passes. Worktree-local TEMP/TMP avoid concurrent test collisions. Project code
+builds with warnings as errors. Default release builds keep the experiment off.
+
+Real native ORT 1.31.1 versus PyTorch: all 13 component cases pass (masked/
+residual/RVQ at 4/7/49 tokens plus CLIP at 77 tokens). RVQ indices match exactly;
+maximum errors are 8.59e-6 masked logits, 1.63e-5 residual logits, 8.82e-4 RVQ
+decoded normalized features and 1.44e-6 CLIP. Bounds are 3e-5 + 3e-4*abs(reference)
+for the native checker. Larger decoder absolute error occurs on large-magnitude
+random code combinations; no bitwise arithmetic parity is asserted.
+
+`tests/momask-reference.py` independently reproduces full masked/residual token
+selection with Python/NumPy/ORT and checks tokenization against the official CLIP
+tokenizer. Every base/final token matches for real walk, idle and contraction/
+punctuation prompts. Independent exported-track checks on idle->wave and
+walk->arms edits verify all outside poses and both endpoints within 1.20e-7 per
+component after equivalent quaternion sign matching. Native GLB import/inspect
+accepts all outputs. Two-job batches load each model session only once. An
+installed native generation succeeds with PATH restricted to Windows system
+directories; no Python dependency is present. The existing Tide Motion install
+is not replaced.
+
+CPU observation: two 2-second jobs with shared sessions complete in 1.34 seconds
+including process startup, bundle hashing and loading; inference/conversion
+0.125/0.133 seconds. Coarsely sampled peak working set 552,628,224 bytes (50 ms
+sampling). This is a local observation under concurrent work, not an isolated
+benchmark or GPU speed comparison. No GPU work ran, so no GPU mutex was needed.
+
+Quality comparison uses the same two own-authored prompts, requested duration 2 s
+and seeds 2 (walk)/1 (idle), against cached native Kimodo v1.1 50-step outputs.
+MoMask uses 18 mask steps and exports 59 rather than 60 samples. Independent FK
+proxies, not upstream evaluation metrics: walking root travel 2.458 m (MoMask)
+and 2.042 m (Kimodo); idle travel .015/.013 m. Mean horizontal foot/toe movement
+for samples below 3 cm, cm/frame: walking 2.085/.312, idle .282/.027. Minimum
+foot/toe height: walking -.022/.011 m, idle -.027/.017 m. The different skeleton
+reconstruction and negative foot heights affect which samples enter the proxy;
+these four clips do not establish general backend ranking. Contacts currently
+look worse in these MoMask samples; no superiority or artist-ready quality claim.
+Kimodo assets are previously self-generated, not evaluation data. No Kimodo
+inference was repeated for this comparison and no new Kimodo speed measurement
+is asserted.
+
+Hidden bounded mannequin captures: 61 frames for generated walk, 85 frames for
+edited idle wave, 960x540. Used native Tide rebuilt from D:/Projects/PurrEngine
+at `28b61e4db1cb2549fcc9f6bc6d9c6034022f3d9c`, with its matching MinGW platform
+staged privately. The broad engine installer stopped at an unrelated unbuilt
+editor after staging CLI/engine files; platform-only staging completed. No engine
+source changed. Visually inspected coherent walking limbs and a raised right
+hand without inverted joints or binding errors; sparse captures do not establish
+temporal/contact quality. TIDE_HIDDEN=1 was used for validation and previews.
+
+## Build/reproduce locally
+
+This is an explicit opt-in **local experiment**, excluded from ordinary releases:
+
+```powershell
+cmake -S . -B build-local -DMOTION_MOMASK_EXPERIMENTAL=ON
+cmake --build build-local --config Release
+ctest --test-dir build-local -C Release --output-on-failure
+cmake --install build-local --config Release --component momask-experimental --prefix YOUR_PRIVATE_DIRECTORY
+```
+
+The optional build also accepts `tide-motion momask ...`; the standalone launcher
+is the convenient isolated entry point. No existing backend/default is replaced.
+Developer-only preparation: `tests/momask-download.ps1` verifies private input
+pins; `tests/momask-export.py SOURCE OUTPUT CHECKPOINT_DIRECTORY` exports and
+validates the private bundle. Its locked Python environment is not shipped or
+used by inference. `momask-ort-tests BUNDLE` checks all saved reference fixtures;
+`tests/momask-reference.py SOURCE BUNDLE NATIVE.glb [EDIT.glb BEGIN END]` checks
+sampling/tokenization and source preservation. ONNX/reference artifacts stay in
+ignored scratch. Preserve notices; do not upload/private-copy the weights into
+Git or release archives. Checkpoint commercial scope remains unresolved.
+
+Remaining limits: Windows CPU only validated, ASCII tokenizer scope, one prompt
+per job, published-window bound, lossy SOMA rotation reconstruction/proportions,
+no predicted fingers/facial motion, contact/velocity continuity and broad quality
+coverage. Commercial distribution remains a separate unresolved decision.
+
+Integration: rebased onto origin/dev 706665e, preserving native ARDY, measured
+Kimodo selection/action guidance, cleanup and MotionBricks joint-frame/guide/
+contact changes. The integrated ClangCL Release build passes all **nine** CTests.
+The cosine schedule now follows float32 operation order: FP64 changes remask
+counts at half-integer boundaries (3 tokens / 4 steps). An independent real
+short-clip run verifies that boundary and full token parity; the earlier default
+18-step walk token sequence remains unchanged. Windows case-insensitive/canonical
+output collision, whitespace prompt and existing partial-file refusals are also
+covered. Rebase changed no model graph/bundle pin or numerical tolerance.
+
+Final integration includes origin/dev 68dd1c5's native upgrade and batched
+MotionBricks work too. All **ten** integrated CTests pass on that rebuilt tree.
+The separately installed owner launcher is refreshed from this checkout; no
+commercial release/model distribution or ordinary-install replacement is made.

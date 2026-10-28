@@ -1,9 +1,12 @@
 # MoMask native investigation and implemented representation study
 
-Reviewed 2026-10-28. **No supported MoMask backend is shipped.** The external gate
-is the missing checkpoint-specific commercial grant, not an ONNX operator failure.
-Native source work and tests below are implemented; they do not generate motion
-from text. Existing backends, defaults, install manifests and recipes are unchanged.
+Reviewed 2026-10-28. The owner subsequently authorized local development/use with
+unresolved checkpoint scope. **A real native owner-local experimental backend is
+now implemented and tested**; see [momask-local.md](momask-local.md) for current
+installation, commands and real inference validation. It is opt-in and excluded
+from ordinary releases; no commercial clearance is asserted. The following
+sections retain the earlier source-only investigation and checkpoint-rights
+evidence, before that owner authorization. Existing backend defaults are preserved.
 
 ## Exact release and rights evidence
 

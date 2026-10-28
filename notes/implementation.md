@@ -77,6 +77,64 @@ constraint satisfaction are not guaranteed. Separate backend text instances can
 increase batch memory. All weights, fixtures and generated clips remain external
 or in ignored scratch; no research-only checkpoint or evaluation motion data is used.
 
+## Owner-authorized native MoMask local experiment (2026-10-28)
+
+The owner explicitly accepted unresolved checkpoint scope for local use after the
+Hugging Face audit ("just use it and deal with it later"). This supersedes the
+earlier stop-at-license gate for this local experiment, not the factual rights
+findings. Commercial clearance is not asserted; weights remain outside Git and
+releases. Current implementation, commands, validation and gaps are documented
+in [momask-local.md](momask-local.md). Source/configuration/CLIP revisions remain
+pinned; full private input and native bundle hashes are in momask-private-*.json.
+
+MOTION_MOMASK_EXPERIMENTAL defaults OFF. Its separate tide-momask native launcher
+and optional tide-motion momask namespace add text generation, temporal inpainting,
+native local model import, complete preflight, recipes and ordered session-reusing
+batches. It uses existing C++ ORT 1.31.1 CPU, native ASCII CLIP BPE/sampling/RNG,
+native SOMA->HumanML encoding and HumanML->SOMA reconstruction/resampling. No
+shipped Python, hosted inference, procedural generation or pose-blending substitute.
+All five real networks (CLIP, masked/residual transformers and RVQ encoder/decoder)
+run natively. SMPL/SMPL-X, dataset motions, body meshes and evaluation models are
+omitted. Existing native pose/root postprocessing enforces edit endpoints; source
+poses outside the range are preserved, allowing normal quaternion roundoff/sign
+continuity in exported GLB. Source transform roundtrips and real exported edits
+are independently checked. Contact/velocity quality remains limited.
+
+Windows ClangCL Release: eight CTests pass after correcting one CMake list fixture;
+all 13 real native ORT component cases pass PyTorch reference bounds. RVQ indices
+are exact. Full native generation token sequences match an independent reference
+for walk/idle and contraction/punctuation prompts; official tokenizer IDs match.
+Walk and idle edits preserve outside/endpoints within 1.20e-7 exported components
+after quaternion sign matching. Two-job batches load sessions once. A two-job CPU
+run takes 1.34 s including hashes/load, sampled peak working set 552.6 MB; generation
+itself about .13 s/2-second clip. These are contended local observations. Cached
+self-generated Kimodo comparison shows worse foot-slide/ground proxies for these
+MoMask samples; no superiority claim. Bounded hidden Tide walk/wave captures from
+engine checkout 28b61e4db at D:/Projects/PurrEngine pass and were inspected.
+
+The owner's separate LOCALAPPDATA/TideMotion-MoMask-Experimental installation runs
+with only Windows system directories on PATH and has its private verified bundle.
+The existing TideMotion executable/models/PATH are preserved. No GPU work ran;
+future GPU inference must hold TideMotionGpuValidation. No model weight, ONNX
+graph, statistical array, BPE data, generated clip or screenshot is committed.
+
+MoMask integration completion: rebased onto origin/dev 706665e, preserving native
+ARDY, Kimodo measured selection and action policy, cleanup, and the MotionBricks
+joint-frame/control update. Shared CMake, CLI includes and notes were combined
+additively. The integrated Windows CPU Release build passes all nine CTests.
+Matched upstream float32 cosine operation order at mask-count half boundaries;
+a real 3-token/4-step native run and independent full-sampler reference agree,
+and the default walk token sequence is unchanged. Windows case-insensitive path
+collisions, blank prompts and preexisting partial files are rejected in preflight.
+Weights remain private and the experiment remains off in ordinary release builds.
+
+Final MoMask rebase also preserves origin/dev 68dd1c5's native upgrade command and
+batched MotionBricks connects. Combined the additive upgrade/MoMask includes;
+rebuilt the whole Windows Release tree and all ten integrated CTests pass. Native
+model graphs, input pins, inference/encoding mathematics and asset validations
+above are unchanged by this final integration. Refreshed only the separate local
+experimental launcher/notices; the existing TideMotion installation stays intact.
+
 ## ARDY feasibility spike (2026-10-28)
 
 Baseline reviewed: v0.5.0 / dd4dc0b. The focused assessment and reproducible native

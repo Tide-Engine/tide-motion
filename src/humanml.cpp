@@ -45,6 +45,11 @@ float qdistance(Quat a,Quat b) {
     float d=std::abs(a.x*b.x+a.y*b.y+a.z*b.z+a.w*b.w);
     return 1-std::min(1.0f,d);
 }
+Quat from_to(Vec3 a,Vec3 b) {
+    a=normalized(a);b=normalized(b);float d=dot(a,b);
+    if(d<-.99999f) { Vec3 axis=normalized(cross(a,std::abs(a.y)<.9f?Vec3{0,1,0}:Vec3{0,0,1}));return {axis.x,axis.y,axis.z,0}; }
+    auto c=cross(a,b);return normalized(Quat{c.x,c.y,c.z,1+d});
+}
 }
 void Statistics::validate() const {
     for(size_t i=0;i<features;++i)if(!std::isfinite(mean[i])||!std::isfinite(deviation[i])||deviation[i]<=0)
@@ -86,6 +91,38 @@ std::vector<Positions> rotation_fk(std::span<const Row> rows,const Positions& of
     for(size_t f=0;f<rows.size();++f) {
         result[f][0]=root[f].position;
         for(size_t j=1;j<22;++j)result[f][j]=result[f][static_cast<size_t>(parents[j])]+rotate(edge[f][j],offsets[j]);
+    }
+    return result;
+}
+Encoded from_soma(const Clip& clip) {
+    require_soma(clip);if(clip.fps!=30)throw std::runtime_error("MoMask source must be canonical 30 Hz SOMA");
+    size_t count=(((clip.frames()-1)*2+2)/3+1+3)/4*4;
+    if(count<4||count>196)throw std::runtime_error("MoMask source must fit 196 samples at 20 Hz");
+    Encoded result;result.origin=clip.frame(0)[0].p;result.origin.y=0;
+    result.heading=kimodo_heading(clip,clip.frame(0));Quat alignment=yaw(-result.heading);
+    std::vector<Positions> world(count+1);std::vector<float> headings(count+1);
+    for(size_t f=0;f<=count;++f) {
+        auto pose=sample(clip,static_cast<float>(f)/20);auto w=world_pose(clip,pose);
+        for(size_t j=0;j<22;++j)world[f][j]=rotate(alignment,w[mapping[j]].p-result.origin);
+        headings[f]=kimodo_heading(clip,pose)-result.heading;
+        if(f) {while(headings[f]-headings[f-1]>std::numbers::pi_v<float>)headings[f]-=2*std::numbers::pi_v<float>;
+               while(headings[f]-headings[f-1]<-std::numbers::pi_v<float>)headings[f]+=2*std::numbers::pi_v<float>;}
+    }
+    constexpr Vec3 raw[22]={{0,0,0},{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,-1,0},{0,1,0},{0,-1,0},{0,-1,0},{0,1,0},{0,0,1},{0,0,1},{0,1,0},{1,0,0},{-1,0,0},{0,0,1},{0,-1,0},{0,-1,0},{0,-1,0},{0,-1,0},{0,-1,0},{0,-1,0}};
+    for(size_t f=0;f<count;++f) {
+        Row r{};Quat q=yaw(-headings[f]),next=yaw(-headings[f+1]);
+        r[0]=(headings[f]-headings[f+1])/2;Vec3 velocity=rotate(next,world[f+1][0]-world[f][0]);r[1]=velocity.x;r[2]=velocity.z;r[3]=world[f][0].y;
+        std::array<Quat,22> edges{};edges[0]=q;
+        auto put=[&](size_t i,Vec3 v){r[i]=v.x;r[i+1]=v.y;r[i+2]=v.z;};
+        for(size_t j=1;j<22;++j) {
+            Vec3 p=world[f][j];p.x-=world[f][0].x;p.z-=world[f][0].z;put(4+(j-1)*3,rotate(q,p));
+            edges[j]=from_to(raw[j],world[f][j]-world[f][static_cast<size_t>(parents[j])]);
+            Quat parent=(j==13||j==14)?q:edges[static_cast<size_t>(parents[j])];Quat local=normalized(inverse(parent)*edges[j]);
+            put(67+(j-1)*6,rotate(local,{1,0,0}));put(70+(j-1)*6,rotate(local,{0,1,0}));
+        }
+        for(size_t j=0;j<22;++j)put(193+j*3,rotate(q,world[f+1][j]-world[f][j]));
+        for(size_t k=0;k<4;++k) {constexpr size_t feet[4]={7,10,8,11};Vec3 d=world[f+1][feet[k]]-world[f][feet[k]];r[259+k]=dot(d,d)<.002f?1.0f:0.0f;}
+        result.rows.push_back(r);
     }
     return result;
 }
@@ -140,7 +177,10 @@ Clip splice(const Clip& source,const Clip& generated,size_t begin,size_t end,flo
 size_t mask_count(size_t tokens,size_t iteration,size_t iterations) {
     if(tokens==0||tokens>4500||iterations<2||iterations>1000||iteration>=iterations)
         throw std::runtime_error("Invalid MoMask schedule");
-    double value=std::cos(static_cast<double>(iteration)/(iterations-1)*std::numbers::pi/2)*static_cast<double>(tokens);
+    // Match the upstream float32 linspace -> multiply pi -> multiply .5 -> cos
+    // schedule. FP64 changes discrete mask counts near half-integer boundaries.
+    float t=static_cast<float>(static_cast<double>(iteration)/static_cast<double>(iterations-1));
+    double value=std::max(0.0f,std::cos((t*std::numbers::pi_v<float>)*.5f)*static_cast<float>(tokens));
     // PyTorch round is ties-to-even, independent of the process rounding mode.
     double low=std::floor(value),fraction=value-low;
     auto n=static_cast<size_t>(low);
