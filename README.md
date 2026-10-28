@@ -615,6 +615,52 @@ pivots, upstream IK pins or automatic foot cleanup. Pose continuity is exact at
 non-guide targets; velocity, acceleration, foot planting and plausible motion
 between distant/contradictory poses are not guaranteed. Inspect the generated GLB in a bounded Tide preview.
 
+## Updating
+
+```sh
+tide-motion upgrade --check          # See the latest published stable release
+tide-motion upgrade                  # Update this installation
+tide-motion upgrade --version X.Y.Z   # Select a specific published stable release
+```
+
+The command selects the package for Windows x64, Linux x64/ARM64 or Apple Silicon,
+downloads it from Tide Motion's GitHub releases over HTTPS and verifies its SHA-256
+sidecar. It rejects drafts, prereleases, missing assets, wrong versions and unsafe
+archive paths. The staged executable must run and report the selected version
+before files are replaced. Updates replace the runtime, licenses and shipped
+documentation/examples, preserving models, settings, other user files and PATH.
+A replacement failure rolls back the distribution files. There is no elevation.
+
+The latest-release route skips an equal/older release. `--force` reinstalls it;
+`--version` explicitly allows selecting an older release. `--check` changes no
+installation files. Pushes to `dev` produce build artifacts, not published stable
+releases, so they do not become upgrade candidates until a release is published.
+There is no nightly channel yet. Existing executables without this command need
+one manual installation of a release that includes it.
+
+For an offline update, put the package beside its `.sha256` file:
+
+```sh
+tide-motion upgrade --archive tide-motion-0.5.1-windows-x64.zip --force
+```
+
+`--root DIR` explicitly chooses another installation directory, including a new
+one. A source build requires this option when installing. Without it, the command
+updates the root containing its own installed `bin/tide-motion` executable.
+No model-cache environment or model files are required. HTTPS uses system curl;
+Windows extraction uses system PowerShell, Linux/macOS use tar. No Python,
+GitHub CLI, account or Tide engine installation is required. Archive and metadata
+size limits and safe-path/type checks apply before installation. Checksums detect
+corruption; these are not cryptographic publisher signatures.
+
+A per-installation OS lock prevents simultaneous upgrades. Windows can rename a
+running runtime but may retain its mapped old files until those processes exit;
+a later upgrade collects only marked, successfully committed backups. Failed or
+interrupted recovery backups are retained for inspection. Close other Tide Motion
+processes if an update reports locked files. Replacing files is transactional for
+reported errors, not an all-files atomic operation across a crash or power loss;
+if rollback itself fails, the error names the directory retaining original files.
+
 ## Optional foot contact cleanup
 
 `cleanup` applies native two-bone foot IK to an existing generated or retargeted

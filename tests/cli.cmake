@@ -272,3 +272,8 @@ help_lists("--fit-poses.*--footsteps.*--attempts" generate --help)
 refuses("Missing or incomplete" generate "walk" --fit-poses --start-pose "${source}" --attempts 2 -o "${WORK}/fit.glb" --models "${empty}")
 file(WRITE "${WORK}/fit-batch.json" "{\"actions\":[{\"action\":\"generate\",\"prompt\":\"walk\",\"startPose\":\"with spaces and 'quotes'/source.glb\",\"fitPoses\":true,\"footsteps\":2,\"attempts\":2,\"output\":\"fit.glb\"}]}")
 refuses("Missing or incomplete" batch "${WORK}/fit-batch.json" --models "${empty}")
+
+help_lists("--check.*--version.*--force.*--root" help upgrade)
+refuses("Version must be" upgrade --version "1.2.3/evil")
+refuses("Unknown upgrade option" upgrade --models "${empty}")
+refuses("Use --version or --archive" upgrade --version 1.2.3 --archive missing.zip)

@@ -167,7 +167,8 @@ void prepare_v12(const fs::path& root) {
         if(!tensor||!output)throw std::runtime_error("v1.2 conversion I/O failed");
         written=t.offset+t.size;
     }
-    for(;written%32;++written)output.put(0);output.close();
+    for(;written%32;++written)output.put(0);
+    output.close();
     if(!output)throw std::runtime_error("v1.2 conversion write failed");
     verify(temporary,v12_model);fs::rename(temporary,root/"kimodo-v1.2.gguf");
 }

@@ -1,6 +1,8 @@
 #include "motion.hpp"
 #include "author.hpp"
 #include "ardy.hpp"
+
+#include "upgrade.hpp"
 #include <kimodo/kimodo.hpp>
 #include <nlohmann/json.hpp>
 #include <algorithm>
@@ -276,6 +278,22 @@ in profile on the right, following its root over a tiled floor.
   --clip NAME                 Animation to preview from a multi-animation file
 
 With TIDE_HIDDEN set, give --capture, --gif or --frames.
+)";
+    if(command=="upgrade")return R"(tide-motion upgrade [--check] [--version X.Y.Z] [--force] [--root DIR]
+tide-motion upgrade --archive PACKAGE.zip|.tar.gz [--check] [--force] [--root DIR]
+
+Install the latest published stable release for this platform, keeping models,
+settings and PATH. --check only reports the selected release. --version selects
+an exact stable release (including an older one). --force reinstalls the selected
+release even when this executable is already as new or newer.
+
+--archive uses a local official-format package and adjacent .sha256, with no
+network access. --root overrides the installation directory (otherwise the root
+of this running installed executable). Source builds require an explicit root.
+Downloads use HTTPS curl; Windows extraction uses system PowerShell, Unix tar.
+Checksums, safe archive paths, package version and runnable executable are checked
+before a transactional replacement. Close other running Tide Motion processes
+if Windows reports locked files. No model downloads or engine updates occur.
 )";
     if(command=="models")return R"(tide-motion models install [all|kimodo|kimodo-v1.2|bricks] --accept-licenses [--models DIR]
 tide-motion models check [all|kimodo|kimodo-v1.2|bricks] [--models DIR]
@@ -700,6 +718,10 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     auto unknown=[](const std::string& name){return std::runtime_error("Unknown command: "+name+"; tide-motion --help lists the commands");};
     if(args[1]=="help") { if(args.size()>2&&!command_help(args[2]))throw unknown(args[2]);help(args.size()>2?args[2]:"");return 0; }
     if(args[1]=="--version") { std::cout<<"tide-motion "<<MOTION_VERSION<<"\n";return 0; }
+    if(args[1]=="upgrade") {
+        for(size_t i=2;i<args.size();++i)if(args[i]=="--help"||args[i]=="-h") {help("upgrade");return 0;}
+        return upgrade(args,MOTION_VERSION);
+    }
     if(!command_help(args[1]))throw unknown(args[1]);
     std::string command=args[1],clip_name,from_name,to_name,tide="tide";
     for(size_t i=2;i<args.size();++i)if(args[i]=="--help"||args[i]=="-h") {help(command);return 0;}

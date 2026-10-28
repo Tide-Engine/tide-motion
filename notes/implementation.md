@@ -1709,3 +1709,123 @@ Tide's explicit cleanup is the alternative); Smart Primitive and scene editors
 tokens) for a 1 m gap. Tide does not override the model's choice. Hand and leaf
 rotations still disagree at seams as noted. Predicted contacts are model output,
 not ground truth, and are not tested on non-walk motions. Linux/macOS untested.
+
+## Native executable upgrade path (2026-10-28)
+
+Owner request: a quick `tide-motion upgrade` path like Tide's. Inspected Tide's
+compiler/cli/upgrade.c and install.c in D:/Projects/PurrEngine (read-only) for
+latest/exact version selection and replacement of mapped Windows programs.
+Implemented independent native C++ orchestration in src/upgrade.cpp/.hpp; Tide
+Motion still requires no engine installation, Python, GitHub CLI or account.
+No inference, model or dependency revisions changed, and no model files/data
+were added. The updater uses the existing SHA-256 and argv process functions.
+
+Commands: upgrade defaults to the latest published stable GitHub release;
+--check reports the selected version/platform without changing an installation;
+--version X.Y.Z (optional v prefix) explicitly selects/reinstalls that published
+stable version, including older versions; --force reinstalls the default/local
+selection even when equal/older; --archive FILE uses a local package plus adjacent
+.sha256 without network; --root DIR explicitly selects an installation root,
+including an empty one. Local archives and exact-version options are exclusive.
+Default root comes from the real running executable's bin directory and requires
+an installed license layout, never the current working directory. Source builds
+need --root to install. No-op latest/equal versions do not replace files.
+No model-cache environment, model download, PATH change or elevation is involved.
+No nightly channel, background check or dev-artifact auto-install is claimed.
+Existing executables lacking upgrade need one initial manual installation of a
+build/release with this command. No version tag/release was published here.
+
+Network contract follows GitHub's public REST latest/tag API:
+https://docs.github.com/en/rest/releases/releases#get-the-latest-release .
+Numeric stable tags only, published/non-draft/non-prerelease. Select the exact
+archive and sidecar names for windows-x64, linux-x64/arm64 or macos-arm64; reject
+missing/duplicate assets, foreign download URLs and invalid sizes. Initial asset
+URLs must match this repository's exact release/tag/name; curl -q uses HTTPS-only
+initial/redirect protocols, bounded timeouts/retries and no shell interpolation.
+Metadata <=1 MiB, sidecar <=4 KiB, archive <=512 MiB. Require matching published
+size and SHA-256 before extraction. Checksums are corruption/integrity checks
+from the same trusted HTTPS release, not independent publisher signatures.
+
+Extraction is into a private destination-volume staging directory. Windows uses
+a fixed locally written PowerShell Zip extraction script (never a downloaded
+script): refuse traversal, absolute/drive/ADS paths, symlinks, duplicate/case
+aliases, reserved device/trailing-dot/space names, >10,000 entries and >512 MiB
+uncompressed bytes. Unix uses system tar with bounded member/type listings;
+refuse traversal/backslashes/absolute paths, hard/device links and all symlinks
+except bounded sibling libonnxruntime.* names used by the distribution. Unix does
+not claim an uncompressed-size cap before extraction. Validate required package
+entries and licenses, execute staged --version and require exact release identity
+before changing existing files. PROMPTING.md is optional for pre-0.5.1 releases;
+if absent in an explicitly selected older release, its prior distributed copy
+is removed transactionally rather than falsely retained as current documentation.
+
+A per-root OS lock (Windows exclusive handle / Unix flock) serializes installs.
+Rename only distribution-owned bin, licenses, examples, notes, README, PROMPTING,
+LICENSE and installer scripts. Models, settings and other root files are never
+moved. Keep all replaced entries in a separate marked backup; reverse every swap
+on reported failure. If rollback itself fails, retain originals and name their
+backup location. Windows can rename mapped runtime files; any locked old files
+are retained after success and collected on a later upgrade only when marked
+committed. Pending/interrupted recovery backups are never automatically deleted.
+Cleanup is bounded to verified direct child scratch/backup directories. This is
+rollback for reported errors, not crash/power-loss atomicity across all files;
+--force is available to repair/reinstall. README records these limits.
+
+Local Windows x64 ClangCL 18.1.8 Release: all eight CTests pass. New independent
+release contracts cover numeric ordering, malformed versions, four platform names,
+drafts/prereleases, foreign URLs, oversized/invalid assets, missing checksums and
+duplicate assets. CLI contracts cover help/options and invalid version/flag
+preflight without a model cache. tests/upgrade.ps1 takes a runtime archive and
+creates a GUID installation with spaces/apostrophes: offline check leaves root
+absent; offline install and self-upgrade from the running installed EXE succeed;
+models/settings remain; locked LICENSE forces rollback after preceding metadata
+swaps, preserving README/note sentinels and executable; exclusive install lock
+refuses a second update; corrupted hash, traversal and executable/version mismatch
+are refused. Committed-backup cleanup and pending-backup retention pass.
+
+Real online path: `upgrade --check` used GitHub's live latest API, which selected
+v0.2.0 at validation time. `upgrade --version 0.2.0 --root .research/online-upgrade`
+downloaded its actual official 7.50 MiB archive/sidecar, verified size/hash, probed
+its executable and installed successfully in isolation. No owner installation or
+model cache was changed. This exposed/closed the legitimate legacy PROMPTING
+absence. The live updater deliberately refuses to downgrade a newer executable
+via the default latest route without --force; exact-version selection is explicit.
+
+Ubuntu 24.04 x64 / GCC 13.3 under WSL: fresh native CPU build, all eight CTests,
+runtime archive and tests/upgrade.sh pass, including offline/live self-replacement,
+model/settings preservation, rollback on a late symlink destination and bad
+checksum/escaping-symlink refusals. A GCC misleading-indentation error encountered
+in the existing native v1.2 converter was fixed by putting output.close() on its
+own line; no converter arithmetic changed. tests/upgrade.sh has LF line endings.
+macOS/ARM64 execution remains unvalidated locally; platform selection is covered
+by contracts, with native execution left to the existing release matrix.
+
+Release workflow correction: its explicit build target list omitted newer CTest
+executables (cleanup/HumanML and now upgrade), so packaging could not reach a
+successful contract stage. Build all default targets before ctest. Existing
+packaging/install jobs now also run native self-upgrade integration scripts on
+their actual archives. Action/dependency pins and publication gates are unchanged;
+no additional CI dispatch, PR, model inference, GPU work or engine preview was
+needed. Tests/packages/live downloads remain ignored under .research or the
+WSL-local build. No package executables or model data enter Git.
+
+Upgrade integration completion: rebased onto origin/dev 706665e, retaining the
+native ARDY backend/contract tests, measured motion selection, updated MotionBricks
+pose/guide/contact support, notices and all concurrent documentation. Resolved
+additive CMake/main include/CLI-test/notes conflicts. Windows and WSL Linux x64
+Release builds and all nine integrated CTests pass. Both integrated archives pass
+self-upgrade tests again; Windows's existing installer test also passes. Workflow
+YAML parses. No action pins, publication gates or extra workflow dispatch changed.
+No model/backend inference was repeated for this executable-maintenance feature.
+
+Final hardening: local archives are copied into owned scratch before hashing and
+extraction, so the extracted bytes are the verified copy. POSIX scratch directories
+use owner-only permissions. All subprocess paths use UTF-8 at the existing process
+API boundary; Windows tests now put both the archive and installation under paths
+with spaces, apostrophes and an accented Unicode character. Current upgrade unit
+and both platform archive/self-replacement tests pass after these changes. This
+also verifies the equal-version no-op retains a modified documentation sentinel
+until --force is requested. ARM64/macOS execution remains a release-matrix check,
+not a local claim. No release tag/publication or real owner-install modification
+was performed; bootstrapping older installed binaries remains a first manual
+installation of a future published package containing the command.

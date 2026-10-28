@@ -73,7 +73,7 @@ jobs:
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER="$(xcrun --find clang)" -DCMAKE_CXX_COMPILER="$(xcrun --find clang++)" -DMOTION_VULKAN=OFF
       - name: Build
-        run: cmake --build build --config Release --target tide-motion motion-tests retarget-tests --parallel 3
+        run: cmake --build build --config Release --parallel 3
       - name: Test contracts
         run: ctest --test-dir build -C Release --output-on-failure
       - name: Package
@@ -87,9 +87,12 @@ jobs:
           $archive = @(Get-ChildItem dist/*.zip)
           if ($archive.Count -ne 1) { throw 'Expected one archive' }
           ./tests/install.ps1 -Archive $archive[0].FullName
+          ./tests/upgrade.ps1 -Archive $archive[0].FullName
       - name: Test Unix installation
         if: runner.os != 'Windows'
-        run: sh tests/install.sh dist/*.tar.gz
+        run: |
+          sh tests/install.sh dist/*.tar.gz
+          sh tests/upgrade.sh dist/*.tar.gz
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: ${{ matrix.platform }}
