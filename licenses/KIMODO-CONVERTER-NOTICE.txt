@@ -1,0 +1,13 @@
+Kimodo GGUF development converter
+Adapted from localai-org/kimodo.cpp at ed8a931aedb132f768190f6931c365855caba74c,
+scripts/convert_motion_to_gguf.py, under Apache-2.0 (KIMODO.txt).
+Tide changes: add the smooth-root SOMA-RP-v1.2 identity; pinned preparation wrapper
+and native C++ conversion of the same pinned inputs in src/models.cpp.
+Upstream NOTICE:
+kimodo.cpp
+
+This project uses ggml, Copyright the ggml authors:
+https://github.com/ggml-org/ggml
+
+The demo displays the LocalAI logo from the LocalAI project:
+https://github.com/mudler/LocalAI

@@ -6,3 +6,5 @@
 *.part
 /build-*/
 /dist-*/
+
+**/__pycache__/

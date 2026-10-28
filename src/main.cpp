@@ -66,6 +66,7 @@ const char* command_help(std::string_view command) {
 
 Generates a SOMA-30 clip from text with Kimodo (30 fps).
 
+      --model v1.1|v1.2      Smooth-root SOMA-RP checkpoint (default v1.1)
   -o, --output FILE.glb       New output (a FILE.glb.json recipe is written beside it)
   --duration SECONDS          Length of the prompt before it, 0.2..10 (default 3)
   --then "PROMPT"             Continue with another prompt (up to 16 in total); a
@@ -240,10 +241,13 @@ in profile on the right, following its root over a tiled floor.
 
 With TIDE_HIDDEN set, give --capture, --gif or --frames.
 )";
-    if(command=="models")return R"(tide-motion models install [all|kimodo|bricks] --accept-licenses [--models DIR]
-tide-motion models check [all|kimodo|bricks] [--models DIR]
+    if(command=="models")return R"(tide-motion models install [all|kimodo|kimodo-v1.2|bricks] --accept-licenses [--models DIR]
+tide-motion models check [all|kimodo|kimodo-v1.2|bricks] [--models DIR]
 
 Downloads (resumably) and verifies the pinned model files by SHA-256.
+kimodo-v1.2 downloads pinned official safetensors/statistics and converts them
+to verified GGUF natively, then adds the shared text files. No Python is needed.
+all retains v1.1 and MotionBricks.
 
   --accept-licenses           Accept the model licences in licenses/ (install)
   --models DIR                Model directory (default: TIDE_MOTION_MODELS or the
@@ -255,8 +259,8 @@ void help(std::string_view command={}) {
     if(const char* text=command_help(command)) {std::cout<<text;return;}
     std::cout<<R"(Tide Motion - native offline animation authoring
 
-  tide-motion models install [all|kimodo|bricks] --accept-licenses [--models DIR]
-  tide-motion models check [all|kimodo|bricks] [--models DIR]
+  tide-motion models install [all|kimodo|kimodo-v1.2|bricks] --accept-licenses [--models DIR]
+  tide-motion models check [all|kimodo|kimodo-v1.2|bricks] [--models DIR]
   tide-motion generate "PROMPT" -o CLIP.glb [--duration 3] [--seed 0] [--steps 50]
       [--variants N [--variants-gif]] [--guidance 2] [--constraint-guidance 2]
       [--then "PROMPT" [--duration S]]... [--transition 5]
@@ -344,7 +348,8 @@ struct RunContext {
     std::unique_ptr<kimodo::model> kimodo;
     // strict: an explicit --device, which never falls back. gpu_failed: auto fell back
     // in this run, so later auto actions stay on the CPU.
-    bool kimodo_gpu=false,kimodo_strict=false,kimodo_checked=false,gpu_failed=false,env_saved=false;
+    bool kimodo_gpu=false,kimodo_strict=false,gpu_failed=false,env_saved=false;
+    std::string kimodo_version="v1.1";std::set<std::string> checked_versions;
     std::string kimodo_device;unsigned kimodo_threads=0;
     std::optional<std::string> backend_env,threads_env;
     std::unique_ptr<BricksModel> bricks;unsigned bricks_threads=0;
@@ -354,7 +359,7 @@ void load_kimodo(const fs::path& models,RunContext* context) {
     std::cerr<<"Loading Kimodo SOMA and text encoder (native GGML)...\n";
     std::string failure;
     try {
-        auto model=kimodo::model::load((models/"kimodo.gguf").string(),(models/"text/encoder.gguf").string());
+        auto model=kimodo::model::load((models/(context->kimodo_version=="v1.2"?"kimodo-v1.2.gguf":"kimodo.gguf")).string(),(models/"text/encoder.gguf").string());
         if(model) {context->kimodo=std::move(*model);return;}
         failure=model.error();
     } catch(const std::exception& e) {failure=e.what();}
@@ -363,10 +368,10 @@ void load_kimodo(const fs::path& models,RunContext* context) {
     load_kimodo(models,context);
 }
 // --device and --threads apply when Kimodo loads; a batch action asking for others reloads it.
-void ensure_kimodo(const fs::path& models,RunContext* context,const std::string& device,unsigned threads) {
-    if(context->kimodo&&context->kimodo_device==device&&context->kimodo_threads==threads)return;
+void ensure_kimodo(const fs::path& models,RunContext* context,const std::string& device,unsigned threads,const std::string& version) {
+    if(context->kimodo&&context->kimodo_device==device&&context->kimodo_threads==threads&&context->kimodo_version==version)return;
     if(!context->env_saved) {context->backend_env=get_env("KIMODO_BACKEND");context->threads_env=get_env("KIMODO_THREADS");context->env_saved=true;}
-    if(context->kimodo) {std::cerr<<"Reloading Kimodo for another --device or --threads.\n";context->kimodo.reset();}
+    if(context->kimodo) {std::cerr<<"Reloading Kimodo for another model, --device or --threads.\n";context->kimodo.reset();}
     set_env("KIMODO_THREADS",threads?std::to_string(threads):context->threads_env.value_or(""));
     context->kimodo_strict=device!="auto";
     if(device=="cpu") {set_env("KIMODO_BACKEND","cpu");context->kimodo_gpu=false;std::cerr<<"Generating on the CPU (--device cpu).\n";}
@@ -381,7 +386,8 @@ void ensure_kimodo(const fs::path& models,RunContext* context,const std::string&
     } else if(context->gpu_failed) {set_env("KIMODO_BACKEND","cpu");context->kimodo_gpu=false;std::cerr<<"Generating on the CPU (the GPU failed earlier in this run).\n";}
     else {set_env("KIMODO_BACKEND",context->backend_env.value_or(""));context->kimodo_gpu=kimodo_on_gpu();}
     // Models are verified once, after the device is settled (a refused --device gpu skips it).
-    if(!context->kimodo_checked) {check_models(models,"kimodo");context->kimodo_checked=true;}
+    if(!context->checked_versions.contains(version)) {check_models(models,version=="v1.2"?"kimodo-v1.2":"kimodo");context->checked_versions.insert(version);}
+    context->kimodo_version=version;
     load_kimodo(models,context);
     context->kimodo_device=device;context->kimodo_threads=threads;
 }
@@ -451,7 +457,7 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
         unsigned variants=1;bool sheet_gif=false;
         if(type=="generate") {
             keys.insert({"prompt","prompts","duration","seed","steps","transition","startPose","endPose","keyframes","effectors","path","placement","correct",
-                "variants","variantsGif","tide","guidance","constraintGuidance","device","threads","correctionFrames","inPlace"});
+                "variants","variantsGif","tide","guidance","constraintGuidance","device","threads","correctionFrames","inPlace","model"});
             if(action.contains("placement")) {
                 auto value=action["placement"].get<std::string>();
                 if(value!="auto"&&value!="world"&&value!="free")throw std::runtime_error("placement is auto, world or free");
@@ -469,6 +475,7 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
                 auto text=numeric(action[pair.first],pair.first);number(text,0,10,pair.first);argv.insert(argv.end(),{pair.second,text});
             }
             if(action.contains("correctionFrames")) {auto text=numeric(action["correctionFrames"],"correctionFrames");integer(text,0,60,"correctionFrames");argv.insert(argv.end(),{"--correction-frames",text});}
+            if(action.contains("model")) {auto value=action["model"].get<std::string>();if(value!="v1.1"&&value!="v1.2")throw std::runtime_error("model is v1.1 or v1.2");argv.insert(argv.end(),{"--model",value});}
             if(action.contains("device")) {auto value=action["device"].get<std::string>();if(value!="auto"&&value!="gpu"&&value!="cpu")throw std::runtime_error("device is auto, gpu or cpu");argv.insert(argv.end(),{"--device",value});}
             if(action.contains("tide")) {auto value=action["tide"].get<std::string>();if(value.empty())throw std::runtime_error("tide must not be empty");argv.insert(argv.end(),{"--tide",value});}
             if(action.contains("prompts")) {
@@ -617,7 +624,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     bool accept=false,joined=false,skeleton=false,to_soma=false,correct=true;Vec3 offset{};
     Placement placement=Placement::automatic;std::string placement_name="auto";
     unsigned variants=1,threads=0;int correction_frames=10;bool variants_gif=false,in_place=false;
-    Guidance guidance;std::string device="auto";
+    Guidance guidance;std::string device="auto",model_version="v1.1";
     std::vector<std::string> pos;
     std::vector<std::string> flags;
     // Prompt durations; index 0 is the positional prompt, later ones come from --then.
@@ -654,6 +661,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         else if(a=="--variants-gif")variants_gif=true;
         else if(a=="--guidance")guidance.text=static_cast<float>(number(value(),0,10,"guidance"));
         else if(a=="--constraint-guidance")guidance.constraint=static_cast<float>(number(value(),0,10,"constraint guidance"));
+        else if(a=="--model") {model_version=value();if(model_version!="v1.1"&&model_version!="v1.2")throw std::runtime_error("--model is v1.1 or v1.2 (smooth-root SOMA-RP)");}
         else if(a=="--device") {device=value();if(device!="auto"&&device!="gpu"&&device!="cpu")throw std::runtime_error("--device is auto, gpu or cpu");}
         else if(a=="--threads")threads=static_cast<unsigned>(integer(value(),1,1024,"threads"));
         else if(a=="--steps")steps=static_cast<unsigned>(integer(value(),1,1000,"steps"));
@@ -681,7 +689,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     }
     std::set<std::string> allowed;
     if(command=="generate")allowed={"--models","-o","--output","--duration","--seed","--steps","--then","--transition","--start-pose","--end-pose","--keyframe","--effector","--path","--placement","--no-correction",
-        "--correction-frames","--in-place","--variants","--variants-gif","--tide","--guidance","--constraint-guidance","--device","--threads"};
+        "--correction-frames","--in-place","--variants","--variants-gif","--tide","--guidance","--constraint-guidance","--device","--threads","--model"};
     else if(command=="connect")allowed={"--models","-o","--output","--tokens","--joined","--offset","--from-clip","--to-clip","--threads"};
     else if(command=="mirror")allowed={"-o","--output","--clip"};
     else if(command=="retarget")allowed={"-o","--output","--target","--map","--to-soma","--clip"};
@@ -697,7 +705,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         return batch(utf8path(pos[0]),models,context);
     }
     if(command=="models") {
-        if(pos.empty()||pos.size()>2||(pos[0]!="install"&&pos[0]!="check"))throw std::runtime_error("Use models install or models check [all|kimodo|bricks]");
+        if(pos.empty()||pos.size()>2||(pos[0]!="install"&&pos[0]!="check"))throw std::runtime_error("Use models install or models check [all|kimodo|kimodo-v1.2|bricks]");
         std::string selection=pos.size()==2?pos[1]:"all";
         if(pos[0]=="check")check_models(models,selection);
         else {
@@ -867,7 +875,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         if(variants>1) {sheet.png=variants_path(output,".png");if(variants_gif)sheet.gif=variants_path(output,".gif");}
         for(const auto& file:outputs)refuse_existing(file);
         for(const auto& file:{sheet.png,sheet.gif})if(!file.empty()&&fs::exists(file))throw std::runtime_error("Contact sheet already exists: "+file.string());
-        ensure_kimodo(models,context,device,threads);
+        ensure_kimodo(models,context,device,threads,model_version);
         if(condition&&context->kimodo->motion_dim()!=kimodo_features)throw std::runtime_error("Constraints need the SOMA-30 Kimodo model");
         std::vector<Clip> made;std::vector<std::string> labels;
         for(unsigned v=0;v<variants;++v) {
@@ -893,6 +901,9 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         generate_recipe["placement"]=placement_name;generate_recipe["corrected"]=correct&&!conditions.poses.empty();
         generate_recipe["correctionFrames"]=correction_frames;generate_recipe["inPlace"]=in_place;
         generate_recipe["guidance"]=guidance.text;generate_recipe["constraintGuidance"]=guidance.constraint;
+        generate_recipe["model"]="nvidia/Kimodo-SOMA-RP-"+model_version;
+        generate_recipe["modelGgufSha256"]=model_version=="v1.2"?"9c24c5ee9b6b3683947ab2796727ffb2fbd69b2ebc7683214809013687d87a19":"3bf1229f4c1eff1d28f5196a854113da2df9a11a5e21c60694630903bf948ee4";
+        if(model_version=="v1.2")generate_recipe["checkpointRevision"]="0e3c89024d896064b6851201373f7834784a386b";
         generate_recipe["device"]=context->kimodo_gpu?"gpu":"cpu";generate_recipe["threads"]=threads;
         if(variants>1)generate_recipe["variants"]={{"count",variants},{"firstSeed",seed},{"sheet",sheet.png.filename().string()}};
         generate_recipe["constraints"]=nlohmann::json::array();

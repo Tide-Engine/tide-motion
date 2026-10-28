@@ -44,8 +44,9 @@ Ordinary exported animation assets are the game interface. Tide can render previ
 
 The core is C++23. Kimodo is compiled as a static library from localai-org/kimodo.cpp
 at ed8a931aedb132f768190f6931c365855caba74c, including its GGML submodule at
-8c63e70982c95ceb862e3a1073a2c1beef75d60a. This port supports the older SOMA RP
-v1.1 checkpoint. It does not claim support for the newer v1.2 checkpoint.
+8c63e70982c95ceb862e3a1073a2c1beef75d60a. The upstream port targets the SOMA RP
+v1.1 checkpoint. Tide also validates opt-in smooth-root v1.2 using the same
+native architecture (see the v1.2 section below).
 Native output is the compact 30-joint rig, not the 77-joint presentation skeleton.
 
 MotionBricks uses Microsoft's native ONNX Runtime CPU distribution 1.31.1. Pose
@@ -900,3 +901,138 @@ inference time/memory, goal/seam/action/foot quality numbers are fabricated.
 TIDE_HIDDEN=1 was set for validation. Existing backends/defaults and concurrent
 ARDY integration files are preserved. Reproduce with the isolated commands in
 the detailed note; use a thread-specific build/temp directory.
+
+
+## Opt-in smooth-root SOMA-RP v1.2 (2026-10-28)
+
+Baseline: v0.5.0 / dd4dc0b. Upstream source inspected at
+nv-tlabs/kimodo e1c219c99b4b94ba48be1fb6a1cbc64ecee4c954 (CHANGELOG.md,
+kimodo/motion_rep/reps/kimodo_motionrep.py). The October 15 release corrects
+training/test overlap; that correction alone is not evidence of quality gain.
+This work uses only nvidia/Kimodo-SOMA-RP-v1.2, never the distinct ArdyRep variant.
+No evaluation dataset or research-only checkpoint was downloaded.
+
+Pre-download inspection: official HF revision
+0e3c89024d896064b6851201373f7834784a386b, config.yaml and LICENSE, six small
+statistics arrays and the first 65,536 bytes of the safetensors file. LICENSE
+SHA-256 11ccdcb47db87ac30b63765b5e5154403026c4fbb52c19919d99d912ec454e19
+matches the existing NVIDIA-KIMODO-MODEL.txt terms after
+line-ending normalization. Its license permits commercial use subject to its
+terms; the existing NVIDIA notice and separate Meta text encoder terms remain.
+Config SHA-256 82f1e9f44d0df517d8ebde03d2e9396fd0bf372360714757901c1d97a2626599.
+Architecture: two-stage transformer, 1024 hidden, 2048 FF, 16 layers, 8 heads,
+GELU, 50 text tokens, 4096 text width, separated CFG, 1000 base steps, 30 Hz.
+Header: 408 F32 tensors, 283,281,777 parameters; root input/output widths 738/5,
+body 737/364. Feature order: smooth-root xyz (3), heading cos/sin (2), 30 joint
+positions (90), global first-two-column rotations (180), velocities (90), four
+contacts: 369 total. Local root has angular velocity, horizontal velocity and
+height (4). Statistics are C-order little-endian F64 vectors of 5/4/364 values,
+all finite, all standard deviations positive. They are converted to F32 and use
+the existing sqrt(std^2 + 1e-5) normalization. No v1.1 statistics are substituted.
+
+The complete checkpoint then downloaded privately and matched its upstream LFS
+SHA-256 fdcef624140a12c0a4840192ce0b75cafb4e73228a893da3864b4a990d3e919e
+(1,133,177,724 bytes). Conversion changes only the pinned converter's model
+identity allowlist; no tensor transform or inference patch is needed. The
+414-tensor F32 GGUF is 1,133,166,784 bytes, SHA-256
+9c24c5ee9b6b3683947ab2796727ffb2fbd69b2ebc7683214809013687d87a19.
+All source/statistics hashes are pinned in tools/soma-rp-v1.2.json. The native
+kimodo.cpp/GGML revisions and conditioning patch stay unchanged.
+
+Contract: generate --model v1.1|v1.2; default v1.1. Batch field model accepts the
+same values, fully preflighted. Recipes add model and modelGgufSha256, plus
+checkpointRevision for v1.2. A model switch reloads Kimodo; checksums are checked
+once per selected version per process. v1.1 retains kimodo.gguf; v1.2 uses
+kimodo-v1.2.gguf; both share the existing pinned text bundle. models install/check
+kimodo-v1.2 are explicit opt-ins; all retains its prior selection. There is no published pinned v1.2 GGUF found in the HF model search at inspection
+time. Installation therefore downloads the official safetensors, config, license
+and statistics to .soma-v1.2, verifies all pins before parsing, writes the same
+GGUF natively in C++ and verifies its full pinned digest before rename. Verified
+sources remain cached (about 1.13 GB extra disk space). No user Python is needed.
+The Python stdlib/curl preparation tool is an independent development reference;
+it is not packaged or invoked by shipped inference/installation. Native input
+parsing is intentionally restricted to the exact pinned files, never arbitrary
+user safetensors or checkpoints. Dependencies and model licenses stay unchanged.
+
+Validation (Windows x64 ClangCL 18.1.8 Release, Vulkan, RTX 4080 SUPER): all five
+native CTests pass with TEMP/TMP isolated beneath this worktree. The first run
+hit the known shared-temp collision; its isolated rerun passed. Three development
+conversion tests pass (license/input refusal, F64-to-F32 statistics and truncated
+input rejection). Native conversion of the verified official files produces a
+byte-identical pinned GGUF to the independent Python reference. Native install
+also downloaded missing LICENSE/config via HTTPS, retained/verified cached
+weights/statistics, converted, verified and installed shared text successfully.
+
+The reproducible tests/soma-v12.ps1 batch makes 31 GLBs: per version, idle (2 s),
+walk (3 s), right kick (2.5 and 4 s), each with seeds 1/2/3; a 2.5 s kick between
+the same generated v1.1 idle poses; a 3 s walk with three path points; a 1.5 s
+walk -> 1.5 s right-hand wave starting from that idle. One final v1.1 repeat
+checks switching back. All use 50 steps and default CFG/correction. Exactly three
+Kimodo loads occur; every GLB imports, every recipe identifies the selected
+checkpoint, and the repeat's binary animation payload equals the first v1.1
+idle after switching versions (GLB names differ). A sampler Int32 overflow in the
+first harness was fixed to Int64; resource/timing evidence comes from its fully
+completed rerun holding TideMotionGpuValidation throughout. The installed owner's
+exp2.json batch was observed concurrently outside this mutex and left alone;
+these timings are contended, not isolated benchmarks.
+
+Independent GLB FK (tests/soma_metrics.py): each version passes all 3 idle travel
+proxies (<30 cm), all 3 walk travel proxies (>50 cm), and all 6 kick proxies (foot
+height >45 cm). These coarse proxies do not establish semantic precision or
+artist readiness. Foot-slide proxy = mean horizontal cm/frame of feet/toes when
+both adjacent positions are below 3 cm, averaged per clip and then across seeds:
+
+| Case | v1.1 | v1.2 |
+| --- | ---: | ---: |
+| idle, 2 s | 0.026 | 0.025 |
+| walk, 3 s | 0.117 | 0.135 |
+| kick, 2.5 s | 0.181 | 0.161 |
+| kick, 4 s | 0.072 | 0.087 |
+
+This proxy differs from upstream benchmark metrics and can omit airborne feet.
+Before correction, start/end pose joint errors (mean/max cm) were v1.1
+1.30/3.47 and 1.56/4.49; v1.2 1.05/3.29 and 2.09/5.39. Mean rotation errors
+were 5.76/5.59 degrees vs 5.15/4.81. Correction makes both poses exact. Path
+hips-ground errors at frames 0/45/89: 5.04/5.38/7.01 cm vs 5.68/4.21/4.54 cm;
+the constrained feature is smooth root, so hips errors are reported explicitly.
+The multi-prompt start errors were 1.32/4.09 vs 1.24/3.44 cm; both sequences
+raise the right hand above the head in the second half (24.1 vs 17.9 cm peak).
+
+Contended DDIM sampling medians over the 12 unconditioned clips: v1.1 1.499 s
+(range 1.112..3.049), v1.2 1.162 s (0.939..1.351), excluding text/load/decode.
+Sequential order and the external workload prevent attributing that difference
+to the checkpoint. Total 31-action process: 102.76 s; sampled peak host working
+set 4,212,203,520 bytes. Both checkpoints have equal F32 weight size and exactly
+the same observed graph scratch allocation sizes (maximum 14.80 MiB per graph).
+Per-checkpoint peak host/VRAM usage was not isolated; WDDM and another inference
+process preclude interpreting whole-device VRAM as this process's allocation.
+No speed or memory improvement is claimed.
+
+Bounded hidden Tide previews use D:/Projects/PurrEngine at
+28b61e4db1cb2549fcc9f6bc6d9c6034022f3d9c: rebuilt CLI target and MinGW platform,
+staged privately with its engine files (the broad install's unrelated missing
+editor target was bypassed by staging the platform component). Six mannequin
+captures at 90/179 frames were inspected: right kicks, walking first segment,
+and right hand raised in the second segment, without binding errors or inverted
+limbs. They are sparse visual checks, not full contact-quality review.
+
+Default remains v1.1: this small sample shows mixed contact/pose results and does
+not justify a quality preference. Linux/macOS, CPU v1.2 inference, numerical parity
+with upstream PyTorch, broad prompt coverage and isolated GPU benchmarks remain
+unvalidated. The native installer/selection are functional; developer tooling
+and all generated assets/weights remain outside runtime dependencies and Git.
+
+Additional native-install end-to-end batch (same mutex): constrained v1.2
+walk->wave exports 90 frames; combined keyframe/right-hand effector kick exports
+75 frames. Keyframe pre-correction mean/max error 1.2/3.4 cm (corrected exactly),
+effector mean/max 2.0/2.0 cm. This exercised the native-generated installed GGUF,
+not a bypass of model verification. Native install's missing LICENSE/config
+network path and both cached/native converter parity are validated; the full
+weight transfer used curl before integration rather than being downloaded twice.
+
+Integration: rebased onto origin/dev including native pose authoring, foot contact
+cleanup and protected-pose retarget propagation; preserved all their source,
+documentation and tests. Windows Vulkan Release rebuild passes all six current
+CTests and the three development conversion tests. The v1.2 converter uses a
+named immutable model record, so later additive model registries cannot change
+its output verification by inserting entries. No dependency revision changed.

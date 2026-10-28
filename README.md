@@ -618,3 +618,35 @@ before any model loads):
 Add `map` and/or `clip` for a mapped rig or named animation. Place this action after
 `generate`, `connect` or `retarget` to postprocess that action's output. Each output
 remains an ordinary GLB skeleton and animation, without mesh or skin changes.
+
+### Opt-in smooth-root SOMA-RP v1.2
+
+`generate --model v1.2` selects the commercial NVIDIA SOMA-RP v1.2 checkpoint;
+`--model v1.1` remains the default. Batch generate actions accept `"model": "v1.2"`.
+Recipes record the model identity, converted GGUF SHA-256 and v1.2 checkpoint
+revision. Switching versions in a batch reloads the model. Both versions share
+the existing pinned text encoder/tokenizer. ArdyRep is a different representation
+and is not accepted by this selector.
+
+Install v1.2 with the native executable (no Python needed). Read
+`licenses/NVIDIA-KIMODO-MODEL.txt` and the text encoder terms first:
+
+```powershell
+tide-motion models install kimodo-v1.2 --models MODELS --accept-licenses
+tide-motion generate "A person walks forward." --model v1.2 --models MODELS -o walk.glb
+```
+
+Installation downloads pinned official safetensors and statistics into
+`MODELS/.soma-v1.2/`, verifies them, converts to F32 GGUF in native C++ and verifies
+the converted checksum before publishing `kimodo-v1.2.gguf`. It reuses or installs
+the shared text bundle. The verified source files remain cached for reinstall;
+allow about 2.3 GB for v1.2 source plus GGUF, in addition to the shared text files.
+`models check kimodo-v1.2` checks the GGUF and text files. Existing `models install
+all` keeps its v1.1 + MotionBricks selection. No weights belong in Git or releases.
+
+Developers can independently reproduce the same GGUF with Python 3.11+ and curl
+using `tools/prepare_soma_v12.py --input SOURCE --download --output OUT.gguf
+--accept-licenses`. The reference tool verifies `tools/soma-rp-v1.2.json`; it is
+never invoked by the native executable and is not a runtime dependency.
+See `notes/implementation.md` for measured behavior and limits; corrected training
+splits alone do not imply better motion quality.
