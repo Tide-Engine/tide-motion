@@ -1,5 +1,24 @@
 # Native animation authoring
 
+## ARM row-rotation contract tolerance (2026-10-28)
+
+Build and release run40733029160 passed Windows/Linux x64 but failed the
+Dex2HOI handedness assertion on both Linux/macOS ARM64. Reproduced the original
+failure locally with GCC13.3 Release arithmetic and `-mfma -ffp-contract=fast`:
+the quarter-turn encode/decode/rotate chain differs from the ideal unit axis by
+3.76972873231e-7, exceeding the test's3e-7 limit. This is accumulated float rounding,
+not an observed row/column or handedness error.
+
+The test now budgets eight float epsilons (9.536743164e-7) and checks all three
+expected basis axes for both exact published quarter-turn rows and the encoded
+quaternion roundtrip. Transposition/sign mistakes still produce order-one errors.
+Split the independent matrix helper's return onto its own line for GCC's
+warnings-as-errors validation. Production decoding, inference arithmetic, model/
+dependency pins, packaging and workflow gates are unchanged. The full Dex2HOI
+representation suite passes the reproducing GCC13.3 FMA build with
+`-Wall -Wextra -Wpedantic -Werror`. ARM execution is verified by the subsequent
+ordinary push-triggered CI run; no ARM host is available locally.
+
 ## Explicit held-grip bindings after Dex2HOI owner feedback (2026-10-28)
 
 Owner confirmed incorrect prop position/grip in the raw native trials. Checked the

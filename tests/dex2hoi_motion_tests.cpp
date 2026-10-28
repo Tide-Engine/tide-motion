@@ -29,7 +29,8 @@ Matrix multiply(const Matrix& a,const Matrix& b) {
 }
 Matrix invert(const Matrix& a) {
     Matrix b{};b[15]=1;for(size_t i=0;i<3;++i)for(size_t j=0;j<3;++j)b[i*4+j]=a[j*4+i];
-    for(size_t i=0;i<3;++i)for(size_t j=0;j<3;++j)b[i*4+3]-=b[i*4+j]*a[j*4+3];return b;
+    for(size_t i=0;i<3;++i)for(size_t j=0;j<3;++j)b[i*4+3]-=b[i*4+j]*a[j*4+3];
+    return b;
 }
 Vec3 position(const Matrix& a) {return {static_cast<float>(a[3]),static_cast<float>(a[7]),static_cast<float>(a[11])};}
 Dex2HoiRig rig_fixture() {
@@ -104,7 +105,15 @@ void verify_fk(const Dex2HoiRig& rig,const Clip& clip,const std::vector<float>& 
 int main()try {
     const auto r=dex2hoi_rotation6(yaw(std::numbers::pi_v<float>/2));
     check(std::abs(r[0])<2e-7f&&std::abs(r[2]-1)<2e-7f&&std::abs(r[4]-1)<2e-7f,"Published 6D values are matrix rows");
-    check(distance(rotate(dex2hoi_rotation6(r),{1,0,0}),{0,0,-1})<3e-7,"Row-basis decoding has correct handedness");
+    const std::array<float,6> quarter_turn_rows{0,0,1,0,1,0};
+    // Allow accumulated float rounding through normalization, basis/quaternion
+    // conversion and rotation (including fused multiply-add on ARM).
+    constexpr double rotation_tolerance=8*std::numeric_limits<float>::epsilon();
+    for(const auto q:{dex2hoi_rotation6(quarter_turn_rows),dex2hoi_rotation6(r)}) {
+        check(distance(rotate(q,{1,0,0}),{0,0,-1})<rotation_tolerance,"Row-basis decoding has correct handedness");
+        check(distance(rotate(q,{0,1,0}),{0,1,0})<rotation_tolerance,"Row-basis decoding preserves the yaw axis");
+        check(distance(rotate(q,{0,0,1}),{1,0,0})<rotation_tolerance,"Row-basis decoding preserves the third basis axis");
+    }
     refuses([]{dex2hoi_rotation6(std::array<float,6>{});});
     const auto init=dex2hoi_initial_features({{0.25f,-0.5f,1},yaw(0.3f)});
     check(std::abs(init[3]-std::sqrt(0.5f))<1e-7&&std::abs(init[4]+1)<1e-7&&std::abs(init[8]+1)<1e-7,"Spatial63 frequency/xyz/sin/cos order");
