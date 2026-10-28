@@ -1418,3 +1418,42 @@ including the new incoming HumanML contract test. No MoMask network inference or
 quality claim is made. No inference algorithms/dependency revisions changed in
 this rebase, so the successful native connect/cleanup asset checks above remain
 applicable without repeating model inference.
+
+## Broader paired v1.1/v1.2 quality comparison (2026-10-28)
+
+Owner requested more evidence for choosing a default. Full method, thresholds,
+results, uncertainty and limits: notes/soma-rp-comparison.md. Added developer-only
+400-clip protocol/runner, independent exported-GLB geometry scorer, three model-
+free evaluator checks and optional EXCLUDE_FROM_ALL/uninstalled soma-sheet helper.
+No production inference, dependency/model pins, license terms or defaults change.
+
+Native Vulkan generation at 15c78fd: 400/400 clips completed under the shared
+TideMotionGpuValidation mutex, four counterbalanced blocks, fresh seeds 101..108,
+ten plain prompts at 2.5/5 seconds plus common-pose kicks, curved paths and two
+multi-prompt sequences. All expected frame counts, finite FK and model identities
+pass. Geometry proxy passes 164/192 v1.1 versus 167/192 v1.2; paired seed-cluster
+bootstrap interval for the difference -2.60..+5.73 percentage points. Not an
+overall winner. Plain 5-second right kicks improve 1/8->6/8 (short kicks both
+8/8); backward/turn foot slide worsens while crouch slide and path error improve.
+Raw pose-kick position error slightly favors v1.1 with a v1.1 idle reference.
+Twelve preselected randomized A/B pose-sheet votes: v1.1 2, v1.2 3, seven ties.
+Sparse visual review is not a full-motion/human-panel study. v1.1 remains default;
+use case-specific selection rather than claiming higher version implies quality.
+
+Every block observed another tide-motion process (workload not inferred), so
+performance is not isolated. The GPU mutex was released for the concurrent ARDY
+measurement and reacquired for twelve bounded hidden captures with checkout-built
+Tide. Optional GIF correctly refused: that engine checkout lacks --record; no
+animated validation claimed. Weights, generated clips, raw measurements, logs,
+executable/reference hashes and hidden review keys remain ignored .research data.
+The new scorer's three checks and current six CTests pass; soma-sheet builds and
+renders all twelve two-view PNGs. No extra CI dispatch or PR is requested.
+
+Comparison integration: rebased onto origin/dev 93a92e3, preserving the full
+native ARDY backend, its validation/notices/packaging, incoming HumanML proof
+work and cleanup guards. Windows Vulkan Release rebuild passes all eight current
+CTests; the optional soma-sheet target builds and the evaluator's three model-
+free tests pass. Runtime staging includes the new comparison note and excludes
+the developer-only renderer/tools. The 400-clip measurements retain their exact
+15c78fd generation provenance; no unchanged Kimodo inference was repeated for
+this additive test/documentation integration.

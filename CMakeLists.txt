@@ -154,6 +154,7 @@ install(FILES README.md PROMPTING.md LICENSE install.ps1 install.sh DESTINATION 
 install(FILES notes/implementation.md notes/ardy-native.md notes/ardy-feasibility.md notes/momask.md notes/momask-source-lock.json notes/momask-huggingface-audit.json
   notes/momask-archive-inventory.json notes/momask-configs.json notes/momask-export-results.json
   notes/momask-export-requirements.txt DESTINATION notes COMPONENT runtime)
+install(FILES notes/soma-rp-comparison.md DESTINATION notes COMPONENT runtime)
 install(DIRECTORY examples/ DESTINATION examples COMPONENT runtime)
 set(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION bin)
 set(CMAKE_INSTALL_SYSTEM_RUNTIME_COMPONENT runtime)
@@ -201,6 +202,10 @@ if(BUILD_TESTING)
   endif()
   add_custom_command(TARGET momask-ort-tests POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:motion-ort>" "$<TARGET_FILE_DIR:momask-ort-tests>")
   add_test(NAME cli-help COMMAND tide-motion --help)
+  # Optional developer-only renderer for blind comparisons of existing generated GLBs.
+  add_executable(soma-sheet EXCLUDE_FROM_ALL tests/model-comparison/sheet.cpp)
+  target_link_libraries(soma-sheet PRIVATE motion-core)
+  add_custom_command(TARGET soma-sheet POST_BUILD COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:motion-ort>" "$<TARGET_FILE_DIR:soma-sheet>")
   add_test(NAME cli-contracts COMMAND "${CMAKE_COMMAND}" "-DTOOL=$<TARGET_FILE:tide-motion>" "-DFIXTURE=$<TARGET_FILE:motion-tests>" "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/cli-contracts" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/cli.cmake")
   add_test(NAME retarget-cli COMMAND "${CMAKE_COMMAND}" "-DTOOL=$<TARGET_FILE:tide-motion>" "-DFIXTURE=$<TARGET_FILE:retarget-tests>" "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/retarget-cli" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/retarget.cmake")
 endif()
