@@ -2,7 +2,9 @@ param(
     [Parameter(Mandatory=$true)][string]$Tool,
     [Parameter(Mandatory=$true)][string]$Models,
     [string]$Tide,
-    [ValidateRange(1,64)][int]$Seeds=8
+    [ValidateRange(1,64)][int]$Seeds=8,
+    [ValidateSet('auto','cpu','gpu')][string]$Device='auto',
+    [ValidateRange(1,8)][int]$BatchSize=8
 )
 $ErrorActionPreference='Stop'
 $env:TIDE_HIDDEN='1'
@@ -22,13 +24,17 @@ foreach($seed in 1..$Seeds) {
         }
         $name="$kind-$seed"
         @{version=1;seed=$seed;warmupChunks=8;segments=$segments}|ConvertTo-Json -Depth 10|Set-Content -LiteralPath (Join-Path $work "$name.json")
-        $actions+=@{action='dart';plan="$name.json";output="$name.glb";threads=4}
+        $actions+=@{action='dart';plan="$name.json";output="$name.glb";threads=4;device=$Device;batchSize=$BatchSize}
     }
 }
 @{actions=$actions}|ConvertTo-Json -Depth 10|Set-Content -LiteralPath (Join-Path $work 'batch.json')
 $info=[Diagnostics.ProcessStartInfo]::new($Tool)
 $info.UseShellExecute=$false;$info.CreateNoWindow=$true;$info.RedirectStandardOutput=$true;$info.RedirectStandardError=$true
 foreach($arg in @('batch',(Join-Path $work 'batch.json'),'--models',$Models)){$info.ArgumentList.Add($arg)}
+$mx=[Threading.Mutex]::new($false,'TideMotionGpuValidation');$held=$false
+try {
+try {$held=$mx.WaitOne(0)}catch [Threading.AbandonedMutexException] {$held=$true}
+if(!$held){throw 'TideMotionGpuValidation is held; retry after current validation'}
 $process=[Diagnostics.Process]::new();$process.StartInfo=$info
 $watch=[Diagnostics.Stopwatch]::StartNew();[void]$process.Start()
 $stdout=$process.StandardOutput.ReadToEndAsync();$stderr=$process.StandardError.ReadToEndAsync();$peak=0L
@@ -45,4 +51,5 @@ foreach($action in $actions){
     if($LASTEXITCODE){throw 'DART GLB failed native reimport'}
 }
 if($Tide){& $Tool preview (Join-Path $work 'goals-1.glb') --tide $Tide --capture (Join-Path $work 'goals.png') --frames 51;if($LASTEXITCODE){throw 'DART preview failed'}}
-@{directory=$work;actions=$actions.Count;goals=$goals;reached=$success;seconds=$watch.Elapsed.TotalSeconds;peakWorkingSetBytes=$peak}|ConvertTo-Json|Tee-Object -FilePath (Join-Path $work 'summary.json')
+@{directory=$work;device=$Device;batchSize=$BatchSize;actions=$actions.Count;goals=$goals;reached=$success;seconds=$watch.Elapsed.TotalSeconds;peakWorkingSetBytes=$peak}|ConvertTo-Json|Tee-Object -FilePath (Join-Path $work 'summary.json')
+}finally{if($held){$mx.ReleaseMutex()};$mx.Dispose()}

@@ -2724,3 +2724,86 @@ existing model-file metadata records remain unchanged, and private MoMask bundle
 verification passes. Installed executable matches the validated Vulkan/DirectML
 build, SHA-256 d4b524f0dc0f6b6a701e0ef053e5bdc6d020fda3157243137480dbcaaa526761.
 
+## DART native GPU and inference batching (2026-10-28)
+
+Owner requested GPU acceleration and fuller model utilization. DART now prefers
+Windows x64 DirectML with --device auto (default); cpu forces CPU, gpu is strict.
+It reuses the existing pinned ARDY DirectML/ORT redistributables and notices in
+bin/ardy-directml, adding no SDK/CUDA/Python dependency. MOTION_ARDY_DIRECTML
+currently controls both native GPU paths. Separate C API tables isolate GPU ORT
+1.24.4 from CPU ORT 1.31.1. Text remains native CPU, cached once. An automatic GPU
+initialization failure falls back; an API execution failure restarts the entire
+unwritten group from its seeds on CPU. Explicit gpu propagates failures.
+
+Three new opset-17 dynamic-batch graphs reuse all existing tensor offsets; no
+checkpoint, weights hash or representation changes. Native model installation
+constructs the additional verified graphs; rerun models install dart after upgrade.
+Pins are in dart-models.json. Developer-only dart_batch_export.py checks PyTorch
+against ORT for batches 1/2/4/8/16. It explicitly transposes decoder latent axes
+from [B,1,256] to [1,B,256] and broadcasts the policy's shared standard deviation.
+Neither issue could be detected by the previous batch-one exports. Dynamic
+graphs have 1439/964/86 denoiser/decoder/policy nodes and share the same 372 MB
+tensor file. No model enters Git; developer tools are absent from runtime packages.
+
+Consecutive independent dart actions with equal device/threads/batchSize share
+policy and decoder calls and both CFG branches in one 2N denoiser call per step.
+batchSize is 1..8, default 8 (--batch-size in internal/standalone arguments).
+Every stream retains its own RNG, history, warmup, prompt/target progression,
+world transform and metrics; finished streams are padded and ignored. There is
+no batching across dependent autoregressive chunks or non-DART actions. All
+plans/outputs preflight before inference; a group writes only after all results
+exist. Session sets persist across groups, cached by network/static batch size.
+Recipes distinguish actual device/accelerator, group wall time, request count,
+primitive waves, denoiser calls and sampled process-local GPU memory. A successful
+rollout does not imply contacts or exact goals; misses remain explicit.
+
+Windows ClangCL 18 Release/RTX 4080 SUPER, four CPU threads, mutex held throughout
+every GPU test and each matched CPU comparison: native PyTorch reference maximum
+error CPU 1.04308e-5, GPU 2.19867e-5 (original 2e-4 bound). GPU profiles for each
+network at batches 1 and 4 record one fused DML kernel and no CPU-provider kernels.
+A DirectML crash when cloning provider session options was reproduced and fixed
+by creating/configuring independent options for each cached session.
+An intermittent native crash was then observed in a short packaged rollout.
+Sessions now use one retained DirectML device and compute queue through DML1,
+instead of independent device creation for each network. Twelve independent
+GPU continuation processes, repeated full 24-action runs and packaged GPU/
+strict-refusal/actual-CPU-fallback checks pass after that change. Exact driver
+crash causality was not established; the shared-device path avoids that lifetime
+pattern and is the validated implementation. Timings below are the final repeat.
+
+Matched 24-action/eight-seed runs (wall time includes verification/load; single
+machine observations, not universal performance guarantees): CPU group 1/8 took
+27.746/18.755 s; GPU group 1/8 took 9.065/3.597 s. Every run reached 48/48 goals.
+Mean/max goal error stays 0.14838/0.29810 m across modes; independent GLB/FK
+checks all 96 assets and recipe roots, with max bone error <2.7e-7 m. Largest
+joint step <=22.43 degrees. GPU local memory peaks 224,059,392 / 231,858,176 bytes;
+100-ms-sampled host working sets 621,797,376 / 609,529,856 bytes (CPU 320/326 MB).
+Foot drift/support-leg limitations remain; acceleration does not fix contacts.
+
+Windows and Ubuntu GCC 13 pass all twelve current CTests with isolated temp paths.
+Windows archive installer/reinstaller/refusals pass. The installed executable
+runs real default-GPU inference with Windows-only PATH; a private deployment
+missing GPU DLLs refuses explicit gpu and really generates on CPU with auto.
+tests/dart-runtime.ps1 reproduces it under TideMotionGpuValidation. Models and
+generated/reference data remain ignored. No owner installation or engine changes.
+
+Capability audit: released-policy waypoint control and changing supported text
+segments use the full native forward host loop. Arbitrary text continuation still
+needs native CLIP tokenization/embedding integration and its own adherence tests;
+it is not a policy skill extension. Imported SOMA history still needs an explicit,
+independently validated inverse representation/calibration, rather than assuming
+SOMA and SMPL rest geometry coincide. Those are technical work not delivered here.
+Upstream optim_mld.py (noise.requires_grad_, Adam, loss.backward) and
+optim_scene_mld.py require gradients through DDIM/decoder/world transforms;
+forward-only GPU ONNX calls do not implement inbetweening or scene optimization.
+Those need native backward graphs/optimizer plus separately audited scene/body
+assets as applicable. No new rights grant or unsupported capability is asserted.
+
+Final integration onto cbff1cc preserves the independent MoMask GPU option,
+shared authoring controls, preview/props/follow/Mixamo work and newer-Clang fixes.
+The combined Windows DirectML build and Linux CPU build pass all twelve CTests.
+The final isolated ZIP installs/reinstalls and passes real default DART GPU,
+strict GPU refusal and actual CPU fallback with Windows-only PATH. Models and
+the owner's installed tool are untouched. No additional CI dispatch or engine
+source changes. GPU timings/memory above use the final shared-device code;
+the integrated code changes no inference arithmetic after that measurement.

@@ -339,6 +339,8 @@ refuses("Missing or incomplete" connect "${full}" "${source}" -o "${WORK}/caps.g
 refuses("Tide preview failed" preview "${full}" --capture "${WORK}/p77.png" --tide "${CMAKE_COMMAND}")
 # DART is opt-in; all plan and batch fields are refused before model access.
 help_lists("waypoint control" help dart)
+refuses("DART batch size" dart "${WORK}/dart-valid.json" --batch-size 9 -o "${WORK}/dart.glb")
+refuses("device is auto, gpu or cpu" dart "${WORK}/dart-valid.json" --device other -o "${WORK}/dart.glb")
 file(WRITE "${WORK}/dart-valid.json" "{\"version\":1,\"segments\":[{\"text\":\"walk\",\"chunks\":12,\"target\":[0,2]}]}")
 refuses("Missing or incomplete" dart "${WORK}/dart-valid.json" -o "${WORK}/dart.glb" --models "${empty}")
 refuses("accept-licenses" models install dart --models "${empty}")

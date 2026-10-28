@@ -640,8 +640,10 @@ release is built with Vulkan; the others use CPU inference.
 
 ## DART waypoint control and continuation (opt-in)
 
-`dart` runs the released DART locomotion policy, diffusion model, motion decoder
-and CLIP text tower natively on the CPU. It exports canonical SOMA-30 GLBs for
+`dart` runs the released DART locomotion policy, diffusion model and motion decoder
+natively on Windows DirectML GPU (default `--device auto`) or CPU (`--device cpu`).
+`--device gpu` requires GPU execution; auto falls back to CPU. CLIP stays native CPU.
+It exports canonical SOMA-30 GLBs for
 the existing preview and mapped humanoid retargeting commands. Defaults and the
 `models install all` selection stay unchanged.
 
@@ -667,6 +669,13 @@ history frames and is capped below 18,000 frames. Plans and paths remain local.
 Batch actions use `{"action":"dart","plan":"plan.json","output":"clip.glb","threads":4}`;
 plans resolve relative to the batch manifest and all are preflighted before
 any inference. One set of sessions and three text embeddings is reused.
+Consecutive DART actions share real policy/decoder calls and both guidance branches
+across up to eight independent streams; action `batchSize` (1..8) limits grouping.
+Set `device` per action. Run `models install dart --accept-licenses` again after
+upgrading to construct the additional batch graphs from the cached checkpoints.
+On the tested RTX 4080 SUPER, 24 actions took 3.60 s with GPU groups of eight,
+versus 27.75 s with single-stream CPU groups; all four CPU/GPU/group-size cases
+reached 48/48 tested waypoints. These are local observations, not hardware guarantees.
 
 Initialization uses the model's mean features followed by native generated walk
 warmup. The predicted-joint path derives its pelvis offset from the released

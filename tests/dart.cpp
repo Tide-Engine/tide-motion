@@ -36,6 +36,7 @@ void assets(const fs::path& directory) {
 }
 }
 int main(int argc,char** argv) try {
+    if(argc==5&&std::string_view(argv[1])=="--batch-reference"){DartModel model(utf8path(argv[2]),4,argv[4]);std::cout<<"Batched reference max "<<model.verify_batch_reference(utf8path(argv[3]))<<'\n';return 0;}
     if(argc==3&&std::string_view(argv[1])=="--assets"){assets(utf8path(argv[2]));return 0;}
     if(argc==3){DartModel model(utf8path(argv[1]),4);std::cout<<"Native/PyTorch max absolute error "<<model.verify_reference(utf8path(argv[2]))<<'\n';return 0;}
     auto path=fs::temp_directory_path()/("dart-plan-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".json");

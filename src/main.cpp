@@ -5,6 +5,7 @@
 #include "momask.hpp"
 #include "ardy_gpu.hpp"
 #include "dart.hpp"
+#include "dart_gpu.hpp"
 #include <kimodo/kimodo.hpp>
 #include <nlohmann/json.hpp>
 #include <algorithm>
@@ -83,7 +84,7 @@ not predicted fingers. Inpaint preserves the input's rig by default.
 Kimodo spatial constraints/ARDY history controls are not accepted. Weight rights remain unresolved;
 manual import does not grant commercial rights. See notes/momask-local.md.
 )";
-    if(command=="dart")return R"(tide-motion dart PLAN.json -o OUT.glb [--models DIR] [--threads N]
+    if(command=="dart")return R"(tide-motion dart PLAN.json -o OUT.glb [--models DIR] [--threads N] [--device auto|gpu|cpu]
 
 Native offline DART continuation and waypoint control on canonical SOMA at 30 Hz.
 Install explicitly with models install dart --accept-licenses.
@@ -91,7 +92,11 @@ Version-1 plan: seed, warmupChunks, segments [{text, chunks, target?: [x,z]}].
 Supported text: walk, run, hop on left leg. Targets are world metres; chunks is
 the maximum 8-frame primitive count. Target segments stop within 0.3 m or at the
 budget, reporting misses in the recipe. No inbetweening or scene constraints.
-Inference and model conversion are native CPU operations; no Python is required.
+auto prefers native Windows DirectML and restarts on CPU if GPU execution fails.
+gpu is strict; cpu forces CPU. Text/model conversion stay native CPU operations.
+Consecutive batch actions share real policy/CFG/decoder calls (up to eight plans).
+Action batchSize (1..8, default 8) limits grouping; --batch-size is its CLI form.
+No Python is required. Rerun models install dart to prepare the new batch graphs.
 )";
     if(command=="generate")return R"(tide-motion generate "PROMPT" -o CLIP.glb [options]
 
@@ -498,8 +503,15 @@ struct RunContext {
     struct PendingBridge { Clip from,to; BricksRequest options; fs::path output; };
     struct ReadyBridge { fs::path output; Bridge bridge; size_t requests=1,index=0; };
     bool bricks_prepare=false;std::vector<PendingBridge> bricks_pending;std::deque<ReadyBridge> bricks_ready;
-    std::unique_ptr<DartModel> dart;unsigned dart_threads=0;
+    std::unique_ptr<DartModel> dart;unsigned dart_threads=0;std::string dart_device;
+    struct ReadyDart {fs::path output;DartResult result;};std::deque<ReadyDart> dart_ready;
 };
+DartModel& dart_session(const fs::path& models,unsigned threads,const std::string& device,RunContext* context) {
+    if(!context->dart||context->dart_threads!=threads||context->dart_device!=device) {
+        context->dart.reset();check_models(models,"dart");context->dart=std::make_unique<DartModel>(models/"dart",threads,device);context->dart_threads=threads;context->dart_device=device;
+    }
+    return *context->dart;
+}
 BricksModel& bricks_session(const fs::path& models,unsigned threads,RunContext* context) {
     if(!context->bricks||context->bricks_threads!=threads) {
         if(!context->bricks)check_models(models,"bricks");
@@ -673,7 +685,10 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
             if(action.value("inPlace",false))argv.push_back("--in-place");
             for(auto pair:{std::pair{"device","--device"},std::pair{"rig","--rig"},std::pair{"tide","--tide"}})if(action.contains(pair.first))argv.insert(argv.end(),{pair.second,action[pair.first].get<std::string>()});
         } else if(type=="dart") {
-            keys.insert({"plan","threads"});auto plan=path(action.at("plan"));(void)load_dart_plan(plan);argv.push_back(plan.string());
+            keys.insert({"plan","threads","device","batchSize"});auto plan=path(action.at("plan"));(void)load_dart_plan(plan);argv.push_back(plan.string());
+            if(action.contains("device")){auto d=action["device"].get<std::string>();if(d!="auto"&&d!="cpu"&&d!="gpu")throw std::runtime_error("DART device is auto, cpu or gpu");argv.insert(argv.end(),{"--device",d});}
+            if(action.value("device",std::string("auto"))=="gpu"&&!dart_gpu_compiled())throw std::runtime_error("DART GPU: this build has no DirectML support");
+            if(action.contains("batchSize")){if(!action["batchSize"].is_number_integer())throw std::runtime_error("batchSize must be integer");auto v=integer(action["batchSize"].dump(),1,8,"DART batchSize");argv.insert(argv.end(),{"--batch-size",std::to_string(static_cast<unsigned>(v))});}
         } else if(type=="generate") {
             auto selected_backend=action.value("backend",std::string("kimodo"));
             if(selected_backend=="ardy") {
@@ -886,6 +901,14 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
     };
     size_t batched_until=0;
     for(size_t i=0;i<commands.size();++i) {
+        if(commands[i][1]=="dart"&&context->dart_ready.empty()) {
+            auto threads=option(commands[i],"--threads"),device=option(commands[i],"--device"),limit=option(commands[i],"--batch-size");
+            size_t end=i;std::vector<DartPlan> plans;size_t maximum=limit.empty()?8:static_cast<size_t>(std::stoul(limit));
+            for(;end<commands.size()&&end-i<maximum&&commands[end][1]=="dart"&&option(commands[end],"--threads")==threads&&option(commands[end],"--device")==device&&option(commands[end],"--batch-size")==limit;++end)plans.push_back(load_dart_plan(utf8path(commands[end][2])));
+            std::cerr<<"DART neural batch actions "<<i+1<<"-"<<end<<" ("<<plans.size()<<" independent streams)\n";
+            auto results=dart_session(models,threads.empty()?0:static_cast<unsigned>(std::stoul(threads)),device.empty()?"auto":device,context).generate(plans);
+            for(size_t k=0;k<results.size();++k)context->dart_ready.push_back({fs::absolute(utf8path(option(commands[i+k],"-o"))),std::move(results[k])});
+        }
         if(i>=batched_until&&commands[i][1]=="connect") {
             std::set<fs::path> run_outputs;const auto threads=option(commands[i],"--threads");size_t j=i;
             context->bricks_prepare=true;context->bricks_pending.clear();
@@ -995,6 +1018,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         else if(a=="--model") {model_version=value();if(model_version!="v1.1"&&model_version!="v1.2")throw std::runtime_error("--model is v1.1 or v1.2 (smooth-root SOMA-RP)");}
         else if(a=="--device") {device=value();if(device!="auto"&&device!="gpu"&&device!="cpu")throw std::runtime_error("--device is auto, gpu or cpu");}
         else if(a=="--threads")threads=static_cast<unsigned>(integer(value(),1,1024,"threads"));
+        else if(a=="--batch-size")(void)integer(value(),1,8,"DART batch size");
         else if(a=="--steps")steps=static_cast<unsigned>(integer(value(),1,1000,"steps"));
         else if(a=="--seed")seed=static_cast<uint64_t>(integer(value(),0,4294967295.0,"seed"));
         else if(a=="--frames")frames=static_cast<int>(integer(value(),1,18000,"frames"));
@@ -1037,7 +1061,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     else if(command=="cleanup")allowed={"-o","--output","--contacts","--map","--clip"};
     else if(command=="models")allowed={"--models","--accept-licenses"};
     else if(command=="pose-sequence")allowed={"-o","--output","--models","--threads","--contacts-out","--contact-threshold"};
-    else if(command=="dart")allowed={"-o","--output","--models","--threads"};
+    else if(command=="dart")allowed={"-o","--output","--models","--threads","--device","--batch-size"};
     else if(command=="batch")allowed={"--models"};
     for(const auto& flag:flags)if(!allowed.contains(flag))throw std::runtime_error(command+" does not take "+flag);
     if(command=="batch") {
@@ -1163,11 +1187,12 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     if(command=="dart") {
         if(pos.size()!=1)throw std::runtime_error("dart takes one JSON plan");
         auto plan=load_dart_plan(utf8path(pos[0]));
-        if(!context->dart||context->dart_threads!=threads) {
-            check_models(models,"dart");context->dart=std::make_unique<DartModel>(models/"dart",threads);context->dart_threads=threads;
-        }
-        auto result=context->dart->generate(plan);result.clip.name=output.stem().string();save_glb(result.clip,output);
-        nlohmann::json recipe={{"tool","tide-motion"},{"version",MOTION_VERSION},{"command","dart"},{"authoring",plan.recipe},{"threads",threads?threads:4},{"device","cpu"},{"fps",30},{"frames",result.clip.frames()},{"metrics",result.metrics},
+        if(device=="gpu"&&!dart_gpu_compiled())throw std::runtime_error("DART GPU: this build has no DirectML support");
+        DartResult result;
+        if(!context->dart_ready.empty()){auto ready=std::move(context->dart_ready.front());context->dart_ready.pop_front();if(ready.output!=fs::absolute(output))throw std::runtime_error("DART batch output order mismatch");result=std::move(ready.result);}
+        else result=dart_session(models,threads,device,context).generate(plan);
+        result.clip.name=output.stem().string();save_glb(result.clip,output);
+        nlohmann::json recipe={{"tool","tide-motion"},{"version",MOTION_VERSION},{"command","dart"},{"authoring",plan.recipe},{"threads",threads?threads:4},{"device",result.metrics.at("device")},{"accelerator",result.metrics.at("device")=="gpu"?"directml":"cpu"},{"fps",30},{"frames",result.clip.frames()},{"metrics",result.metrics},
             {"sourceRevision","bb67ae1ed6ce051080468bf15bc6e54a6c3f8417"},{"weightsSha256","6c186ea7807efe7cef02e639726bb94040f1c44fb8beef0621c667440d7b7877"},{"sampler","x0 cosine10 DDIM eta0 CFG5"},
             {"randomGenerator","std::mt19937 + std::normal_distribution<float>; compiler-dependent normal transform"},
             {"checkpoints",{{"denoiser","e6c550641deaaccb6313f3529a4ca6602eb00d675dcff3aa47217825b5a43615"},{"decoder","b818cc8704ad9b408c745cac48943c99bf5402ffca521b25ffaf6639a5d5d276"},{"policy","81af5cda56e519afadb7bdf74ba82322cc79f903c1cbea151b05fdc71f460a0e"},{"text","40d365715913c9da98579312b702a82c18be219cc2a73407c4526f58eba950af"},{"normalizer","cb442539380d15a5763b799ba063d9b0b6574a751a03ae0c86d4a6f24bff5bd4"}}}};

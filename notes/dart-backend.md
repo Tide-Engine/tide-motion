@@ -1,11 +1,23 @@
 # Native DART locomotion backend
 
-Implemented 2026-10-28. `dart PLAN.json -o CLIP.glb` is an explicit opt-in CPU
+Implemented 2026-10-28. `dart PLAN.json -o CLIP.glb` is an explicit opt-in native
 backend for continuation and waypoint locomotion, with the released policy's
 `walk`, `run`, `hop on left leg` labels. It is offline animation authoring.
 It does not expose arbitrary text, imported start clips, gradient inbetweening,
 scene/SDF interaction, automatic rig identification, skinning or non-humanoid
 retargeting. Existing backends and defaults are preserved.
+
+GPU/batching update: `--device auto|gpu|cpu` now prefers Windows DirectML, with
+strict gpu and automatic CPU fallback/restart. Text remains native CPU. Consecutive
+DART actions share real neural calls, bounded by action `batchSize` 1..8 (default 8),
+with independent RNG/history/goals. Both guidance branches run as a 2N batch.
+Rerun `models install dart --accept-licenses` after upgrading to prepare the three
+new verified graphs, which reuse existing learned tensors. The shared build switch
+is MOTION_ARDY_DIRECTML; its pinned DLLs/notices serve both backends. Linux remains CPU.
+See the final GPU/batching section of implementation.md for contracts, parity,
+measured timings/memory, native package/fallback tests and the capability audit.
+Earlier CPU measurements below remain historical observations. GPU/CPU are not
+promised bit-identical; all 96 new matched-run assets pass independent GLB/FK tests.
 
 ## Exact assets, rights and preparation
 

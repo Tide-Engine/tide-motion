@@ -31,6 +31,9 @@ constexpr ModelFile files[]={
     {"dart","dart/decoder.onnx",161074,"866e25acfe54984e84a1426bf8545353b858bb6e97d874b7bbd7c6669c77d579",nullptr},
     {"dart","dart/policy.onnx",11842,"35383487387d695d1550bb5db0d18469546ab656fc9eb953b0f83530d661cd39",nullptr},
     {"dart","dart/text.onnx",663015,"5d5ce3c84769ccbd724a43c26b24ccd08046d75c7edc7c6e561bf82866cdce79",nullptr},
+    {"dart","dart/denoiser-batch.onnx",278098,"cddda8f84f991df73cd779bb92b7d3a739f69acfece69b22c8e1f7652f1be06a",nullptr},
+    {"dart","dart/decoder-batch.onnx",178146,"2bc1faaf482be8e92598c84ba365e6183254b8e317db23a6b0f35f95e96d62ec",nullptr},
+    {"dart","dart/policy-batch.onnx",12010,"a051450cfb9fcdc9243ea96c4c83671bf5d452ccf1381a602caa84f564d5959f",nullptr},
     v12_model,
     {"kimodo","kimodo.gguf",1133166784ULL,"3bf1229f4c1eff1d28f5196a854113da2df9a11a5e21c60694630903bf948ee4",
      "https://huggingface.co/LocalAI-io/Kimodo-SOMA-RP-v1.1-GGML/resolve/65f8b8ab34ee7524161cc87b20ae4cb4f5d3a12d/models/kimodo-soma-rp-v1.1-f32.gguf"},
@@ -56,6 +59,7 @@ void prepare_v12(const fs::path& root);
 void prepare_dart(const fs::path& root);
 struct DartSlice {const char* file;uint64_t source,bytes,destination;bool half;};
 #include "generated/dart-graphs.inc"
+#include "generated/dart-batch-graphs.inc"
 void selection_valid(const std::string& selection) {
     if(selection!="all"&&selection!="kimodo"&&selection!="bricks"&&selection!="kimodo-v1.2"&&selection!="text"&&selection!="dart")throw std::runtime_error("Model selection must be all, kimodo, kimodo-v1.2, text, bricks or dart");
 }
@@ -153,6 +157,7 @@ void prepare_dart(const fs::path& root) {
         out.close();if(!out)throw std::runtime_error("DART graph write failed");publish(path);
     };
     graph("denoiser.onnx",denoiser_graph());graph("decoder.onnx",decoder_graph());graph("policy.onnx",policy_graph());graph("text.onnx",text_graph());
+    graph("denoiser-batch.onnx",denoiser_batch_graph());graph("decoder-batch.onnx",decoder_batch_graph());graph("policy-batch.onnx",policy_batch_graph());
 }
 void prepare_v12(const fs::path& root) {
     for(const auto& source:v12_sources)install_file(root,source);

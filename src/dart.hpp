@@ -11,10 +11,14 @@ struct DartResult { Clip clip; nlohmann::json metrics; };
 class DartModel {
     struct Impl; std::unique_ptr<Impl> impl_;
 public:
-    explicit DartModel(const fs::path& directory,unsigned threads=0);
+    explicit DartModel(const fs::path& directory,unsigned threads=0,const std::string& device="auto");
     ~DartModel();
     DartResult generate(const DartPlan&);
+    // Independent streams share policy/CFG/decoder calls. Maximum eight jobs.
+    std::vector<DartResult> generate(std::span<const DartPlan>);
+    std::string device() const;
     // Development verification against independently exported PyTorch tensors.
     double verify_reference(const fs::path&);
+    double verify_batch_reference(const fs::path& directory);
 };
 }
