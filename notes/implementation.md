@@ -392,6 +392,11 @@ local 18.1.8 and enables -Wcast-function-type-mismatch, which rejected the direc
 FARPROC-to-OrtGetApiBase cast in ardy_gpu.cpp under -Werror. The pointer bits are
 now copied with memcpy (size asserted), which no cast-function-type variant flags.
 Local ClangCL 18 full build and all twelve CTests pass. Only CI covers the newer clang.
+The next run exposed that every Windows job since the upgrade test was added had
+been cancelled before installation tests: upgrade.ps1 passed but ended on an
+expected refusal, so its native nonzero exit leaked through $LASTEXITCODE into the
+Actions pwsh wrapper. The script now ends with exit 0; the CI step reproduces exit 1
+without it and exit 0 with it locally.
 
 Windows help text correction (0.1.3): the owner reported mojibake in the first
 help line because its UTF-8 em dash was printed through a legacy console code

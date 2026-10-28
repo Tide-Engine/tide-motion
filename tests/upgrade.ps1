@@ -80,3 +80,4 @@ Refuses 'Version must be' @('upgrade','--version','1.2.3/evil')
 Refuses 'Unknown upgrade option' @('upgrade','--models','no-models')
 if((Get-FileHash -LiteralPath $tool).Hash -ne $before){throw 'Failed upgrade changed executable'}
 Write-Output "Offline/live upgrade, preservation, rollback, locking and refusal checks passed: $work"
+exit 0
