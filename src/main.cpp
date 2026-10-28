@@ -1,4 +1,5 @@
 #include "motion.hpp"
+#include "author.hpp"
 #include <kimodo/kimodo.hpp>
 #include <nlohmann/json.hpp>
 #include <algorithm>
@@ -149,6 +150,21 @@ of another.
   --threads N                 CPU threads, 1..1024 (default: half)
   --models DIR                Model directory
 )";
+    if(command=="pose-sequence")return R"(tide-motion pose-sequence POSES.json -o CLIP.glb [--models DIR] [--threads N]
+
+Native MotionBricks offline authoring through 1..128 explicit SOMA pose targets.
+Poses use schema tide-motion-pose-sequence-1, start and targets. Each pose has
+file, optional clip/frame/hold, required position [root X,Y,Z metres] and yaw
+(degrees, 0 faces +Z, 90 +X). Each target requires tokens 6..16; it adds
+4*tokens-7 intervals at 30 Hz. Start defaults to the last source frame, targets
+to the first. Negative frame indices count from the end. Windows sample the last
+four context / first four target samples, clamped at clip ends; hold:true repeats
+the selected pose. Later contexts use the last four generated samples.
+Paths are relative to POSES.json. All source clips must exist before the run
+(including in batch). Output is ordinary GLB plus an effective JSON recipe.
+No scene understanding, contacts, IK, arbitrary timing or velocity seam guarantee.
+See examples/pose-sequence.json and README.md.
+)";
     if(command=="mirror")return R"(tide-motion mirror CLIP.glb -o MIRRORED.glb [--clip NAME]
 
 Swaps left and right in a SOMA-30 clip and reflects it across the character's
@@ -173,7 +189,7 @@ metres); examples/synty-polygon.json maps Synty POLYGON characters.
 )";
     if(command=="batch")return R"(tide-motion batch JOBS.json [--models DIR]
 
-Runs ordered generate, connect, retarget and mirror actions, loading each model
+Runs ordered generate, connect, pose-sequence, retarget and mirror actions, loading each model
 once.
 The whole manifest and every output path are checked before anything runs.
 Paths are relative to the manifest. README.md lists every action field.
@@ -235,6 +251,7 @@ void help(std::string_view command={}) {
       [--device auto|gpu|cpu] [--threads N]
   tide-motion connect FROM.glb TO.glb -o BRIDGE.glb [--tokens 6..16] [--joined]
       [--offset X Y Z] [--from-clip NAME] [--to-clip NAME] [--threads N]
+  tide-motion pose-sequence POSES.json -o CLIP.glb [--threads N]
   tide-motion mirror CLIP.glb -o MIRRORED.glb [--clip NAME]
   tide-motion retarget SOURCE.glb --target CHARACTER.glb|.fbx --map BONES.json -o CLIP.glb
   tide-motion retarget SOURCE.glb|.fbx --to-soma --map BONES.json -o SOMA.glb [--clip NAME]
@@ -462,6 +479,10 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
             }
         }
         else if(type=="connect") { argv.push_back(path(action.at("from")).string());argv.push_back(path(action.at("to")).string());keys.insert({"from","to","tokens","joined","offset","fromClip","toClip","threads"}); }
+        else if(type=="pose-sequence") {
+            auto poses=path(action.at("recipe"));(void)load_pose_sequence(poses);
+            argv.push_back(poses.string());keys.insert({"recipe","threads"});
+        }
         else if(type=="mirror") {
             argv.push_back(path(action.at("source")).string());keys.insert({"source","clip"});
             if(action.contains("clip"))argv.insert(argv.end(),{"--clip",action["clip"].get<std::string>()});
@@ -478,7 +499,7 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
             if(action.contains("clip"))argv.insert(argv.end(),{"--clip",action["clip"].get<std::string>()});
             keys.insert({"source","target","map","toSoma","clip"});
         }
-        else throw std::runtime_error("Action must be generate, connect, retarget or mirror");
+        else throw std::runtime_error("Action must be generate, connect, pose-sequence, retarget or mirror");
         for(const auto& item:action.items())if(!keys.contains(item.key()))throw std::runtime_error("Unknown action field: "+item.key());
         auto output=path(action.at("output"));
         if(output.extension()!=".glb")throw std::runtime_error("Output must be a .glb path: "+output.string());
@@ -492,7 +513,7 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
         } else written.push_back(output);
         for(const auto& file:written)if(fs::exists(file)||fs::exists(file.string()+".part")||fs::exists(file.string()+".json")||!outputs.insert(file).second)throw std::runtime_error("Output must be a new, distinct path: "+file.string());
         argv.insert(argv.end(),{"-o",output.string()});
-        if(type=="generate"||type=="connect")argv.insert(argv.end(),{"--models",models.string()});
+        if(type=="generate"||type=="connect"||type=="pose-sequence")argv.insert(argv.end(),{"--models",models.string()});
         for(const char* key:{"duration","seed","steps","tokens","threads"})if(action.contains(key)) {
             if(!action[key].is_number())throw std::runtime_error(std::string(key)+" must be numeric");
             auto text=action[key].dump();
@@ -539,7 +560,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     std::string command=args[1],clip_name,from_name,to_name,tide="tide";
     for(size_t i=2;i<args.size();++i)if(args[i]=="--help"||args[i]=="-h") {help(command);return 0;}
     fs::path models,output,capture,gif,target_file,map_file,character_file,texture_file;bool mannequin=false;
-    if(command=="generate"||command=="connect"||command=="models"||command=="batch")models=model_directory();
+    if(command=="generate"||command=="connect"||command=="pose-sequence"||command=="models"||command=="batch")models=model_directory();
     double duration=3;uint64_t seed=0;unsigned steps=50,transition=5;int frames=0,tokens=0;
     bool accept=false,joined=false,skeleton=false,to_soma=false,correct=true;Vec3 offset{};
     Placement placement=Placement::automatic;std::string placement_name="auto";
@@ -614,6 +635,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     else if(command=="inspect")allowed={"--clip","--skeleton"};
     else if(command=="preview")allowed={"--clip","--tide","--capture","--gif","--frames","--mannequin","--skeleton","--character","--map","--texture"};
     else if(command=="models")allowed={"--models","--accept-licenses"};
+    else if(command=="pose-sequence")allowed={"-o","--output","--models","--threads"};
     else if(command=="batch")allowed={"--models"};
     for(const auto& flag:flags)if(!allowed.contains(flag))throw std::runtime_error(command+" does not take "+flag);
     if(command=="batch") {
@@ -677,6 +699,21 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         if(fs::exists(file)||fs::exists(file.string()+".part")||fs::exists(file.string()+".json"))throw std::runtime_error("Output, partial output or recipe already exists: "+file.string());
     };
     if(variants<2)refuse_existing(output);
+    if(command=="pose-sequence") {
+        if(pos.size()!=1)throw std::runtime_error("pose-sequence takes one JSON recipe");
+        auto plan=load_pose_sequence(utf8path(pos[0]));
+        if(!context->bricks||context->bricks_threads!=threads) {
+            if(!context->bricks)check_models(models,"bricks");
+            context->bricks=std::make_unique<BricksModel>(models/"motionbricks.onnx",threads);context->bricks_threads=threads;
+        }
+        auto made=generate_pose_sequence(plan,*context->bricks);made.name=output.stem().string();
+        save_glb(made,output);
+        nlohmann::json recipe={{"tool","tide-motion"},{"version",MOTION_VERSION},{"command",command},{"authoring",plan.recipe},{"threads",threads},{"fps",30},{"frames",made.frames()},
+            {"motionbricksRevision","54fc563aeaaf819a753d72cc9fdc6713989cdd43"}};
+        std::ofstream metadata(output.string()+".json");metadata<<recipe.dump(2)<<"\n";metadata.close();
+        if(!metadata)throw std::runtime_error("Animation saved but could not write its recipe");
+        std::cout<<"Saved "<<output.string()<<" ("<<made.frames()<<" frames)\n";return 0;
+    }
     Clip clip;
     nlohmann::json retarget_recipe,generate_recipe,mirror_recipe;
     // Store generation settings alongside the asset; no need to rerun inference at build time.

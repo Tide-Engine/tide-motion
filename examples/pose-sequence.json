@@ -1,0 +1,8 @@
+{
+  "schema": "tide-motion-pose-sequence-1",
+  "start": {"file": "idle.glb", "frame": -1, "position": [0, 0.95, 0], "yaw": 0, "hold": true},
+  "targets": [
+    {"file": "walk.glb", "frame": 15, "position": [0, 0.95, 0.8], "yaw": 0, "tokens": 8},
+    {"file": "idle.glb", "frame": 0, "position": [0.5, 0.95, 1.4], "yaw": 90, "tokens": 10, "hold": true}
+  ]
+}

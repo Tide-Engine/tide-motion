@@ -505,3 +505,55 @@ No evaluation motion samples, proprietary training data or research-only SMPL-X
 checkpoints are included or downloaded. Supply source motion/characters you have
 rights to use. NVIDIA's output terms do not establish copyright ownership or
 clear third-party rights in user-supplied assets.
+
+### Offline pose sequences (MotionBricks)
+
+`tide-motion pose-sequence poses.json -o authored.glb --threads 8` generates
+through explicit ordered pose targets with one native ONNX session. Start from
+[examples/pose-sequence.json](examples/pose-sequence.json), replacing the clip
+paths and placements with your own. Files are relative to the JSON file; use
+SOMA GLBs, or first convert a manually mapped humanoid with `retarget --to-soma`.
+No upstream sample or evaluation motions are supplied.
+
+The schema is `tide-motion-pose-sequence-1`, with `start` and 1..128 `targets`.
+Each entry requires `file`, `position` (absolute **hips** XYZ in Y-up metres,
+including height), and `yaw` (absolute facing in degrees: 0 is +Z, 90 is +X).
+`clip` selects an animation; `frame` selects a 30 Hz sample (negative counts from
+the end; start defaults to -1, targets to 0). Root displacement and orientation
+are rotated about that sample; local body rotations and lengths stay intact.
+A start uses the four samples ending there, a target the four samples starting
+there; sampling clamps at clip ends. `hold:true` instead repeats the chosen pose
+four times to request zero guide velocity. It does not insert a timed hold.
+
+Each target requires integer `tokens` 6..16. With Tide's existing three-sample
+boundary trimming it adds **4*tokens-7 intervals** at 30 Hz: 8 tokens arrives 25
+frames (0.833 s) later, 10 tokens 33 frames (1.1 s) later. Arrival frames accumulate
+from frame 0; no resampling to arbitrary seconds is performed. All targets are
+reached exactly after the existing endpoint correction. One copy of each seam is
+exported. Later generations use the last four generated samples as context.
+The output contains only the selected start and generated motion, without source
+clip lead-ins or target clip tails.
+
+The adjacent `.glb.json` records `authoring`: a reusable schema object with
+absolute paths, resolved frames, effective positions/yaws/hold settings and token
+counts, plus computed startFrame/endFrame/seconds on targets. Extract `authoring`
+to a JSON file to edit and rerun; computed timing fields are recomputed on load.
+Model revision, tool version, thread setting and final frame count are recorded
+beside it. Sources must remain available; recipes do not embed motion data.
+
+Batch action: `{"action":"pose-sequence","recipe":"poses.json","threads":8,
+"output":"authored.glb"}`. The entire recipe, every source and all output
+collisions are checked before inference, including when a later batch action is
+invalid. Pose-sequence sources must already exist at batch preflight; an earlier
+batch action cannot create them in the same run. Interleaved connect actions
+reuse the session when thread settings agree. Existing connect/batch schemas stay
+compatible. Limits: 1 MiB JSON, 128 targets, 18,000 exported frames and existing
+GLB limits. Failure keeps completed batch assets.
+
+Design references are the pinned upstream [Inbetweener](https://github.com/NVlabs/motionbricks/blob/54fc563aeaaf819a753d72cc9fdc6713989cdd43/docs/inbetweener.md)
+and [Smart Primitive Editor](https://github.com/NVlabs/motionbricks/blob/54fc563aeaaf819a753d72cc9fdc6713989cdd43/docs/smart_primitive_editor.md):
+ordered pose windows and explicitly placed interaction targets. This feature has
+no objects, collision detection, scene/contact understanding, automatic placement,
+pivots, early transitions, IK or foot cleanup. Pose continuity is exact; velocity,
+acceleration, foot planting and plausible motion between distant/contradictory
+poses are not guaranteed. Inspect the generated GLB in a bounded Tide preview.

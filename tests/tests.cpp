@@ -1,4 +1,5 @@
 #include "motion.hpp"
+#include "author.hpp"
 #include "motion_decode.hpp"
 #include "skeleton.hpp"
 #include <algorithm>
@@ -193,6 +194,21 @@ void kimodo_contracts() {
     check(angle(out.frame(15)[3].q,before.frame(15)[3].q)>1e-3f,"Correction fades in before the keyframe");
 }
 int main(int argc,char** argv) try {
+    if(argc==4&&std::string(argv[1])=="--verify-sequence") {
+        auto plan=load_pose_sequence(argv[2]);auto output=load_glb(argv[3]);
+        size_t frame=0;
+        auto verify=[&](std::span<const Transform> expected) {
+            auto actual=output.frame(frame);
+            for(size_t j=0;j<30;++j) {
+                auto d=actual[j].p-expected[j].p;check(dot(d,d)<1e-10f,"Exported pose endpoint position");
+                check(angle(actual[j].q,expected[j].q)<0.002f,"Exported pose endpoint rotation");
+            }
+        };
+        verify(plan.start.frame(3));
+        for(size_t i=0;i<plan.targets.size();++i) {frame+=4*plan.tokens[i]-7;verify(plan.targets[i].frame(0));}
+        check(output.frames()==frame+1,"Exported exact sequence timing");
+        std::cout<<"Verified all endpoint poses and arrival frames: "<<output.frames()<<" frames\n";return 0;
+    }
     Clip c;c.joints=soma();
     for(int f=0;f<8;++f)for(size_t j=0;j<30;++j) { auto t=c.joints[j].rest;if(j==0)t.p={static_cast<float>(f)/30,1,0};c.poses.push_back(t); }
     c.validate();require_soma(c);
@@ -203,6 +219,35 @@ int main(int argc,char** argv) try {
     auto dir=fs::temp_directory_path()/"tide-motion-contract-tests";fs::create_directories(dir);
     auto path=dir/"roundtrip.glb";if(fs::exists(path))fs::remove(path);save_glb(c,path);auto loaded=load_glb(path);
     check(loaded.frames()==c.frames(),"GLB roundtrip frame count");
+    // Independently predictable translating clip: root +X at 1m/s, facing +Z.
+    nlohmann::json pose={{"file","roundtrip.glb"},{"frame",3},{"position",{4,2,-3}},{"yaw",90}};
+    nlohmann::json target=pose;target["frame"]=1;target["tokens"]=6;
+    nlohmann::json doc={{"schema","tide-motion-pose-sequence-1"},{"start",pose},{"targets",{target,target}}};
+    auto sequence_file=dir/"poses.json";
+    auto write_sequence=[&](){std::ofstream out(sequence_file);out<<doc.dump();};write_sequence();
+    auto plan=load_pose_sequence(sequence_file);
+    check(std::abs(plan.start.frame(3)[0].p.x-4)<1e-6f&&std::abs(plan.start.frame(3)[0].p.y-2)<1e-6f,"Absolute root placement");
+    check(std::abs(plan.start.frame(0)[0].p.z+2.9f)<1e-5f,"Context samples precede anchor and rotate travel");
+    check(std::abs(plan.targets[0].frame(3)[0].p.z+3.1f)<1e-5f,"Target samples follow anchor and rotate travel");
+    check(std::abs(kimodo_heading(plan.start,plan.start.frame(3))-1.5707963f)<1e-4f,"Absolute facing");
+    for(size_t j=1;j<30;++j)check(same(plan.start.frame(3)[j].q,c.frame(3)[j].q),"Placement preserves local body rotations");
+    check(plan.recipe["targets"][0]["endFrame"]==17&&plan.recipe["targets"][1]["endFrame"]==34,"Exact trimmed timing accumulates intervals");
+    doc["targets"][0]["hold"]=true;doc["start"]["frame"]=-1;write_sequence();plan=load_pose_sequence(sequence_file);
+    check(plan.recipe["start"]["frame"]==7,"Negative source frame resolves");
+    {std::ofstream out(sequence_file);out<<plan.recipe.dump();}
+    auto reloaded=load_pose_sequence(sequence_file);
+    check(reloaded.recipe==plan.recipe,"Effective authoring recipe can be reused");
+    check(plan.targets[0].frame(0)[0].p.z==plan.targets[0].frame(3)[0].p.z,"Held pose repeats four guides");
+    Clip assembled;assembled.joints=soma();assembled.poses.assign(plan.start.frame(3).begin(),plan.start.frame(3).end());
+    Clip fake;fake.joints=soma();for(int f=0;f<18;++f)fake.poses.insert(fake.poses.end(),assembled.frame(0).begin(),assembled.frame(0).end());
+    fake.frame(17)[0].p.x=5;append_pose_bridge(assembled,fake);
+    check(assembled.frames()==18&&assembled.frame(17)[0].p.x==5,"Append removes only duplicate seam");
+    bool seam_refused=false;try{append_pose_bridge(assembled,fake);}catch(const std::exception&){seam_refused=true;}check(seam_refused,"Nonexact seam refused");
+    doc["targets"][1]["tokens"]=6.5;write_sequence();bool refused_sequence=false;
+    try{(void)load_pose_sequence(sequence_file);}catch(const std::exception&){refused_sequence=true;}check(refused_sequence,"Fractional timing refused");
+    doc["targets"][1]["tokens"]=8;doc["targets"][1]["frame"]=99;write_sequence();refused_sequence=false;
+    try{(void)load_pose_sequence(sequence_file);}catch(const std::exception&){refused_sequence=true;}check(refused_sequence,"Late invalid source refused");fs::remove(sequence_file);
+
     for(size_t f=0;f<c.frames();++f)for(size_t j=0;j<30;++j)check(dot(c.frame(f)[j].p-loaded.frame(f)[j].p,c.frame(f)[j].p-loaded.frame(f)[j].p)<1e-12f,"GLB position roundtrip");
     std::array<std::vector<Transform>,8> guides;
     for(size_t f=0;f<8;++f)guides[f]={c.frame(f).begin(),c.frame(f).end()};

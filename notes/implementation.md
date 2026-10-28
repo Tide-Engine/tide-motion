@@ -641,3 +641,87 @@ command help. Both Windows builds (Vulkan and CPU, ClangCL, warnings as errors)
 pass all five CTests. Not measured: --threads timing on the CPU path (only
 validated and plumbed), CPU fallback of --device gpu on a broken driver (the
 refusal path is the CPU-only build's), Linux/macOS builds (left to CI).
+
+## Offline MotionBricks pose authoring (2026-10-28)
+
+`pose-sequence POSES.json -o OUT.glb` and the matching batch action add bounded
+explicit pose-target authoring. Design references read at the unchanged pinned
+MotionBricks revision 54fc563aeaaf819a753d72cc9fdc6713989cdd43: docs/inbetweener.md
+(ordered targets, sampled windows, chaining recent context) and
+ docs/smart_primitive_editor.md (authored poses placed around interaction objects).
+Only source/documentation was inspected; no upstream sample/evaluation motions
+were copied. No model, dependency or license revision changed.
+
+The versioned JSON schema, example and full field semantics are in README.md and
+examples/pose-sequence.json. Absolute Y-up hips position and absolute hip-derived
+facing place a sampled SOMA pose without changing local body rotations. Start
+uses the preceding four 30 Hz samples ending at the chosen frame; targets use
+the following four beginning there. Sampling clamps at source boundaries.
+Optional hold repeats the pose four times, giving zero guide derivatives under
+the existing four-pose contract (not upstream's one-pose mask mode). A later
+segment uses the last four generated samples as its context. Alignment, masks,
+trim and native endpoint correction remain unchanged in bricks.cpp; no alternative
+inference, blending generator or scene simulation was introduced.
+
+Each target requires 6..16 tokens. A trimmed bridge contains 4*tokens-6 samples;
+exporting only one seam copy adds 4*tokens-7 intervals. The output starts at the
+selected start pose, without the three context lead-in samples or clip tails.
+Arrival frame/time is exact; arbitrary second durations and early transitions
+are intentionally absent. Sample normalization can change a seam quaternion by
+roundoff: the already exported endpoint is copied back bit for bit before append.
+Append refuses a nonexact seam. Effective recipes record absolute input paths,
+resolved source frames, placements, hold and token settings, computed arrivals,
+threads, version, model source revision and output count. Their authoring object
+can be extracted and rerun; derived timing fields are recomputed.
+
+All targets/GLBs are resolved and validated before any session is loaded. Bounds:
+1 MiB recipe, 128 targets, existing GLB/frame limits. Batch preflight loads every
+pose-sequence recipe before any action executes, and the existing global output/
+partial/recipe collision checks cover its outputs. Sources must already exist
+at preflight, so pose-sequence cannot consume a clip created by an earlier action
+in that same batch. Windows are retained, not full source clips. One RunContext
+owns/reuses the ONNX session across sequence segments and interleaved connect
+actions with the same threads setting; connect behavior is unchanged.
+
+Validation on Windows x64 ClangCL 18 Release: all five CTests pass. New independent
+model-free checks use a translating authored rig to verify absolute placement,
+facing, rotated travel, last/first four sampling, held guides, negative source
+indices, unchanged local body rotations, accumulated arrival frames, reusable
+effective recipes, exact seam omission/refusal, fractional timing and late bad
+sources. CLI tests reject a late missing source in batch before the first generate
+loads models, plus reserved output/partial/recipe paths and per-command help.
+
+Real native ONNX CPU inference (8 threads), coordinated with Windows named mutex
+TideMotionGpuValidation, used existing locally Kimodo-generated idle/walk clips.
+Two targets (walk frame 15 at [0,0.95,0.8], yaw 0, 8 tokens; idle frame 0 at
+[0.5,0.95,1.4], yaw 90, 10 tokens) produced 59 frames, arrivals 25 and 58.
+A following ordinary 8-token connect produced 26 frames; the two-action log has
+one model verification and one ONNX session load. Native exported-GLB verifier
+checks every local endpoint translation within 1e-5 m and rotation within 0.002
+rad, plus all arrival/frame counts. All pass. Reproducible opt-in runner:
+tests/pose-inference.ps1, taking models and user/self-generated idle/walk inputs;
+it acquires the shared mutex, checks session reuse/endpoints and optionally previews.
+No weights or generated/third-party motion assets enter Git.
+
+Bounded TIDE_HIDDEN=1 mannequin capture at frame budget 51 succeeds and was
+visually inspected (walk pose, facing/profile, no binding diagnostics). Tide CLI
+and MinGW platform were built from D:/Projects/PurrEngine at
+28b61e4db1cb2549fcc9f6bc6d9c6034022f3d9c and staged privately under this task's
+.research. Initial staging lacked native resources; installing the matching
+platform/CLI components resolved it. No engine changes were made. The capture
+is functional asset evidence, not a continuous contact-quality assessment.
+
+Limits: exact poses do not guarantee velocity/acceleration continuity, plausible
+travel between contradictory/distant targets, contact preservation, collision
+avoidance or artist-ready motion. No scene/object understanding, pivots, automatic
+placement, IK/contact cleanup or Kimodo v1.2 work is included. Only explicit SOMA
+poses; mapped humanoids first use retarget --to-soma. Linux/macOS and GPU timings
+were not tested for this feature; MotionBricks remains native CPU ONNX.
+
+Integration: rebased onto current origin/dev, preserving the concurrent 0.5.1
+prompting/preview/install updates and ARDY research. Rebuilt and all five CTests
+pass again; exported endpoint/timing verification and the bounded Tide capture
+also pass with the integrated executable. A repeat via the opt-in inference
+runner correctly refused while another thread held TideMotionGpuValidation;
+no conflicting inference was started. Real inference evidence above is from the
+successful earlier mutex-protected run, with author.cpp/bricks.cpp unchanged.
