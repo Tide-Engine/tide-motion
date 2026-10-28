@@ -47,21 +47,21 @@ Download an archive, its `.sha256` sidecar and the installer from
 | Linux ARM64 | `linux-arm64.tar.gz` | Ubuntu 24.04 or compatible glibc/libstdc++ |
 | macOS Apple Silicon | `macos-arm64.tar.gz` | macOS 15 or newer |
 
-Archive names start with `tide-motion-<version>-`. Intel Mac and Windows ARM64
+Archive names start with `tide-motion-<version>-`; the commands below match any version. Intel Mac and Windows ARM64
 packages are not currently provided. macOS builds are unsigned and unnotarized;
 macOS may require approval in Privacy & Security for a downloaded executable.
 
 Windows:
 
 ```powershell
-./install.ps1 -Archive ./tide-motion-0.5.1-windows-x64.zip -AddToPath
+./install.ps1 -Archive (Get-Item ./tide-motion-*-windows-x64.zip) -AddToPath
 ```
 
 Reopen the terminal after adding PATH. `-Root <directory>` selects another
 installation. Linux/macOS (select your platform's archive):
 
 ```sh
-sh install.sh ./tide-motion-0.5.1-linux-x64.tar.gz
+sh install.sh ./tide-motion-*-linux-x64.tar.gz
 export PATH="$HOME/.local/share/tide-motion/bin:$PATH"
 ```
 
@@ -888,15 +888,15 @@ A replacement failure rolls back the distribution files. There is no elevation.
 
 The latest-release route skips an equal/older release. `--force` reinstalls it;
 `--version` explicitly allows selecting an older release. `--check` changes no
-installation files. Pushes to `dev` produce build artifacts, not published stable
-releases, so they do not become upgrade candidates until a release is published.
-There is no nightly channel yet. Existing executables without this command need
+installation files. A push to `dev` whose commits since the last release include a
+`feat:` or `fix:` is published as the next release once every platform passes (see
+AGENTS.md); other pushes produce build artifacts only. There is no nightly channel. Existing executables without this command need
 one manual installation of a release that includes it.
 
 For an offline update, put the package beside its `.sha256` file:
 
 ```sh
-tide-motion upgrade --archive tide-motion-0.5.1-windows-x64.zip --force
+tide-motion upgrade --archive tide-motion-<version>-windows-x64.zip --force
 ```
 
 `--root DIR` explicitly chooses another installation directory, including a new
