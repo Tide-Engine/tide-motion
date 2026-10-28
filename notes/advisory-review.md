@@ -75,6 +75,16 @@ collision, swept/continuous collision and aesthetics as not evaluated. Unknown
 must not become a zero or a pass. All checks are native offline analysis and never
 replace learned generation, correct poses, reject unusual art or alter the GLB.
 
+The agent JSON also retains `measurements` for every evaluated rule/subject,
+including those with no hints: eligible sample count, exceedance count, mean,
+maximum and peak frame. Rotation statistics use adjacent pairs (exclude frame 0).
+Low-foot motion statistics use only pairs whose two joint centres meet the height
+condition; zero eligible samples yields null statistics, not zero movement.
+These are continuous measurements, not a quality score. Comparing hint counts
+alone can select a worse candidate because intervals split/merge at thresholds.
+Keep frame counts, authored poses, sensitivity settings and sample eligibility
+matched, and inspect action adherence before selecting a candidate.
+
 Bounds: 1 MiB manifest, 1..24 cases, 128 joints/case, existing 18000-frame clip
 bound, 60000 total frames, 16 prop proxies/case, 10000 observation intervals/case,
 64 MiB HTML. All inputs are checked before either output is written. Existing

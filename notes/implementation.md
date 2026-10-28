@@ -3399,3 +3399,42 @@ verification was corrected to check preservation of the original records without
 rejecting unrelated new files. MoMask's exact private bundle verification and new
 installed CLI help pass. Package includes only native runtime/docs/notices/examples,
 with no model, motion or developer Python payloads. No model rights status changed.
+## Agent-driven advisory test drive (2026-10-28)
+
+Owner redirected review toward agents after finding manual interpretation of the
+calibration panel unhelpful. [The test drive](review-test-drive.md) records actual
+native inference, unsuccessful cleanup, matched-control comparisons, independent
+GLB checks, retained assets/recipes and limitations. Ten hints localized toe motion
+in the real generated parry. Existing cleanup guards rolled back all four predicted
+heel intervals. Native MotionBricks target-pose controls yielded a retained
+alternative with 6.7% / 16.9% lower mean near-ground toe speed and lower peaks,
+while keeping all three authored key poses and 51 frames. This is not certified
+planted-foot sliding, physical balance or an overall artistic-quality win.
+
+Actual use exposed a report gap: fewer hint intervals could mask worse motion,
+and comparing continuous values required scraping viewer tracks. Added native
+per-rule/subject measurements (eligible/exceedance samples, mean, maximum and
+peak frame), including below-threshold series. Missing eligible samples are null,
+not zero. Rotation statistics exclude the first sample. Observations, identities,
+feedback, inputs, generation and correction behavior are unchanged. Analytic
+review/CLI tests pass; dense GLB checks verify exact authored pose preservation.
+
+Bounded hidden native before/after GIF and pose-sheet captures succeed using
+Tide CLI and native platform rebuilt from clean engine checkout 367ae4da2 and
+privately staged, with TideMotionGpuValidation held. Source, generated clips,
+recipes and decision evidence remain ignored. No model/dependency/pin/license,
+engine source or owner installation changes. See the test-drive note for measured
+values, source provenance and explicit contact/mesh/aesthetic limitations.
+
+Integrated dev f08cb0e's independent equipment authoring work without changing
+the measured inference assets. Combined Windows Release CPU build passes all 18
+CTests. The native animated comparison also exposed metrics text spilling between
+GIF cells; GIFs now use short candidate labels while still sheets retain metrics.
+Preview contracts and a fresh bounded 51-frame hidden native GIF capture pass
+after that presentation-only adjustment. Original is left, alternative right.
+
+Final integration rebases onto 66ef74b, preserving concurrent DART/MoMask controls,
+pins and notices. All 18 combined Windows Release CPU CTests pass. A fresh native
+review of all five retained test-drive clips reproduces every observation and
+continuous measurement exactly. No owner installation update or model download
+was performed by this test-drive work.

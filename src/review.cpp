@@ -49,16 +49,20 @@ nlohmann::json review_motion(const Clip& clip,const nlohmann::json& settings) {
     bool canonical=true;try{require_soma(clip);}catch(const std::exception&){canonical=false;}
     std::vector<std::vector<Transform>> world;world.reserve(clip.frames());Json positions=Json::array();
     for(size_t f=0;f<clip.frames();++f){world.push_back(world_pose(clip,clip.frame(f)));Json p=Json::array();for(const auto& t:world.back())p.push_back(xyz(t.p));positions.push_back(std::move(p));}
-    Json findings=Json::array();
-    auto series=[&](const std::string& rule,const std::vector<std::string>& subjects,const std::string& unit,float threshold,const std::string& method,const std::vector<float>& values){
+    Json findings=Json::array(),measurements=Json::array();
+    auto series=[&](const std::string& rule,const std::vector<std::string>& subjects,const std::string& unit,float threshold,const std::string& method,const std::vector<float>& values,const std::vector<bool>& eligible=std::vector<bool>{}){
+        size_t count=0,exceedances=0,peak=0;double sum=0;float maximum=0;
+        for(size_t f=0;f<values.size();++f)if(eligible.empty()||eligible[f]){++count;sum+=values[f];if(values[f]>threshold)++exceedances;if(count==1||values[f]>maximum){maximum=values[f];peak=f;}}
+        measurements.push_back({{"rule",rule},{"subjects",subjects},{"unit",unit},{"threshold",threshold},{"method",method},{"samples",count},{"exceedanceSamples",exceedances},{"meanValue",count?Json(sum/static_cast<double>(count)):Json(nullptr)},{"maxValue",count?Json(maximum):Json(nullptr)},{"peakFrame",count?Json(peak):Json(nullptr)}});
         for(size_t f=0;f<values.size();){if(values[f]<=threshold){++f;continue;}size_t start=f,peak=f;while(f+1<values.size()&&values[f+1]>threshold){++f;if(values[f]>values[peak])peak=f;}size_t end=f++;
             if(findings.size()>=10000)throw std::runtime_error("Review exceeds 10000 observation intervals");
             std::string id=rule;for(const auto& s:subjects)id+="/"+s;id+="/"+std::to_string(start)+"-"+std::to_string(end);
             findings.push_back({{"id",id},{"rule",rule},{"subjects",subjects},{"startFrame",start},{"endFrame",end},{"peakFrame",peak},{"startSeconds",static_cast<double>(start)/clip.fps},{"endSeconds",static_cast<double>(end)/clip.fps},{"peakValue",values[peak]},{"unit",unit},{"threshold",threshold},{"method",method},{"interpretation","unreviewed"}});
         }
     };
+    std::vector<bool> adjacent(clip.frames(),true);adjacent[0]=false;
     for(size_t j=0;j<clip.joints.size();++j){std::vector<float> v(clip.frames());for(size_t f=1;f<clip.frames();++f){Quat q=normalized(inverse(clip.frame(f-1)[j].q)*clip.frame(f)[j].q);v[f]=2*std::atan2(length({q.x,q.y,q.z}),std::abs(q.w))*180/std::numbers::pi_v<float>;}
-        series("local-rotation-step",{clip.joints[j].name},"degrees/sample",angle,"Shortest local quaternion change from preceding sample; rapid intentional action may qualify",v);}
+        series("local-rotation-step",{clip.joints[j].name},"degrees/sample",angle,"Shortest local quaternion change from preceding sample; rapid intentional action may qualify",v,adjacent);}
     Json proxies=Json::array();
     if(canonical){
         proxies.push_back({{"name","torso"},{"from","Hips"},{"to","Chest"},{"radius",.13}});
@@ -68,10 +72,10 @@ nlohmann::json review_motion(const Clip& clip,const nlohmann::json& settings) {
             for(size_t f=0;f<clip.frames();++f)v[f]=std::max(0.0f,.165f-distance(world[f][a].p,world[f][b].p,world[f][hips].p,world[f][chest].p));
             series("forearm-torso-proxy-overlap",{side+"ForeArm",side+"Hand","Hips","Chest"},"metres",overlap,"SOMA forearm capsule radius .035 m against torso capsule radius .13 m; not skin collision",v);
             proxies.push_back({{"name",side+"ForeArm"},{"from",side+"ForeArm"},{"to",side+"Hand"},{"radius",.035}});
-            for(const std::string suffix:{"Foot","ToeBase"}){size_t j=names.at(side+suffix);std::vector<float> depth(clip.frames()),drift(clip.frames());
-                for(size_t f=0;f<clip.frames();++f){depth[f]=std::max(0.0f,ground-world[f][j].p.y);if(f&&world[f][j].p.y<=ground+near&&world[f-1][j].p.y<=ground+near){Vec3 d=world[f][j].p-world[f-1][j].p;drift[f]=std::hypot(d.x,d.z)*clip.fps;}}
+            for(const std::string suffix:{"Foot","ToeBase"}){size_t j=names.at(side+suffix);std::vector<float> depth(clip.frames()),drift(clip.frames());std::vector<bool> low(clip.frames(),false);
+                for(size_t f=0;f<clip.frames();++f){depth[f]=std::max(0.0f,ground-world[f][j].p.y);if(f&&world[f][j].p.y<=ground+near&&world[f-1][j].p.y<=ground+near){low[f]=true;Vec3 d=world[f][j].p-world[f-1][j].p;drift[f]=std::hypot(d.x,d.z)*clip.fps;}}
                 series("foot-joint-below-plane",{side+suffix},"metres",below,"Joint centre below configured plane; not sole/mesh penetration",depth);
-                series("low-foot-horizontal-motion",{side+suffix},"metres/second",speed,"Adjacent joint centres below configured height; no planted-contact inference",drift);
+                series("low-foot-horizontal-motion",{side+suffix},"metres/second",speed,"Adjacent joint centres below configured height; no planted-contact inference",drift,low);
             }
         }
     }
@@ -87,7 +91,7 @@ nlohmann::json review_motion(const Clip& clip,const nlohmann::json& settings) {
             propTracks.push_back({{"name",name},{"bone",bone},{"radius",r},{"positions",track}});
         }
     }
-    return {{"schemaVersion",1},{"purpose","advisory-observations"},{"frames",clip.frames()},{"fps",clip.fps},{"rig",canonical?"soma30":"custom"},{"settings",{{"groundY",ground},{"rotationStepDegrees",angle},{"belowGroundMetres",below},{"nearGroundMetres",near},{"lowFootSpeed",speed},{"overlapMetres",overlap}}},{"coverage",{{"localRotationSteps","sampled"},{"bodyAndGroundProxies",canonical?"sampled":"not-evaluated: canonical SOMA required"},{"propTorsoProxies",canonical&&!propTracks.empty()?"sampled":"not-evaluated"},{"anatomicalReachability","not-evaluated: no calibrated joint limits or target contract"},{"meshCollision","not-evaluated"},{"continuousCollision","not-evaluated"},{"physicalBalance","not-evaluated"},{"aestheticQuality","not-evaluated"}}},{"observations",findings},{"joints",joints},{"positions",positions},{"bodyProxies",proxies},{"props",propTracks}};
+    return {{"schemaVersion",1},{"purpose","advisory-observations"},{"frames",clip.frames()},{"fps",clip.fps},{"rig",canonical?"soma30":"custom"},{"settings",{{"groundY",ground},{"rotationStepDegrees",angle},{"belowGroundMetres",below},{"nearGroundMetres",near},{"lowFootSpeed",speed},{"overlapMetres",overlap}}},{"coverage",{{"localRotationSteps","sampled"},{"bodyAndGroundProxies",canonical?"sampled":"not-evaluated: canonical SOMA required"},{"propTorsoProxies",canonical&&!propTracks.empty()?"sampled":"not-evaluated"},{"anatomicalReachability","not-evaluated: no calibrated joint limits or target contract"},{"meshCollision","not-evaluated"},{"continuousCollision","not-evaluated"},{"physicalBalance","not-evaluated"},{"aestheticQuality","not-evaluated"}}},{"observations",findings},{"measurements",measurements},{"joints",joints},{"positions",positions},{"bodyProxies",proxies},{"props",propTracks}};
 }
 std::string review_html(const nlohmann::json& bundle) {
     std::string data=bundle.dump(-1,' ',false,nlohmann::json::error_handler_t::replace),safe;safe.reserve(data.size());

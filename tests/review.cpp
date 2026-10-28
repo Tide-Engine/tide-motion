@@ -21,6 +21,10 @@ int main(int argc,char** argv)try {
         ++steps;check(o["subjects"][0]=="RightHand","Localized joint");check(o["startFrame"]==3||o["startFrame"]==5,"Quaternion sign invariant and intervals split across gaps");check(o["startFrame"]==o["endFrame"],"Inclusive single-sample interval");check(std::abs(o["peakValue"].get<float>()-90)<.001f,"Measured 90 degree step");check(o["unit"]=="degrees/sample","Explicit sample-based unit");
     }
     check(steps==2,"Two separated steps, no extra sign jump");
+    bool measured=false;for(const auto& m:r["measurements"])if(m["rule"]=="local-rotation-step"&&m["subjects"][0]=="RightHand"){
+        measured=true;check(m["samples"]==7&&m["exceedanceSamples"]==2,"Rotation statistics use adjacent pairs only");check(std::abs(m["meanValue"].get<double>()-180.0/7)<.001,"Continuous measurement independent of hint interval count");}
+    check(measured,"Below-threshold samples remain available to agents");
+    auto unavailable=review_motion(c,{{"groundY",-1000}});for(const auto& m:unavailable["measurements"])if(m["rule"]=="low-foot-horizontal-motion")check(m["samples"]==0&&m["meanValue"].is_null()&&m["maxValue"].is_null()&&m["peakFrame"].is_null(),"No eligible samples is unavailable, not zero movement");
     check(c.frame(0)[hand].q.w==original[hand].q.w&&c.frame(3)[hand].q.y>.7f,"Analysis preserves input");
     check(r["coverage"]["anatomicalReachability"].get<std::string>().starts_with("not-evaluated"),"Unknown is explicit");
     json settings={{"props",json::array({{{"name","probe"},{"bone","Hips"},{"start",{0,0,0}},{"end",{0,0,0}},{"radius",.02}}})}};

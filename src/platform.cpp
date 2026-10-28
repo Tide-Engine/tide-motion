@@ -508,8 +508,10 @@ float2 OnScreen(float x, float y) { return float2(x * Screen.width / VIEW_W, -y 
         std::ostringstream travel;travel.imbue(std::locale::classic());
         travel<<labels[i]<<std::fixed<<std::setprecision(2)<<" | displacement "<<metrics.displacement
               <<" m | path "<<metrics.distance<<" m | peak "<<metrics.peak_speed<<" m/s";
-        texts.push_back({travel.str(),left+pad*0.5f,top-0.06f*height,0.13f*height,false});
-        texts.push_back({std::to_string(footfalls(c).size())+" travelling footfalls",left+pad*0.5f,top-0.21f*height,0.10f*height,false});
+        // A GIF cell has only two poses' width. Its full metrics line can spill
+        // over the next candidate; keep that detail on the wide still sheet.
+        texts.push_back({animated?labels[i]:travel.str(),left+pad*0.5f,top-0.06f*height,0.13f*height,false});
+        if(!animated)texts.push_back({std::to_string(footfalls(c).size())+" travelling footfalls",left+pad*0.5f,top-0.21f*height,0.10f*height,false});
         if(animated) {
             scene<<"    {\n        mut var pose = body.defaultPose;\n        pose.Sample(v"<<i<<", seconds, Playback.Clamp);\n";
             scene<<"        Body(pose, float3("<<num(left+pad*0.5f+0.5f*step)<<", "<<num(floor_a)<<", 0), "<<front<<"deg);\n";
