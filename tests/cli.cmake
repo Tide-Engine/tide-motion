@@ -212,3 +212,16 @@ refuses("Missing or incomplete" generate "walk" --start-pose "${source}" --end-p
 refuses("Two path points" generate "walk" --end-pose "${source}" --end-at "0,-1" --path "0,-2@-1" -o "${WORK}/end-at.glb" --models "${empty}")
 file(WRITE "${WORK}/end-at.json" "{\"actions\":[{\"action\":\"generate\",\"prompt\":\"walk\",\"endPose\":\"with spaces and 'quotes'/source.glb\",\"endAt\":[0,-1,90],\"output\":\"end-at.glb\"}]}")
 refuses("Missing or incomplete" batch "${WORK}/end-at.json" --models "${empty}")
+
+# Invalid connected source protection is refused before an inference model loads.
+file(WRITE "${source}.json" "{\"protectedFrames\":[999]}")
+refuses("Source constraint frame outside clip" connect "${source}" "${source}" --models "${empty}" -o "${WORK}/bad-pins.glb")
+foreach(field IN ITEMS maxJointCorrectionDegrees maxJointStepIncreaseDegrees maxAnkleStepIncrease)
+  file(WRITE "${WORK}/bad-step-plan.json" "{\"contacts\":[{\"foot\":\"left-foot\",\"start\":0,\"end\":2}],\"${field}\":-1}")
+  refuses("${field} is out of range" cleanup "${source}" --contacts "${WORK}/bad-step-plan.json" -o "${WORK}/bad-steps.glb")
+endforeach()
+file(REMOVE "${source}.json")
+
+# Keep a manifest-relative source path so Windows separators need no JSON escaping.
+file(WRITE "${WORK}/bad-bounds-batch.json" "{\"actions\":[{\"action\":\"generate\",\"prompt\":\"walk\",\"output\":\"unused-bounds.glb\"},{\"action\":\"cleanup\",\"source\":\"clean.glb\",\"contacts\":\"bad-step-plan.json\",\"output\":\"unused-clean-bounds.glb\"}]}")
+refuses("Batch action 2.*maxAnkleStepIncrease" batch "${WORK}/bad-bounds-batch.json" --models "${empty}")

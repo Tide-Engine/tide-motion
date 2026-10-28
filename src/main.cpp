@@ -152,6 +152,9 @@ of another.
   --to-clip NAME              Animation to use from a multi-animation TO.glb
   --threads N                 CPU threads, 1..1024 (default: half)
   --models DIR                Model directory
+
+Bridge endpoints are protected from later cleanup. --joined also carries authored
+source/target protected frames with the correct offsets after seam omission.
 )";
     if(command=="pose-sequence")return R"(tide-motion pose-sequence POSES.json -o CLIP.glb [--models DIR] [--threads N]
 
@@ -180,6 +183,11 @@ SOMA-30 or explicitly mapped direct thigh/calf/foot chains only.
 Translations, root motion and world foot orientation are kept. Authored constraint
 frames in an adjacent Tide recipe are protected automatically; use protectedFrames
 for clips without that recipe. Do not label kicks/airborne frames as contacts.
+The plan also bounds joint correction (maxJointCorrectionDegrees, default 30),
+extra local joint rotation per frame (maxJointStepIncreaseDegrees, default 5),
+and extra 3D ankle travel per frame (maxAnkleStepIncrease, default 0.005 metres).
+Step guards include the transitions into/out of each contact. Rejected intervals
+are restored in full; recipes distinguish attempted corrections from final motion.
 Recipes report horizontal mean drift per frame before/after, max anchor residual
 (including fades/protected frames), max joint correction and skipped intervals.
 )";
@@ -794,6 +802,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     }
     Clip clip;
     nlohmann::json retarget_recipe,generate_recipe,mirror_recipe;
+    std::vector<size_t> connect_pins;
     // Store generation settings alongside the asset; no need to rerun inference at build time.
     auto recipe_for=[&](const Clip& made,uint64_t used_seed) {
         return nlohmann::json{{"tool","tide-motion"},{"version",MOTION_VERSION},{"command",command},{"inputs",pos},{"rig","soma30"},{"fps",30},{"frames",made.frames()},{"requestedDuration",duration},{"seed",used_seed},{"steps",steps},{"tokens",tokens},{"joined",joined},{"offset",{offset.x,offset.y,offset.z}},
@@ -817,14 +826,18 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         plan.protected_frames.insert(plan.protected_frames.end(),protected_frames.begin(),protected_frames.end());
         auto reports=cleanup_contacts(clip,plan,mapping?&*mapping:nullptr);
         mirror_recipe={{"tool","tide-motion"},{"version",MOTION_VERSION},{"command","cleanup"},{"source",pos[0]},{"clip",clip_name},
-            {"fps",clip.fps},{"frames",clip.frames()},{"solver","tide-two-bone-v1"},{"fadeFrames",plan.fade_frames},{"maxCorrectionMetres",plan.max_correction},{"protectedFrames",plan.protected_frames},
+            {"fps",clip.fps},{"frames",clip.frames()},{"solver","tide-two-bone-v1"},{"fadeFrames",plan.fade_frames},{"maxCorrectionMetres",plan.max_correction},{"maxJointCorrectionDegrees",plan.max_joint_correction},
+            {"maxJointStepIncreaseDegrees",plan.max_joint_step_increase},{"maxAnkleStepIncreaseMetres",plan.max_ankle_step_increase},{"safeguards","tide-contact-bounds-v1"},{"protectedFrames",plan.protected_frames},
             {"sourceRecipe",source_recipe},{"rootMotionPreserved",true},{"contacts",nlohmann::json::array()}};
         if(source_recipe.contains("constraints"))mirror_recipe["constraints"]=source_recipe["constraints"];
         if(mapping) {std::ifstream input(map_file);nlohmann::json m;input>>m;mirror_recipe["mapping"]=m;}
         for(size_t i=0;i<reports.size();++i) {
             const auto& r=reports[i];const auto& contact=plan.contacts[i];
             mirror_recipe["contacts"].push_back({{"foot",contact.foot?"right-foot":"left-foot"},{"start",contact.start},{"end",contact.end},{"samples",r.samples},{"skipped",r.skipped},{"skipReason",r.skip_reason},
-                {"horizontalMeanStepBeforeMetres",r.drift_before},{"horizontalMeanStepAfterMetres",r.drift_after},{"anchorResidualMaxMetres",r.residual_max},{"jointCorrectionMaxDegrees",r.rotation_max}});
+                {"horizontalMeanStepBeforeMetres",r.drift_before},{"horizontalMeanStepAfterMetres",r.drift_after},{"anchorResidualMaxMetres",r.residual_max},{"jointCorrectionMaxDegrees",r.rotation_max},
+                {"jointStepMaxBeforeDegrees",r.joint_step_before},{"jointStepMaxAfterDegrees",r.joint_step_after},
+                {"ankleStepMaxBeforeMetres",r.ankle_step_before},{"ankleStepMaxAfterMetres",r.ankle_step_after},
+                {"attemptedJointCorrectionMaxDegrees",r.attempted_rotation_max},{"attemptedJointStepIncreaseMaxDegrees",r.joint_step_increase},{"attemptedAnkleStepIncreaseMaxMetres",r.ankle_step_increase}});
         }
     } else if(command=="mirror") {
         if(pos.size()!=1)throw std::runtime_error("mirror takes one SOMA-30 .glb clip");
@@ -1001,16 +1014,20 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     } else {
         if(pos.size()!=2)throw std::runtime_error("connect takes source and target GLB files");
         auto a=load_glb(utf8path(pos[0]),from_name),b=load_glb(utf8path(pos[1]),to_name);
+        // Validate inherited metadata before loading an inference session.
+        auto source_pins=protected_recipe_frames(source_metadata(utf8path(pos[0])),a.frames());
+        auto target_pins=protected_recipe_frames(source_metadata(utf8path(pos[1])),b.frames());
         for(size_t f=0;f<b.frames();++f)b.frame(f)[0].p=b.frame(f)[0].p+offset;
         if(!context->bricks||context->bricks_threads!=threads) {
             if(!context->bricks)check_models(models,"bricks");
             context->bricks=std::make_unique<BricksModel>(models/"motionbricks.onnx",threads);context->bricks_threads=threads;
         }
         clip=context->bricks->generate(a,b,tokens);
+        connect_pins=connected_protected_frames(a.frames(),clip.frames(),b.frames(),source_pins,target_pins,joined);
         if(joined)clip=join(a,clip,b);
     }
     auto recipe=recipe_for(clip,seed);
-    if(command=="connect")recipe["threads"]=threads;
+    if(command=="connect") {recipe["threads"]=threads;recipe["protectedFrames"]=connect_pins;}
     if(command=="retarget")recipe=std::move(retarget_recipe);
     if(command=="mirror"||command=="cleanup")recipe=std::move(mirror_recipe);
     finish(clip,output,recipe);return 0;

@@ -5,5 +5,8 @@
   ],
   "protectedFrames": [],
   "fadeFrames": 3,
-  "maxCorrection": 0.1
+  "maxCorrection": 0.1,
+  "maxJointCorrectionDegrees": 30,
+  "maxJointStepIncreaseDegrees": 5,
+  "maxAnkleStepIncrease": 0.005
 }

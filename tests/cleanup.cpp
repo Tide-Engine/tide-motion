@@ -64,7 +64,7 @@ int main(int argc,char** argv) {try {
     // hips-to-anchor distance exceeds 1 m, so the geometric minimum error is d-1.
     for(size_t f=0;f<c.frames();++f)c.frame(f)[0].p.y+=0.01f*static_cast<float>(f);
     auto anchor=world_pose(c,c.frame(0))[3].p;
-    p.max_correction=0.5f;auto unreachable=cleanup_contacts(c,p,&m);
+    p.max_correction=0.5f;p.max_joint_correction=180;p.max_joint_step_increase=180;p.max_ankle_step_increase=0.5f;auto unreachable=cleanup_contacts(c,p,&m);
     check(!unreachable[0].skipped,"unreachable oracle did not exercise the solver");
     auto w=world_pose(c,c.frame(25));float distance=length(anchor-w[1].p);
     check(distance>1.04f,"unreachable fixture still within reach");
@@ -72,7 +72,7 @@ int main(int argc,char** argv) {try {
     check(std::abs(length(w[2].p-w[1].p)-0.5f)<1e-6f&&std::abs(length(w[3].p-w[2].p)-0.5f)<1e-6f,"unreachable solver stretched bones");
     // Straight knees have no original bend plane. Shortening the root-to-anchor
     // distance requires the fallback plane while the ankle stays fixed.
-    c=original;
+    c=original;p=CleanupPlan{};p.contacts={{0,0,30}};p.fade_frames=0;
     for(size_t f=0;f<c.frames();++f) {
         c.frame(f)[2].p={0,-0.5f,0};c.frame(f)[3].p={0,-0.5f,0};
         c.frame(f)[0].p.y-=0.0002f*static_cast<float>(f);
@@ -88,6 +88,35 @@ int main(int argc,char** argv) {try {
             check(std::abs(delta.w)>std::cos(0.05f/2),"fallback knee has a rotation pop");
         }
     }
+    // Interior drift improves to zero, but release jumps 21 mm instead of 1 mm.
+    // Comparing interval-average drift or only its interior edges would miss it.
+    c=original;p=CleanupPlan{};p.contacts={{0,0,20}};p.fade_frames=0;
+    auto release=cleanup_contacts(c,p,&m);
+    check(release[0].skip_reason=="ankle-step-increased","release ankle jump was not rejected");
+    check(release[0].ankle_step_increase>0.019f&&release[0].ankle_step_after<0.00101f,"release report mixes attempted and final motion");
+    for(size_t f=0;f<c.frames();++f)check(c.frame(f)[1].q.w==1&&c.frame(f)[2].q.w==1,"release rollback incomplete");
+    c=original;p.max_ankle_step_increase=0.5f;p.max_joint_step_increase=0.1f;
+    auto joint_pop=cleanup_contacts(c,p,&m);
+    check(joint_pop[0].skip_reason=="joint-step-increased"&&joint_pop[0].joint_step_after<1e-5f,"release joint pop was not rejected");
+    c=original;p=CleanupPlan{};p.contacts={{0,0,30}};p.fade_frames=0;p.max_joint_correction=0.05f;
+    auto correction=cleanup_contacts(c,p,&m);
+    check(correction[0].skip_reason=="joint-correction-bound"&&correction[0].rotation_max==0&&correction[0].attempted_rotation_max>0.05f,"absolute joint correction bound");
+    // Quaternion signs must not be interpreted as a 360-degree step.
+    c=original;c.frame(15)[2].q.w=-1;p.max_joint_correction=30;
+    auto signs=cleanup_contacts(c,p,&m);check(!signs[0].skipped,"quaternion sign triggered a false pop");
+    // Two nearby intervals share a measured boundary edge. Final metrics must
+    // describe the final asset after both intervals, independent of input order.
+    c=original;p.contacts={{0,16,30},{0,0,15}};p.max_joint_step_increase=180;p.max_ankle_step_increase=0.5f;
+    auto adjacent=cleanup_contacts(c,p,&m);
+    for(size_t i=0;i<p.contacts.size();++i) {
+        const auto& contact=p.contacts[i];float peak=0;
+        for(size_t f=std::max<size_t>(1,contact.start);f<=std::min(contact.end+1,c.frames()-1);++f)
+            peak=std::max(peak,length(world_pose(c,c.frame(f))[3].p-world_pose(c,c.frame(f-1))[3].p));
+        check(std::abs(peak-adjacent[i].ankle_step_after)<1e-6f,"adjacent interval reports stale edge metrics");
+    }
+    auto serial=original;serial.joints[4].parent=3;
+    bool serial_refused=false;try{cleanup_contacts(serial,p,&m);}catch(const std::exception&){serial_refused=true;}
+    check(serial_refused&&serial.frame(15)[1].q.w==1,"interacting leg chains must be refused without mutation");
     auto path=fs::temp_directory_path()/("tide-cleanup-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".glb");save_glb(c,path);auto read=load_glb(path,"",false);fs::remove(path);check(read.frames()==c.frames(),"cleanup export");
     p.contacts={{0,0,100}};bool refused=false;try{cleanup_contacts(c,p,&m);}catch(const std::exception&){refused=true;}check(refused,"bad interval accepted");
     std::cout<<"contact contracts passed\n";return 0;

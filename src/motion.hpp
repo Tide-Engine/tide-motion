@@ -63,10 +63,13 @@ struct CleanupPlan {
     std::vector<size_t> protected_frames;
     unsigned fade_frames=3;
     float max_correction=0.1f;
+    float max_joint_correction=30, max_joint_step_increase=5, max_ankle_step_increase=0.005f;
 };
 struct ContactReport {
     size_t samples=0; bool skipped=false; std::string skip_reason;
     float drift_before=0,drift_after=0,residual_max=0,rotation_max=0;
+    float joint_step_before=0,joint_step_after=0,ankle_step_before=0,ankle_step_after=0;
+    float attempted_rotation_max=0,joint_step_increase=0,ankle_step_increase=0;
 };
 CleanupPlan load_cleanup_plan(const fs::path&);
 // Explicit contact intervals only. Keeps all translations, root and world foot orientation.
@@ -133,6 +136,9 @@ public:
     Clip generate(const Clip&, const Clip&, int tokens=0);
 };
 Clip join(const Clip&, const Clip& bridge, const Clip&);
+// Maps inherited pins through the same endpoint omission as join(); always pins bridge ends.
+std::vector<size_t> connected_protected_frames(size_t source_frames,size_t bridge_frames,size_t target_frames,
+    std::span<const size_t> source_pins,std::span<const size_t> target_pins,bool joined);
 // Variants of CLIP.glb are CLIP.seedN.glb; their contact sheet CLIP.variants.png/.gif.
 fs::path variant_path(const fs::path& output, uint64_t seed);
 fs::path variants_path(const fs::path& output, const std::string& extension);

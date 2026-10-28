@@ -60,6 +60,11 @@ def world(nodes, tracks, frame):
     return [visit(i) for i in range(len(nodes))]
 
 
+def angle(a, b):
+    delta = multiply((-a[0], -a[1], -a[2], a[3]), b)
+    return math.degrees(2 * math.atan2(math.sqrt(sum(x*x for x in delta[:3])), abs(delta[3])))
+
+
 def verify(before_path, after_path, left, right):
     nodes, before = read(before_path)
     after_nodes, after = read(after_path)
@@ -82,6 +87,7 @@ def verify(before_path, after_path, left, right):
                 bone_error = max(bone_error, abs(math.dist(wa[f][parent][0], wa[f][child][0]) -
                                                  math.dist(wb[f][parent][0], wb[f][child][0])))
     assert bone_error < 2e-6, bone_error
+    parents = {child: i for i, node in enumerate(nodes) for child in node.get('children', [])}
     for contact in recipe['contacts']:
         joint = names[left if contact['foot'] == 'left-foot' else right]
         start, end = contact['start'], contact['end']
@@ -94,6 +100,26 @@ def verify(before_path, after_path, left, right):
         for f in range(start, end + 1):
             dot = abs(sum(x*y for x, y in zip(wa[f][joint][1], wb[f][joint][1])))
             assert abs(1-dot) < 2e-5, 'world ankle orientation changed'
+        if 'safeguards' in recipe:
+            chain = (parents[parents[joint]], parents[joint], joint)
+            peaks = [0, 0, 0, 0]
+            for f in range(max(1, start), min(count-1, end+1) + 1):
+                for j in chain:
+                    qa = angle(before[j, 'rotation'][f-1], before[j, 'rotation'][f])
+                    qb = angle(after[j, 'rotation'][f-1], after[j, 'rotation'][f])
+                    peaks[0], peaks[1] = max(peaks[0], qa), max(peaks[1], qb)
+                    assert qb <= qa + recipe['maxJointStepIncreaseDegrees'] + 0.002
+                da, db = math.dist(wa[f][joint][0], wa[f-1][joint][0]), math.dist(wb[f][joint][0], wb[f-1][joint][0])
+                peaks[2], peaks[3] = max(peaks[2], da), max(peaks[3], db)
+                assert db <= da + recipe['maxAnkleStepIncreaseMetres'] + 3e-6
+            for value, key, tolerance in zip(peaks, ('jointStepMaxBeforeDegrees', 'jointStepMaxAfterDegrees',
+                                                    'ankleStepMaxBeforeMetres', 'ankleStepMaxAfterMetres'), (0.002, 0.002, 2e-6, 2e-6)):
+                assert abs(value-contact[key]) < tolerance, (key, value, contact[key])
+            for f in range(start, end + 1):
+                for j in chain:
+                    correction = angle(before[j, 'rotation'][f], after[j, 'rotation'][f])
+                    assert correction <= recipe['maxJointCorrectionDegrees'] + 0.002
+            print(contact['foot'], 'peak joint step deg / ankle step m:', peaks)
         print(contact['foot'], 'mean horizontal step (m):', a, '->', b)
     print('max bone length error (m):', bone_error, '; protected frames:', recipe['protectedFrames'])
 

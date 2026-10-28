@@ -1229,3 +1229,116 @@ inference correctly refused because another task held TideMotionGpuValidation;
 no conflicting inference started. Native measurements and sheet above came from
 the successful earlier mutex-protected runs; the placement/inference algorithm
 and platform.cpp are unchanged by integration. No v1.2 quality claim is made.
+
+## Cleanup step guards and connected pose protection (2026-10-28)
+
+Continuing the owner's gap-cleanup request. Native cleanup now checks individual
+local joint rotation steps and world ankle 3D steps at every affected transition,
+including start-1 -> start and end -> end+1 when present. Comparing only average
+horizontal drift or a whole-interval maximum can hide a release pop; checks use
+the original value at the same joint/transition. Quaternion angles use shortest
+arc atan2 to avoid acos precision near identity and quaternion-sign false pops.
+
+New optional contact-plan controls (also used by batch's existing contacts file):
+maxJointCorrectionDegrees 0..180, default 30; maxJointStepIncreaseDegrees 0..180,
+default 5; maxAnkleStepIncrease 0..0.5 world metres/frame, default 0.005. Numeric
+slack is 0.001 degree / 1e-6 m. These are conservative introduced-change bounds,
+not anatomical limits or a speed limit on existing kicks. Zero allows only the
+numeric slack; higher values deliberately permit larger edits. All settings are
+finite, type/range checked in complete batch preflight before any inference.
+Generation/retarget defaults and inference/model arithmetic remain unchanged.
+The additional defaults affect only the already opt-in cleanup command. The
+unit fixtures and actual rejected Synty release step below justify adding them.
+
+Any violated guard restores the entire original interval. Existing correction-
+bound / drift-increased checks remain; new skip reasons are joint-correction-bound,
+joint-step-increased and ankle-step-increased, tested in that order after drift.
+The recipe records effective settings, safeguards=tide-contact-bounds-v1, final
+peak joint/ankle steps before/after and attempted max correction/step increases.
+Attempted values survive rollback; final values describe the exported asset.
+Boundary steps are recomputed after all decisions so adjacent intervals cannot
+leave stale metrics. Mean drift/residual keep their existing inclusive-interval
+meaning. Independent leg chains are required: custom mappings that put one leg
+under the other are now refused transactionally, since their corrections would
+interact despite distinct joint indices. This is a mapping validation safeguard,
+not automatic bone identification. Existing normal SOMA/mapped rigs still work.
+
+connect recipes now always protect bridge endpoints. With --joined they also
+carry all inherited authored source/target indices using exactly join()'s duplicate
+endpoint omission: bridge begins at sourceFrames-1; target frame zero is at
+sourceFrames+bridgeFrames-2. Target pin zero binds to the retained bridge endpoint.
+Bridge-only exports retain just their two endpoints because input interiors are
+absent. Inherited recipe validation occurs before an inference model loads.
+Target --offset changes the retained poses but not their frame indices. As with
+mirror/retarget, protection refers to the resulting exported pose and does not
+copy stale constraint coordinates/error claims. A model-free core helper shares
+the frame-map contract with independent count/pose tests. No join/inference
+animation math changed; pins do not promise smooth velocity through the joins.
+
+Windows x64 ClangCL 18.1.8 CPU Release builds with project warnings as errors.
+All six CTests pass, with TEMP/TMP in .research/test-temp-bounds. New independent
+contracts: a 21 mm release step after an interior lock (input 1 mm/frame) is
+rejected and restored; per-joint release pops and absolute correction bounds;
+shortest quaternion-sign arcs; final metrics across adjacent reverse-ordered
+intervals; refusal of interacting serial leg chains; exact pin mapping against
+an independently assembled 8+26+8 frame join; bridge-only/minimal maps and bad
+indices/counts; CLI/batch guard range/preflight refusal before model loading.
+The initial synthetic join fixture used a bridge targeting input frame 4 with
+a target starting at frame 0; its new pose assertion correctly failed. The
+fixture now supplies actual matching endpoints; production join code was not
+changed to accommodate a contradictory test.
+
+Real asset checks reuse the earlier self-generated idle and the scratch Synty
+character (neither committed). Default guarded idle cleanup retains the earlier
+mean horizontal reductions: left/right 0.273/0.261 -> 0.062/0.153 mm/frame. Final
+peak joint steps 2.290/0.893 degrees, full 3D ankle steps 2.204/4.242 mm/frame.
+Those peaks can rise within the configured per-transition allowance; this does
+not claim every derivative improves. Synty left mean 0.301 -> 0.078 mm/frame;
+right is now restored to 0.332 mm/frame: its attempted extra ankle step is
+6.145 mm/frame, beyond the 5 mm default, despite improved mean drift. This is
+an intentional safety/cleanup tradeoff. Independent tests/verify_cleanup.py now
+checks per-transition bounds and final reported peaks from exported GLBs, alongside
+root/local-translation, protected pose, world ankle rotation and length checks.
+
+Real native end-to-end reproduction: tests/cleanup-inference.ps1 -Models DIR
+-Source GENERATED_SOMA.glb -Target GENERATED_SOMA.glb [-Tool EXE]. Developer Python
+stdlib is used only for independent exported-asset verification (verify_connect.py
+and verify_cleanup.py); no Python is used by inference, build, installation or
+CTests, and tests are not packaged. The script creates a GUID work/temp directory,
+adds an interior protected frame to each input recipe, runs joined connect,
+bridge-only connect and cleanup in one ordered batch, and checks one native ORT
+session load. It uses MotionBricks's CPU-only backend with one CPU thread and
+records no performance timings. Initial attempts to reserve TideMotionGpuValidation
+found it busy and started no inference; the final functional test runs only CPU,
+with no GPU, VRAM allocation or GPU benchmarking. The GPU mutex remains mandatory
+for GPU inference/benchmarks; it was not bypassed for any GPU work here.
+
+Actual source/target: existing parry-swing-return.glb, each 75 frames, 8-token
+bridges, target offset [0,0,0.4]. Output joined=174, bridge=26; source/target
+inherited pins plus seams are [0,1,74,99,100,173], bridge pins [0,25]. Independent
+GLB comparison checks every retained source/target pose (translation <2e-6 m,
+rotation <0.002 degrees), including the offset target, and all metadata indices.
+Cleanup's explicit two foot contacts 0..15 are both restored by drift-increased
+in the presence of the extra authored frame-1 pin. All six protected poses remain
+within 2e-6 per component. Independent max length error <5.2e-8 m; native checker
+world-root/local-translation error zero, length error <3e-8 m. These conservative
+skips are reported, not presented as successful foot locking. Accepted real
+cleanup and its independent metrics are the idle examples above. Actual files/logs
+remain ignored in .research/cleanup-connect-f3602d03b6de49babeb6b9dd2b8c06ef and
+.research/validation-bounds. No evaluation motion, weights or character files
+enter Git. No repeated visual capture was needed for pin metadata and stricter
+rollback of the previously inspected poses; no new temporal-quality claim.
+
+Remaining scope: numerical safeguards are not a collision/anatomical-limit or
+acceleration/jerk solver; no automatic contact suggestions, sole/toe locking,
+helper-leg chains, hand/path IK or guarantee of gait/flight semantics. ARM64,
+Linux/macOS and broad walking/turning/stair/pivot sweeps remain unvalidated here.
+Model/dependency pins and all upstream notices are unchanged.
+
+Integration completion: rebased onto origin/dev 670b6b6, preserving concurrent
+MoMask source/representation/ORT proof work, its notices and packaging notes.
+The integrated Windows CPU Release rebuild succeeds; all seven CTests pass,
+including the new incoming HumanML contract test. No MoMask network inference or
+quality claim is made. No inference algorithms/dependency revisions changed in
+this rebase, so the successful native connect/cleanup asset checks above remain
+applicable without repeating model inference.

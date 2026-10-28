@@ -9,6 +9,25 @@
 namespace motion {
 namespace {
 float len(Vec3 v) {return std::sqrt(dot(v,v));}
+float angle(Quat a,Quat b) {
+    auto q=normalized(inverse(a)*b);
+    return 2*std::atan2(len({q.x,q.y,q.z}),std::abs(q.w))*57.2957795f;
+}
+// Every affected edge, including the preceding/following sample when present.
+std::array<float,6> steps(const Clip& before,const Clip& after,const FootContact& contact,const std::array<size_t,3>& chain) {
+    std::array<float,6> out{};
+    for(size_t f=std::max<size_t>(1,contact.start);f<=std::min(contact.end+1,before.frames()-1);++f) {
+        for(size_t j:chain) {
+            float a=angle(before.frame(f-1)[j].q,before.frame(f)[j].q);
+            float b=angle(after.frame(f-1)[j].q,after.frame(f)[j].q);
+            out[0]=std::max(out[0],a);out[1]=std::max(out[1],b);out[4]=std::max(out[4],b-a);
+        }
+        auto a=world_pose(before,before.frame(f))[chain[2]].p-world_pose(before,before.frame(f-1))[chain[2]].p;
+        auto b=world_pose(after,after.frame(f))[chain[2]].p-world_pose(after,after.frame(f-1))[chain[2]].p;
+        out[2]=std::max(out[2],len(a));out[3]=std::max(out[3],len(b));out[5]=std::max(out[5],len(b)-len(a));
+    }
+    return out;
+}
 Quat aim(Vec3 a,Vec3 b) {
     a=normalized(a);b=normalized(b);float d=dot(a,b);
     if(d< -0.99999f) {auto v=normalized(cross(a,std::abs(a.x)<0.8f?Vec3{1,0,0}:Vec3{0,1,0}));return {v.x,v.y,v.z,0};}
@@ -26,7 +45,7 @@ void fields(const nlohmann::json& v,const std::set<std::string>& keys) {
 CleanupPlan load_cleanup_plan(const fs::path& path) {
     if(fs::file_size(path)>65536)throw std::runtime_error("Contact plan exceeds 64 KiB");
     std::ifstream input(path);nlohmann::json d;input>>d;
-    fields(d,{"contacts","protectedFrames","fadeFrames","maxCorrection"});CleanupPlan p;
+    fields(d,{"contacts","protectedFrames","fadeFrames","maxCorrection","maxJointCorrectionDegrees","maxJointStepIncreaseDegrees","maxAnkleStepIncrease"});CleanupPlan p;
     if(!d.at("contacts").is_array()||d["contacts"].empty()||d["contacts"].size()>1000)throw std::runtime_error("contacts needs 1..1000 intervals");
     for(const auto& c:d["contacts"]) {
         fields(c,{"foot","start","end"});auto f=c.at("foot").get<std::string>();
@@ -43,6 +62,15 @@ CleanupPlan load_cleanup_plan(const fs::path& path) {
         if(!v.is_number()||!std::isfinite(v.get<double>())||v.get<double>()<=0||v.get<double>()>0.5)throw std::runtime_error("maxCorrection is metres in (0,0.5]");
         p.max_correction=v.get<float>();
     }
+    auto bound=[&](const char* key,float& value,float maximum) {
+        if(!d.contains(key))return;
+        const auto& v=d[key];
+        if(!v.is_number()||!std::isfinite(v.get<double>())||v.get<double>()<0||v.get<double>()>maximum)throw std::runtime_error(std::string(key)+" is out of range");
+        value=v.get<float>();
+    };
+    bound("maxJointCorrectionDegrees",p.max_joint_correction,180);
+    bound("maxJointStepIncreaseDegrees",p.max_joint_step_increase,180);
+    bound("maxAnkleStepIncrease",p.max_ankle_step_increase,0.5f);
     // Clip-independent preflight, also used before a batch loads any model.
     for(size_t i=0;i<p.contacts.size();++i) {
         const auto& a=p.contacts[i];if(a.end<a.start+2)throw std::runtime_error("Contact needs at least three frames (inclusive)");
@@ -53,6 +81,8 @@ CleanupPlan load_cleanup_plan(const fs::path& path) {
 std::vector<ContactReport> cleanup_contacts(Clip& c,const CleanupPlan& p,const RetargetMapping* mapping) {
     c.validate();
     if(!std::isfinite(p.max_correction)||p.max_correction<=0||p.max_correction>0.5f||p.fade_frames>60||p.contacts.empty())throw std::runtime_error("Invalid cleanup settings");
+    for(float value:{p.max_joint_correction,p.max_joint_step_increase})if(!std::isfinite(value)||value<0||value>180)throw std::runtime_error("Invalid joint safeguard");
+    if(!std::isfinite(p.max_ankle_step_increase)||p.max_ankle_step_increase<0||p.max_ankle_step_increase>0.5f)throw std::runtime_error("Invalid ankle safeguard");
     auto canonical=soma();std::array<std::array<size_t,3>,2> chains{};
     if(!mapping)require_soma(c);
     for(size_t side=0;side<2;++side)for(size_t k=0;k<3;++k) {
@@ -70,6 +100,16 @@ std::vector<ContactReport> cleanup_contacts(Clip& c,const CleanupPlan& p,const R
         if(ancestor<0)throw std::runtime_error("Contact chains must descend from the motion root");
         if(c.joints[chain[1]].parent!=static_cast<int>(chain[0])||c.joints[chain[2]].parent!=static_cast<int>(chain[1])||chain[0]==c.motion_root||c.joints[chain[0]].parent<0)
             throw std::runtime_error("Cleanup requires direct thigh/calf/foot chains below the motion root");
+    }
+    // Distinct joint indices alone do not rule out a malicious/mistaken serial
+    // mapping where one leg is below the other; their corrections would interact.
+    for(size_t side=0;side<2;++side) {
+        int ancestor=c.joints[chains[side][0]].parent;
+        while(ancestor>=0) {
+            const auto& other=chains[1-side];
+            if(std::find(other.begin(),other.end(),static_cast<size_t>(ancestor))!=other.end())throw std::runtime_error("Cleanup requires independent leg chains");
+            ancestor=c.joints[static_cast<size_t>(ancestor)].parent;
+        }
     }
     for(size_t f:p.protected_frames)if(f>=c.frames())throw std::runtime_error("Protected frame outside clip");
     for(size_t i=0;i<p.contacts.size();++i) {
@@ -117,15 +157,23 @@ std::vector<ContactReport> cleanup_contacts(Clip& c,const CleanupPlan& p,const R
             }
             prev_before=before[e].p;prev_after=after[e].p;
             report.residual_max=std::max(report.residual_max,len(after[e].p-anchor));
-            for(size_t j:chain) {auto q=normalized(inverse(original.frame(f)[j].q)*pose[j].q);report.rotation_max=std::max(report.rotation_max,2*std::acos(std::clamp(std::abs(q.w),0.0f,1.0f))*57.2957795f);}
+            for(size_t j:chain)report.rotation_max=std::max(report.rotation_max,angle(original.frame(f)[j].q,pose[j].q));
             ++report.samples;
         }
         report.drift_before/=static_cast<float>(report.samples-1);report.drift_after/=static_cast<float>(report.samples-1);
         if(report.skipped)report.skip_reason="correction-bound";
-        // A fade or unreachable target can make a short plant worse. Keep the original
-        // interval in that case; other foot intervals use disjoint local joints.
-        if(!report.skipped&&report.drift_after>report.drift_before+1e-7f) {
-            report.skipped=true;report.skip_reason="drift-increased";report.drift_after=report.drift_before;
+        report.attempted_rotation_max=report.rotation_max;
+        auto candidate=steps(original,result,contact,chain);
+        report.joint_step_increase=candidate[4];report.ankle_step_increase=candidate[5];
+        if(!report.skipped) {
+            if(report.drift_after>report.drift_before+1e-7f)report.skip_reason="drift-increased";
+            else if(report.rotation_max>p.max_joint_correction+1e-3f)report.skip_reason="joint-correction-bound";
+            else if(candidate[4]>p.max_joint_step_increase+1e-3f)report.skip_reason="joint-step-increased";
+            else if(candidate[5]>p.max_ankle_step_increase+1e-6f)report.skip_reason="ankle-step-increased";
+        }
+        // Revert the whole interval, retaining previously accepted disjoint chains.
+        if(!report.skip_reason.empty()) {
+            report.skipped=true;report.drift_after=report.drift_before;
             report.rotation_max=0;report.residual_max=0;
             for(size_t f=contact.start;f<=contact.end;++f) {
                 for(size_t j:chain)result.frame(f)[j]=original.frame(f)[j];
@@ -133,6 +181,11 @@ std::vector<ContactReport> cleanup_contacts(Clip& c,const CleanupPlan& p,const R
             }
         }
         reports.push_back(report);
+    }
+    // Adjacent intervals can share an edge; report its final state after all decisions.
+    for(size_t i=0;i<p.contacts.size();++i) {
+        auto final=steps(original,result,p.contacts[i],chains[p.contacts[i].foot]);auto& r=reports[i];
+        r.joint_step_before=final[0];r.joint_step_after=final[1];r.ankle_step_before=final[2];r.ankle_step_after=final[3];
     }
     result.validate();c=std::move(result);return reports;
 }

@@ -308,6 +308,19 @@ int main(int argc,char** argv) try {
     check(bridge.frames()==26,"Boundary frame trimming");
     check(bridge.frame(0)[0].p.x==guides[3][0].p.x&&bridge.frame(25)[0].p.x==guides[4][0].p.x,"Exact endpoint positions");
     check(join(c,bridge,c).frames()==c.frames()*2+bridge.frames()-2,"Joined seam frames");
+    const std::vector<size_t> source_pins{0,3,7},target_pins{0,2,7};
+    auto pins=connected_protected_frames(8,26,8,source_pins,target_pins,true);
+    check(pins==std::vector<size_t>({0,3,7,32,34,39}),"Joined pins omit duplicate seam samples exactly once");
+    auto exact_bridge=bridge;
+    std::copy(c.frame(7).begin(),c.frame(7).end(),exact_bridge.frame(0).begin());
+    std::copy(c.frame(0).begin(),c.frame(0).end(),exact_bridge.frame(25).begin());
+    auto assembled_join=join(c,exact_bridge,c);
+    for(size_t f:{size_t{32},size_t{34},size_t{39}})
+        check(assembled_join.frame(f)[0].p.x==c.frame(f-32)[0].p.x,"Target pin offset agrees with exported join");
+    check(connected_protected_frames(8,26,8,source_pins,target_pins,false)==std::vector<size_t>({0,25}),"Bridge-only export protects only retained endpoints");
+    check(connected_protected_frames(1,2,1,{}, {},true)==std::vector<size_t>({0,1}),"Minimal seam index mapping");
+    bool bad_pins=false;try{(void)connected_protected_frames(8,26,8,std::vector<size_t>{8},{},true);}catch(const std::exception&){bad_pins=true;}check(bad_pins,"Out-of-range inherited pin refused");
+    bad_pins=false;try{(void)connected_protected_frames(18000,26,8,{}, {},true);}catch(const std::exception&){bad_pins=true;}check(bad_pins,"Oversized joined frame map refused");
     bool rejected=false;try {auto bad=features;bad[0]=NAN;(void)decode_bricks(c,in,bad,8,guides[3],guides[4]);}catch(...){rejected=true;}
     check(rejected,"Nonfinite model output rejection");
     rejected=false;try{auto bad=c;bad.joints[1].rest.p.y+=0.1f;require_soma(bad);}catch(...){rejected=true;}

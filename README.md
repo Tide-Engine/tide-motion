@@ -584,8 +584,21 @@ An interval exceeding it is skipped entirely. A solved interval whose mean
 horizontal drift increases by more than 0.1 micrometres per frame is also rolled
 back in full (`skipReason`: `correction-bound` or `drift-increased`). Same-foot intervals cannot overlap;
 both feet may be planted simultaneously. Each interval needs at least three frames.
-This limit bounds ankle displacement, not the joint angle. Review the reported
-joint corrections, especially on nearly straight knees.
+Additional conservative plan controls bound changes from the input motion:
+
+- `maxJointCorrectionDegrees`: 0..180, default 30; largest local rotation correction.
+- `maxJointStepIncreaseDegrees`: 0..180, default 5; allowed increase in each local
+  joint's rotation step compared with the **same input frame transition**.
+- `maxAnkleStepIncrease`: 0..0.5 metres, default 0.005; allowed increase in each
+  world ankle's 3D movement per frame compared with the same input transition.
+
+Checks include the transitions immediately before/after each interval when those
+samples exist. Any violation restores the entire interval, with skip reason
+`joint-correction-bound`, `joint-step-increased` or `ankle-step-increased`. Numeric
+slack is 0.001 degrees / 0.000001 metres. Quaternion sign changes do not count as
+rotation steps. These controls bound introduced changes; they preserve existing
+fast movement and do not impose anatomical joint limits. Setting a larger bound
+allows larger edits; 0 permits only numeric slack for that change.
 
 Root motion and all local translations stay unchanged. Foot world orientation is
 kept; toes can still articulate. No ground projection, pelvis adjustment, joint
@@ -596,7 +609,10 @@ an interval boundary. These are explicit editing controls, not a quality guarant
 
 Every constraint frame, previously protected frame, and pose-sequence arrival in
 an adjacent source `.glb.json` recipe is protected exactly. Retarget and mirror carry these
-frame indices into its recipe for subsequent cleanup. For externally authored clips or
+frame indices into their recipes for subsequent cleanup. `connect` protects both
+bridge endpoints; `connect --joined` also carries all retained source/target pins
+with the offset after duplicate seam samples are omitted. A bridge-only export
+retains its two endpoint pins, as other source/target frames are absent. For externally authored clips or
 constraints lost through other conversions, put their frame
 indices in `protectedFrames`. All joints at those frames remain unchanged.
 Generated effector/path targets are still measured by generation; this command
@@ -606,7 +622,11 @@ The output recipe records `tide-two-bone-v1`, the effective settings, explicit
 intervals, protected frames, mapping (if used), source recipe, skipped intervals,
 mean horizontal ankle movement per frame before/after (metres), maximum distance
 from the anchor after cleanup, and maximum local joint rotation correction
-(degrees). Metrics include fades and protected frames. A saved asset can contain
+(degrees). Drift/residual metrics include fades and protected frames. Peak joint and 3D ankle
+steps include adjacent boundary transitions. The recipe records attempted maximum
+correction/step increases separately from the final motion, so a rejected edit
+still explains why it was rejected. `safeguards: tide-contact-bounds-v1` identifies
+this policy. A saved asset can contain
 skipped intervals; inspect its recipe.
 
 Batch action (paths relative to the manifest; the plan and mapping are preflighted

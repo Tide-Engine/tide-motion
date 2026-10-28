@@ -116,6 +116,20 @@ std::vector<Transform> sample(const Clip& c,float time) {
     for(size_t j=0;j<c.joints.size();++j)result.push_back(blend(c.frame(lo)[j],c.frame(hi)[j],f-static_cast<float>(lo)));
     return result;
 }
+std::vector<size_t> connected_protected_frames(size_t source_frames,size_t bridge_frames,size_t target_frames,
+    std::span<const size_t> source_pins,std::span<const size_t> target_pins,bool joined) {
+    if(!source_frames||source_frames>18000||bridge_frames<2||bridge_frames>18000||!target_frames||target_frames>18000)
+        throw std::runtime_error("Invalid connected frame counts");
+    for(size_t pin:source_pins)if(pin>=source_frames)throw std::runtime_error("Source protected frame outside clip");
+    for(size_t pin:target_pins)if(pin>=target_frames)throw std::runtime_error("Target protected frame outside clip");
+    if(!joined)return {0,bridge_frames-1}; // No other input frames survive in a bridge-only export.
+    const size_t target_start=source_frames+bridge_frames-2;
+    if(target_start+target_frames>18000)throw std::runtime_error("Joined clip exceeds 18000 frames");
+    std::vector<size_t> pins{source_frames-1,target_start};
+    pins.insert(pins.end(),source_pins.begin(),source_pins.end());
+    for(size_t pin:target_pins)pins.push_back(target_start+pin);
+    std::sort(pins.begin(),pins.end());pins.erase(std::unique(pins.begin(),pins.end()),pins.end());return pins;
+}
 Clip join(const Clip& a,const Clip& bridge,const Clip& b) {
     Clip out=a; out.name="connected";
     if(a.joints.size()!=bridge.joints.size()||a.joints.size()!=b.joints.size())throw std::runtime_error("Cannot join different skeletons");
