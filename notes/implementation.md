@@ -1036,3 +1036,55 @@ documentation and tests. Windows Vulkan Release rebuild passes all six current
 CTests and the three development conversion tests. The v1.2 converter uses a
 named immutable model record, so later additive model registries cannot change
 its output verification by inserting entries. No dependency revision changed.
+
+
+## Cleanup follow-up: mirrored constraints and reach tests (2026-10-28)
+
+Gap review found that mirror omitted protected frame indices, despite retarget
+and cleanup carrying them. Mirror now inherits constraint frames, previously
+protectedFrames and pose-sequence start/arrivals using the same bounded source
+recipe reader. It writes only the frame protection, not stale pre-mirror target
+coordinates, handedness or constraint error claims. The protection means later
+cleanup keeps the mirrored authored pose, rather than its original unmirrored
+pose. No animation math, generation defaults or dependency revisions changed.
+README describes protection through mirror too.
+
+Corrected a validation gap: the old test labelled unreachable moved the root by
+only 9 cm, leaving the target inside the unit-length leg's reachable region. It
+therefore proved finite output, not unreachable behavior. The replacement moves
+the root enough that the independent hip-to-anchor distance is >1.04 m and checks
+ankle residual against the geometric minimum (distance minus the 1 m leg length,
+tolerance 2e-5 m), while verifying both 0.5 m segments remain fixed. It asserts
+the interval was solved, not skipped. Another test starts with exactly straight
+knees, shortens the root-to-anchor distance and verifies ankle placement, stable
+fallback bend direction and knee rotation steps below 0.05 rad/frame. These tests
+pass without changing the solver; prior broad unreachable-validation wording
+should be read subject to this correction.
+
+Validation: Windows x64 ClangCL Release rebuild succeeds. Both affected CTests
+(cleanup-contracts, cli-contracts) pass. CLI regressions exercise explicit/source
+pose-arrival protection through standalone mirror, another batch mirror and batch
+cleanup, checking all inherited indices. TEMP/TMP use the worktree-local
+.research/test-temp-gap directory. Real end-to-end uses the existing 75-frame
+parry-swing-return -> mirror -> cleanup (contacts both feet 0..15): independent GLB
+FK verifies protected mirrored poses at 0/74 within 2e-6 per component, preserved
+world ankle rotations and bone lengths (<9.3e-8 m); native checker reports zero
+world-root/local-translation error and <3e-8 m bone-length change. Left contact
+is restored by the drift-increased safeguard; right mean movement is 0.777 ->
+0.679 mm/frame. Files stay ignored under .research/validation-gap. No inference,
+GPU use or repeated visual preview was needed for this metadata/test-only change.
+
+Useful remaining work: guard peak joint/ankle motion, including steps across the
+contact interval boundary (mean drift alone does not rule out a pop); propagate
+protected frames through connect/join with correct time offsets; broaden real
+walking/turning/stair/pivot regressions; optionally solve authored hand/path
+targets. Automatic contact suggestions, helper-node leg chains, sole/toe locking,
+anatomical limits and ARM64 execution remain separate unimplemented/unvalidated
+scope. The current direct-chain solver retains its documented opt-in controls.
+
+Follow-up integration: rebased onto 3ef0599 (including concurrent DART research
+and opt-in SOMA-RP v1.2 installation/generation), preserving their source, notices,
+recipes and tests. Resolved append-only notes/CLI-test conflicts. Rebuilt the
+integrated CPU executable and all six CTests pass. This does not repeat or claim
+v1.2 model inference/conversion validation; the follow-up only changes mirror
+metadata and native cleanup contract coverage.

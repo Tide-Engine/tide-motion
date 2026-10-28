@@ -811,9 +811,10 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     } else if(command=="mirror") {
         if(pos.size()!=1)throw std::runtime_error("mirror takes one SOMA-30 .glb clip");
         clip=load_glb(utf8path(pos[0]),clip_name,true);
+        auto protected_frames=protected_recipe_frames(source_metadata(utf8path(pos[0])),clip.frames());
         mirror_soma(clip);
         mirror_recipe={{"tool","tide-motion"},{"version",MOTION_VERSION},{"command",command},{"source",pos[0]},{"clip",clip_name},{"rig","soma30"},{"fps",clip.fps},{"frames",clip.frames()},
-            {"plane","the first frame's sagittal plane (through its root, up and its facing)"}};
+            {"protectedFrames",protected_frames},{"plane","the first frame's sagittal plane (through its root, up and its facing)"}};
     } else if(command=="retarget") {
         if(pos.size()!=1||map_file.empty()||(!to_soma&&target_file.empty())||(to_soma&&!target_file.empty()))
             throw std::runtime_error("Use retarget SOURCE.glb --map BONES.json with either --target CHARACTER.glb or --to-soma, and -o CLIP.glb");

@@ -59,11 +59,35 @@ int main(int argc,char** argv) {try {
     for(size_t f=0;f<c.frames();++f)for(size_t j=1;j<c.joints.size();++j)c.frame(f)[j].p=c.frame(f)[j].p*100;
     for(size_t j=1;j<c.joints.size();++j)c.joints[j].rest.p=c.joints[j].rest.p*100;
     p.fade_frames=0;auto scaled=cleanup_contacts(c,p,&m);check(scaled[0].drift_after<1e-6f,"scaled contact failed");
-    c=original;p.contacts={{0,0,30}};p.protected_frames={0,30};
-    // An unreachable anchor is reported as residual while bone lengths remain fixed.
-    for(size_t f=0;f<c.frames();++f)c.frame(f)[0].p.y+=0.003f*static_cast<float>(f);
-    p.max_correction=0.2f;auto unreachable=cleanup_contacts(c,p,&m);
-    check(std::isfinite(unreachable[0].residual_max),"unreachable target produced nonfinite output");
+    c=original;p.contacts={{0,0,30}};p.protected_frames.clear();p.fade_frames=0;
+    // Anchor is genuinely beyond the unit-length leg's reach at frame 25:
+    // hips-to-anchor distance exceeds 1 m, so the geometric minimum error is d-1.
+    for(size_t f=0;f<c.frames();++f)c.frame(f)[0].p.y+=0.01f*static_cast<float>(f);
+    auto anchor=world_pose(c,c.frame(0))[3].p;
+    p.max_correction=0.5f;auto unreachable=cleanup_contacts(c,p,&m);
+    check(!unreachable[0].skipped,"unreachable oracle did not exercise the solver");
+    auto w=world_pose(c,c.frame(25));float distance=length(anchor-w[1].p);
+    check(distance>1.04f,"unreachable fixture still within reach");
+    check(std::abs(length(w[3].p-anchor)-(distance-1))<2e-5f,"unreachable ankle not on reach boundary");
+    check(std::abs(length(w[2].p-w[1].p)-0.5f)<1e-6f&&std::abs(length(w[3].p-w[2].p)-0.5f)<1e-6f,"unreachable solver stretched bones");
+    // Straight knees have no original bend plane. Shortening the root-to-anchor
+    // distance requires the fallback plane while the ankle stays fixed.
+    c=original;
+    for(size_t f=0;f<c.frames();++f) {
+        c.frame(f)[2].p={0,-0.5f,0};c.frame(f)[3].p={0,-0.5f,0};
+        c.frame(f)[0].p.y-=0.0002f*static_cast<float>(f);
+    }
+    anchor=world_pose(c,c.frame(0))[3].p;
+    auto straight=cleanup_contacts(c,p,&m);check(!straight[0].skipped,"straight knee solver skipped");
+    for(size_t f=0;f<c.frames();++f) {
+        auto pose=world_pose(c,c.frame(f));
+        check(length(pose[3].p-anchor)<2e-5f,"straight-knee ankle missed target");
+        check(pose[2].p.z>=-1e-6f,"fallback knee flipped bend direction");
+        if(f) {
+            auto delta=normalized(inverse(c.frame(f-1)[2].q)*c.frame(f)[2].q);
+            check(std::abs(delta.w)>std::cos(0.05f/2),"fallback knee has a rotation pop");
+        }
+    }
     auto path=fs::temp_directory_path()/("tide-cleanup-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".glb");save_glb(c,path);auto read=load_glb(path,"",false);fs::remove(path);check(read.frames()==c.frames(),"cleanup export");
     p.contacts={{0,0,100}};bool refused=false;try{cleanup_contacts(c,p,&m);}catch(const std::exception&){refused=true;}check(refused,"bad interval accepted");
     std::cout<<"contact contracts passed\n";return 0;

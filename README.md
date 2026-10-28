@@ -594,7 +594,7 @@ protected poses and unreachable targets can leave drift or increase movement nea
 an interval boundary. These are explicit editing controls, not a quality guarantee.
 
 Every constraint frame, previously protected frame, and pose-sequence arrival in
-an adjacent source `.glb.json` recipe is protected exactly. Retarget carries these
+an adjacent source `.glb.json` recipe is protected exactly. Retarget and mirror carry these
 frame indices into its recipe for subsequent cleanup. For externally authored clips or
 constraints lost through other conversions, put their frame
 indices in `protectedFrames`. All joints at those frames remain unchanged.
