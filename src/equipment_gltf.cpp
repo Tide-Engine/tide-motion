@@ -20,7 +20,8 @@ constexpr size_t limit=512ULL*1024*1024;
 void require(bool value,const std::string& message) {if(!value)throw std::runtime_error(message);}
 uint32_t word(const std::vector<char>& b,size_t at) {
     require(at<=b.size()&&b.size()-at>=4,"Truncated equipment GLB");uint32_t v=0;
-    for(unsigned k=0;k<4;++k)v|=static_cast<uint32_t>(static_cast<unsigned char>(b[at+k]))<<(8*k);return v;
+    for(unsigned k=0;k<4;++k)v|=static_cast<uint32_t>(static_cast<unsigned char>(b[at+k]))<<(8*k);
+    return v;
 }
 std::vector<char> read(const fs::path& path) {
     auto size=fs::file_size(path);require(size<=limit,"Equipment mesh exceeds 512 MiB");
@@ -133,12 +134,14 @@ void import_glb(Builder& b,const EquipmentTrack& track,size_t root) {
     }
     for(auto v:src.value("textures",json::array())) {
         v["source"]=images+index(v.at("source"),count("images"),"image");
-        if(v.contains("sampler"))v["sampler"]=samplers+index(v["sampler"],count("samplers"),"sampler");b.d["textures"].push_back(v);
+        if(v.contains("sampler"))v["sampler"]=samplers+index(v["sampler"],count("samplers"),"sampler");
+        b.d["textures"].push_back(v);
     }
     for(auto v:src.value("materials",json::array())) {
         auto info=[&](json& object,const char* key){if(object.contains(key))object[key]["index"]=textures+index(object[key].at("index"),count("textures"),"texture");};
         if(v.contains("pbrMetallicRoughness")){auto& p=v["pbrMetallicRoughness"];info(p,"baseColorTexture");info(p,"metallicRoughnessTexture");}
-        for(const char* key:{"normalTexture","occlusionTexture","emissiveTexture"})info(v,key);b.d["materials"].push_back(v);
+        for(const char* key:{"normalTexture","occlusionTexture","emissiveTexture"})info(v,key);
+        b.d["materials"].push_back(v);
     }
     for(auto v:src.value("meshes",json::array())) {
         require(!v.contains("weights"),"Equipment morph weights are unsupported");
@@ -156,7 +159,8 @@ void import_glb(Builder& b,const EquipmentTrack& track,size_t root) {
     require(count("nodes")<=1024,"Too many equipment mesh nodes");std::vector<unsigned> parents(count("nodes")),state(count("nodes"));
     std::function<void(size_t,size_t)> visit=[&](size_t n,size_t depth) {
         require(depth<=128&&state[n]!=1,"Equipment mesh hierarchy contains a cycle or is too deep");if(state[n]==2)return;state[n]=1;
-        for(const auto& child:src["nodes"][n].value("children",json::array()))visit(index(child,count("nodes"),"child"),depth+1);state[n]=2;
+        for(const auto& child:src["nodes"][n].value("children",json::array()))visit(index(child,count("nodes"),"child"),depth+1);
+        state[n]=2;
     };
     for(size_t n=0;n<count("nodes");++n)for(const auto& child:src["nodes"][n].value("children",json::array()))
         require(++parents[index(child,count("nodes"),"child")]==1,"Equipment mesh node has multiple parents");
@@ -172,7 +176,8 @@ void import_glb(Builder& b,const EquipmentTrack& track,size_t root) {
     else for(size_t n=0;n<count("nodes");++n)if(!parents[n])roots.push_back(n);
     require(!roots.empty(),"Equipment GLB must have scene nodes containing geometry");size_t geometry=0;
     std::function<void(size_t)> geometry_count=[&](size_t n) {
-        if(src["nodes"][n].contains("mesh"))++geometry;for(const auto& c:src["nodes"][n].value("children",json::array()))geometry_count(c.get<size_t>());
+        if(src["nodes"][n].contains("mesh"))++geometry;
+        for(const auto& c:src["nodes"][n].value("children",json::array()))geometry_count(c.get<size_t>());
     };
     b.d["nodes"][root]["children"]=json::array();std::set<size_t> unique_roots;
     for(const auto& v:roots) {
@@ -272,8 +277,10 @@ void save_equipment_glb(const EquipmentResult& result,const fs::path& output) {
     b.animation["name"]=body.name;
     for(size_t j=0;j<body.joints.size();++j) {
         const auto& bone=body.joints[j];auto q=normalized(bone.rest.q);json n={{"translation",{bone.rest.p.x,bone.rest.p.y,bone.rest.p.z}},{"rotation",{q.x,q.y,q.z,q.w}}};
-        if(bone.scale!=1)n["scale"]={bone.scale,bone.scale,bone.scale};json children=json::array();
-        for(size_t k=j+1;k<body.joints.size();++k)if(body.joints[k].parent==static_cast<int>(j))children.push_back(k);if(!children.empty())n["children"]=children;
+        if(bone.scale!=1)n["scale"]={bone.scale,bone.scale,bone.scale};
+        json children=json::array();
+        for(size_t k=j+1;k<body.joints.size();++k)if(body.joints[k].parent==static_cast<int>(j))children.push_back(k);
+        if(!children.empty())n["children"]=children;
         size_t node=b.named(n,bone.name);if(bone.parent<0)b.d["scenes"][0]["nodes"].push_back(node);
         std::vector<Transform> poses;poses.reserve(body.frames());for(size_t f=0;f<body.frames();++f)poses.push_back(body.frame(f)[j]);b.track(node,time,poses);
     }

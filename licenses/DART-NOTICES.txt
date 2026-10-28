@@ -9,7 +9,8 @@ is retained in DART-SOURCE.txt.
 Native host transforms/sampler/policy orchestration and exported graph schemas
 are adapted from model/mld_vae.py, model/mld_denoiser.py,
 control/policy/policy.py, control/env/env_reach_location_mld.py,
-mld/rollout_mld.py, utils/smpl_utils.py and diffusion/gaussian_diffusion.py.
+mld/rollout_mld.py, mld/optim_mld.py, mld/optim_scene_mld.py,
+utils/smpl_utils.py and diffusion/gaussian_diffusion.py.
 Changes: native C++ host loop and model preparation; predicted-joint inference;
 model-mean/generated warmup; normalizer-derived pelvis offset; generated fixed
 reference skeleton; explicit SOMA mapping and fixed-length export; bounded plans.
@@ -24,7 +25,7 @@ training/evaluation code or body model is bundled in the executable.
 
 OpenAI CLIP source and model: OpenAI/CLIP at
 d05afc436d78f1c48dc0dbf8e5980a9d471f35f6, MIT (OPENAI-CLIP.txt).
-The native text graph and fixed token sequences derive from that source and its
+The native text graph, tokenizer and separately installed BPE derive from that source and its
 official ViT-B/32 checkpoint. Image inference is not used. Text model training
 data is not distributed. Research deployment recommendations in the model card
 are retained as upstream context and are not represented as an NC license.
@@ -40,3 +41,11 @@ Models remain external verified downloads. No checkpoint tensor data is included
 in Git or runtime packages. src/generated/dart-graphs.inc contains operator/schema
 definitions and external byte ranges only; all learned tensors reside in the
 separately installed, content-pinned model files.
+
+Expanded controls: native Unicode CLIP tokenization, source/history adapters,
+DDIM/DDPM sampling, analytic VJP graphs, reverse autoregressive chain and Adam;
+SOMA skeleton FK replaces optional upstream SMPL body/surface objectives.
+PyTorch 2.7.1 source revision e2d141dbde55c2a4370fac5165b0561b6af4798b supplies
+development-time derivative decompositions (DART-PYTORCH.txt); PyTorch is not
+bundled. CPython 3.11/Unicode 14 data facts supply generated normalization/entity
+tables (PYTHON-TABLES.txt, UNICODE.txt); no Python runtime is bundled.

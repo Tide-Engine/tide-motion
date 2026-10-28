@@ -31,6 +31,12 @@
       "file": "dart/stats.pkl"
     },
     {
+      "url": "https://raw.githubusercontent.com/openai/CLIP/d05afc436d78f1c48dc0dbf8e5980a9d471f35f6/clip/bpe_simple_vocab_16e6.txt.gz",
+      "bytes": 1356917,
+      "sha256": "924691ac288e54409236115652ad4aa250f48203de50a9e4722a6ecd48d6804a",
+      "file": "dart/bpe_simple_vocab_16e6.txt.gz"
+    },
+    {
       "url": null,
       "bytes": 372168788,
       "sha256": "6c186ea7807efe7cef02e639726bb94040f1c44fb8beef0621c667440d7b7877",
@@ -62,21 +68,57 @@
     },
     {
       "url": null,
-      "file": "dart/denoiser-batch.onnx",
+      "bytes": 278098,
       "sha256": "cddda8f84f991df73cd779bb92b7d3a739f69acfece69b22c8e1f7652f1be06a",
-      "bytes": 278098
+      "file": "dart/denoiser-batch.onnx"
     },
     {
       "url": null,
-      "file": "dart/decoder-batch.onnx",
+      "bytes": 178146,
       "sha256": "2bc1faaf482be8e92598c84ba365e6183254b8e317db23a6b0f35f95e96d62ec",
-      "bytes": 178146
+      "file": "dart/decoder-batch.onnx"
     },
     {
       "url": null,
-      "file": "dart/policy-batch.onnx",
+      "bytes": 12010,
       "sha256": "a051450cfb9fcdc9243ea96c4c83671bf5d452ccf1381a602caa84f564d5959f",
-      "bytes": 12010
+      "file": "dart/policy-batch.onnx"
+    },
+    {
+      "url": null,
+      "bytes": 893607,
+      "sha256": "7449ad812b90d391eeda6b144f572ffed53b3b0f792920a69745efb8a231bdc7",
+      "file": "dart/decoder-grad-batch.onnx"
+    },
+    {
+      "url": null,
+      "bytes": 1750094,
+      "sha256": "894c87142e9a8de6aa99a8af1b822aec3b9d026ae5618a35afa46c2f56468f2a",
+      "file": "dart/denoiser-grad-batch.onnx"
+    },
+    {
+      "url": null,
+      "bytes": 50455,
+      "sha256": "5cb07b9cfdd096d2c3074500968fdf9c6c80aa5f95707e9e3c171bdcbc0f4ad0",
+      "file": "dart/transition-batch.onnx"
+    },
+    {
+      "url": null,
+      "bytes": 173828,
+      "sha256": "5f0ec1022215cab1f4e2d1f43937c5fb17c598c30341ea76e6a751a6c64f23cd",
+      "file": "dart/transition-grad-batch.onnx"
+    },
+    {
+      "url": null,
+      "bytes": 224127,
+      "sha256": "9e47e3e9a3e5db360a9f16c0ddb590e40eb23d6f04498d2508a692ba6f095b2b",
+      "file": "dart/soma-points-batch.onnx"
+    },
+    {
+      "url": null,
+      "bytes": 578020,
+      "sha256": "040f144e0e3158177cfe07a0e3485527451f3f3d41779d8013f3a15cddc421fc",
+      "file": "dart/soma-points-grad-batch.onnx"
     }
   ],
   "schemaVersion": 1,
@@ -195,7 +237,7 @@
       "file": "denoiser-batch.onnx",
       "bytes": 278098,
       "sha256": "cddda8f84f991df73cd779bb92b7d3a739f69acfece69b22c8e1f7652f1be06a",
-      "maximumReferenceError": 1.4066696166992188E-05,
+      "maximumReferenceError": 1.4066696166992188e-05,
       "opset": 17,
       "nodes": 1439
     },
@@ -203,7 +245,7 @@
       "file": "decoder-batch.onnx",
       "bytes": 178146,
       "sha256": "2bc1faaf482be8e92598c84ba365e6183254b8e317db23a6b0f35f95e96d62ec",
-      "maximumReferenceError": 8.106231689453125E-06,
+      "maximumReferenceError": 8.106231689453125e-06,
       "opset": 17,
       "nodes": 964
     },
@@ -211,9 +253,403 @@
       "file": "policy-batch.onnx",
       "bytes": 12010,
       "sha256": "a051450cfb9fcdc9243ea96c4c83671bf5d452ccf1381a602caa84f564d5959f",
-      "maximumReferenceError": 1.4066696166992188E-05,
+      "maximumReferenceError": 1.4066696166992188e-05,
       "opset": 17,
       "nodes": 86
     }
+  },
+  "gradientGraphs": {
+    "decoder-grad": {
+      "file": "decoder-grad-batch.onnx",
+      "bytes": 893607,
+      "sha256": "7449ad812b90d391eeda6b144f572ffed53b3b0f792920a69745efb8a231bdc7",
+      "nodes": 1742,
+      "opset": 17,
+      "maximumReferenceError": 1.049041748046875e-05,
+      "operators": {
+        "Add": 96,
+        "Concat": 6,
+        "Constant": 532,
+        "ConstantOfShape": 21,
+        "Div": 36,
+        "Equal": 21,
+        "Erf": 14,
+        "Exp": 7,
+        "Expand": 21,
+        "Gather": 21,
+        "Gemm": 67,
+        "MatMul": 42,
+        "Mul": 218,
+        "Pow": 15,
+        "Reciprocal": 15,
+        "ReduceMean": 30,
+        "ReduceSum": 37,
+        "Reshape": 192,
+        "Shape": 21,
+        "Slice": 11,
+        "Softmax": 7,
+        "Sqrt": 15,
+        "Squeeze": 14,
+        "Sub": 67,
+        "Transpose": 103,
+        "Unsqueeze": 71,
+        "Where": 42
+      },
+      "inputs": {
+        "latent": [
+          1,
+          1,
+          256
+        ],
+        "history": [
+          1,
+          2,
+          276
+        ],
+        "cotangent": [
+          1,
+          8,
+          276
+        ]
+      },
+      "output": [
+        1,
+        808
+      ]
+    },
+    "denoiser-grad": {
+      "file": "denoiser-grad-batch.onnx",
+      "bytes": 1750094,
+      "sha256": "894c87142e9a8de6aa99a8af1b822aec3b9d026ae5618a35afa46c2f56468f2a",
+      "nodes": 2618,
+      "opset": 17,
+      "maximumReferenceError": 0.0002493858337402344,
+      "operators": {
+        "Add": 104,
+        "Cast": 24,
+        "Concat": 3,
+        "Constant": 878,
+        "ConstantOfShape": 56,
+        "Div": 39,
+        "Equal": 64,
+        "Erf": 16,
+        "Exp": 8,
+        "Expand": 56,
+        "Gather": 25,
+        "Gemm": 72,
+        "Greater": 8,
+        "MatMul": 48,
+        "Mul": 288,
+        "Not": 16,
+        "Pow": 16,
+        "Reciprocal": 16,
+        "ReduceMean": 32,
+        "ReduceSum": 48,
+        "Reshape": 352,
+        "Shape": 56,
+        "Sigmoid": 1,
+        "Slice": 5,
+        "Softmax": 8,
+        "Sqrt": 16,
+        "Squeeze": 16,
+        "Sub": 72,
+        "Transpose": 134,
+        "Unsqueeze": 53,
+        "Where": 88
+      },
+      "inputs": {
+        "noise": [
+          2,
+          1,
+          256
+        ],
+        "timestep": [
+          2
+        ],
+        "history": [
+          2,
+          2,
+          276
+        ],
+        "text": [
+          2,
+          512
+        ],
+        "cotangent": [
+          2,
+          1,
+          256
+        ]
+      },
+      "output": [
+        2,
+        808
+      ]
+    },
+    "transition": {
+      "file": "transition-batch.onnx",
+      "bytes": 50455,
+      "sha256": "5cb07b9cfdd096d2c3074500968fdf9c6c80aa5f95707e9e3c171bdcbc0f4ad0",
+      "nodes": 546,
+      "opset": 17,
+      "maximumReferenceError": 2.384185791015625e-07,
+      "operators": {
+        "Add": 3,
+        "Cast": 10,
+        "Clip": 5,
+        "Concat": 7,
+        "Constant": 214,
+        "ConstantOfShape": 8,
+        "Div": 5,
+        "Equal": 8,
+        "Expand": 8,
+        "Gather": 15,
+        "MatMul": 10,
+        "Mul": 18,
+        "Neg": 1,
+        "ReduceL2": 5,
+        "ReduceSum": 2,
+        "Reshape": 48,
+        "Shape": 8,
+        "Slice": 21,
+        "Squeeze": 1,
+        "Sub": 9,
+        "Transpose": 22,
+        "Unsqueeze": 110,
+        "Where": 8
+      },
+      "inputs": {
+        "future": [
+          1,
+          8,
+          276
+        ],
+        "world": [
+          1,
+          12
+        ],
+        "delta": [
+          1,
+          3
+        ]
+      },
+      "output": [
+        1,
+        1092
+      ]
+    },
+    "transition-grad": {
+      "file": "transition-grad-batch.onnx",
+      "bytes": 173828,
+      "sha256": "5f0ec1022215cab1f4e2d1f43937c5fb17c598c30341ea76e6a751a6c64f23cd",
+      "nodes": 1618,
+      "opset": 17,
+      "maximumReferenceError": 3.814697265625e-06,
+      "operators": {
+        "Add": 44,
+        "Cast": 10,
+        "Clip": 5,
+        "Concat": 65,
+        "Constant": 752,
+        "ConstantOfShape": 17,
+        "Div": 20,
+        "Equal": 22,
+        "Expand": 22,
+        "Gather": 28,
+        "GreaterOrEqual": 5,
+        "MatMul": 21,
+        "Mul": 55,
+        "Neg": 11,
+        "ReduceL2": 5,
+        "ReduceSum": 12,
+        "Reshape": 74,
+        "Shape": 22,
+        "Slice": 149,
+        "Squeeze": 29,
+        "Sub": 13,
+        "Transpose": 57,
+        "Unsqueeze": 146,
+        "Where": 34
+      },
+      "inputs": {
+        "future": [
+          1,
+          8,
+          276
+        ],
+        "world": [
+          1,
+          12
+        ],
+        "delta": [
+          1,
+          3
+        ],
+        "cotangent": [
+          1,
+          1092
+        ]
+      },
+      "output": [
+        1,
+        2220
+      ]
+    },
+    "soma-points": {
+      "file": "soma-points-batch.onnx",
+      "bytes": 224127,
+      "sha256": "9e47e3e9a3e5db360a9f16c0ddb590e40eb23d6f04498d2508a692ba6f095b2b",
+      "nodes": 2364,
+      "opset": 17,
+      "maximumReferenceError": 2.384185791015625e-07,
+      "operators": {
+        "Add": 31,
+        "Cast": 4,
+        "Clip": 2,
+        "Concat": 4,
+        "Constant": 947,
+        "ConstantOfShape": 135,
+        "Div": 2,
+        "Equal": 135,
+        "Expand": 135,
+        "Gather": 77,
+        "MatMul": 93,
+        "Mul": 140,
+        "ReduceL2": 2,
+        "ReduceMin": 1,
+        "ReduceSum": 1,
+        "Reshape": 238,
+        "Shape": 135,
+        "Slice": 8,
+        "Squeeze": 29,
+        "Sub": 4,
+        "Transpose": 6,
+        "Unsqueeze": 100,
+        "Where": 135
+      },
+      "inputs": {
+        "future": [
+          1,
+          8,
+          276
+        ],
+        "world": [
+          1,
+          12
+        ],
+        "calibration": [
+          1,
+          24,
+          3,
+          3
+        ],
+        "offsets": [
+          1,
+          30,
+          3
+        ],
+        "root_offset": [
+          1,
+          1
+        ],
+        "floor": [
+          1,
+          2
+        ]
+      },
+      "output": [
+        1,
+        720
+      ]
+    },
+    "soma-points-grad": {
+      "file": "soma-points-grad-batch.onnx",
+      "bytes": 578020,
+      "sha256": "040f144e0e3158177cfe07a0e3485527451f3f3d41779d8013f3a15cddc421fc",
+      "nodes": 4474,
+      "opset": 17,
+      "maximumReferenceError": 1.9073486328125e-06,
+      "operators": {
+        "Add": 138,
+        "Cast": 7,
+        "Clip": 2,
+        "Concat": 78,
+        "Constant": 1880,
+        "ConstantOfShape": 158,
+        "Div": 9,
+        "Equal": 161,
+        "Expand": 160,
+        "Gather": 113,
+        "GreaterOrEqual": 2,
+        "MatMul": 244,
+        "Mul": 176,
+        "Neg": 4,
+        "ReduceL2": 2,
+        "ReduceMin": 1,
+        "ReduceSum": 27,
+        "Reshape": 506,
+        "Shape": 160,
+        "Slice": 155,
+        "Squeeze": 52,
+        "Sub": 4,
+        "Transpose": 105,
+        "Unsqueeze": 146,
+        "Where": 184
+      },
+      "inputs": {
+        "future": [
+          1,
+          8,
+          276
+        ],
+        "world": [
+          1,
+          12
+        ],
+        "calibration": [
+          1,
+          24,
+          3,
+          3
+        ],
+        "offsets": [
+          1,
+          30,
+          3
+        ],
+        "root_offset": [
+          1,
+          1
+        ],
+        "floor": [
+          1,
+          2
+        ],
+        "cotangent": [
+          1,
+          720
+        ]
+      },
+      "output": [
+        1,
+        2220
+      ]
+    }
+  },
+  "developmentGradientCompiler": {
+    "torch": "2.7.1+cpu",
+    "sourceRevision": "e2d141dbde55c2a4370fac5165b0561b6af4798b",
+    "licenseUrl": "https://raw.githubusercontent.com/pytorch/pytorch/e2d141dbde55c2a4370fac5165b0561b6af4798b/LICENSE",
+    "licenseSha256": "a8a2c6b67cf8a597ffaa5c82380a6bd1b82629c0417e00673d8013d662eb500a",
+    "runtimeDependency": false
+  },
+  "unicodeTables": {
+    "generator": "tools/clip_unicode.py",
+    "unicodeVersion": "14.0.0",
+    "python": "3.11.15",
+    "pythonLicenseUrl": "https://raw.githubusercontent.com/python/cpython/v3.11.15/LICENSE",
+    "pythonLicenseSha256": "3b2f81fe21d181c499c59a256c8e1968455d6689d269aa85373bfb6af41da3bf",
+    "unicodeLicenseUrl": "https://www.unicode.org/license.txt",
+    "unicodeLicenseSha256": "e7a93b009565cfce55919a381437ac4db883e9da2126fa28b91d12732bc53d96"
   }
 }

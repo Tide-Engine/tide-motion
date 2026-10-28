@@ -53,7 +53,7 @@ def emit(name,model):
                 inputs='{'+','.join(json.dumps(x) for x in node.input)+'}'
                 outputs='{'+','.join(json.dumps(x) for x in node.output)+'}'
                 attrs='{'+','.join(proto(a) for a in node.attribute)+'}'
-                lines.append('    graph+=dn('+','.join([json.dumps(node.op_type),json.dumps(node.name),inputs,outputs,attrs])+');')
+                lines.append('    graph+=[] DART_GRAPH_BUILD () {return dn('+','.join([json.dumps(node.op_type),json.dumps(node.name),inputs,outputs,attrs])+');}();')
         elif fd.is_repeated:
             lines.extend('    graph+='+single(fd,x)+';' for x in v)
         else:lines.append('    graph+='+single(fd,v)+';')

@@ -60,7 +60,8 @@ MeshBounds fbx_mesh_bounds(const fs::path& path) {
     auto scene=load_scene(path);MeshBounds b;bool first=true;size_t count=0;
     for(const auto* node:scene->nodes)if(node->mesh) {
         const auto* mesh=node->mesh;
-        if(mesh->num_vertices>10000000-count)throw std::runtime_error("Too many FBX prop vertices");count+=mesh->num_vertices;
+        if(mesh->num_vertices>10000000-count)throw std::runtime_error("Too many FBX prop vertices");
+        count+=mesh->num_vertices;
         for(const auto& v:mesh->vertices) {
             auto w=ufbx_transform_position(&node->geometry_to_world,v);
             Vec3 p{static_cast<float>(w.x),static_cast<float>(w.y),static_cast<float>(w.z)};
@@ -70,7 +71,8 @@ MeshBounds fbx_mesh_bounds(const fs::path& path) {
             b.high={std::max(b.high.x,p.x),std::max(b.high.y,p.y),std::max(b.high.z,p.z)};
         }
     }
-    if(first)throw std::runtime_error("FBX prop mesh has no positions");return b;
+    if(first)throw std::runtime_error("FBX prop mesh has no positions");
+    return b;
 }
 Clip read_fbx(const fs::path& path,const std::string& selected,bool rest_only,const std::vector<std::string>& extra_nodes) {
     auto scene=load_scene(path);

@@ -1,5 +1,5 @@
 #include "motion.hpp"
-#include "dart_graph.hpp"
+#include "dart_graphs.hpp"
 #include <picosha2.h>
 #include <array>
 #include <bit>
@@ -26,6 +26,7 @@ constexpr ModelFile files[]={
     {"dart","dart/policy.pt",15339391,"81af5cda56e519afadb7bdf74ba82322cc79f903c1cbea151b05fdc71f460a0e","https://drive.google.com/uc?export=download&id=1q9Vahpx8Ix9QtyoR55ZHPmAld1oFUH52"},
     {"dart","dart/clip.pt",353976522,"40d365715913c9da98579312b702a82c18be219cc2a73407c4526f58eba950af","https://openaipublic.azureedge.net/clip/models/40d365715913c9da98579312b702a82c18be219cc2a73407c4526f58eba950af/ViT-B-32.pt"},
     {"dart","dart/stats.pkl",2917,"cb442539380d15a5763b799ba063d9b0b6574a751a03ae0c86d4a6f24bff5bd4","https://drive.google.com/uc?export=download&id=1pz8H_0U0daO_-bvvzaG--zNkqDG91dIl"},
+    {"dart","dart/bpe_simple_vocab_16e6.txt.gz",1356917,"924691ac288e54409236115652ad4aa250f48203de50a9e4722a6ecd48d6804a","https://raw.githubusercontent.com/openai/CLIP/d05afc436d78f1c48dc0dbf8e5980a9d471f35f6/clip/bpe_simple_vocab_16e6.txt.gz"},
     {"dart","dart/dart-weights.bin",372168788,"6c186ea7807efe7cef02e639726bb94040f1c44fb8beef0621c667440d7b7877",nullptr},
     {"dart","dart/denoiser.onnx",245023,"7ccf2e3f881f6380bf78c0fdd2e888a61a5db4f0a78db963a7c1acea176d748a",nullptr},
     {"dart","dart/decoder.onnx",161074,"866e25acfe54984e84a1426bf8545353b858bb6e97d874b7bbd7c6669c77d579",nullptr},
@@ -34,6 +35,12 @@ constexpr ModelFile files[]={
     {"dart","dart/denoiser-batch.onnx",278098,"cddda8f84f991df73cd779bb92b7d3a739f69acfece69b22c8e1f7652f1be06a",nullptr},
     {"dart","dart/decoder-batch.onnx",178146,"2bc1faaf482be8e92598c84ba365e6183254b8e317db23a6b0f35f95e96d62ec",nullptr},
     {"dart","dart/policy-batch.onnx",12010,"a051450cfb9fcdc9243ea96c4c83671bf5d452ccf1381a602caa84f564d5959f",nullptr},
+    {"dart","dart/decoder-grad-batch.onnx",893607,"7449ad812b90d391eeda6b144f572ffed53b3b0f792920a69745efb8a231bdc7",nullptr},
+    {"dart","dart/denoiser-grad-batch.onnx",1750094,"894c87142e9a8de6aa99a8af1b822aec3b9d026ae5618a35afa46c2f56468f2a",nullptr},
+    {"dart","dart/transition-batch.onnx",50455,"5cb07b9cfdd096d2c3074500968fdf9c6c80aa5f95707e9e3c171bdcbc0f4ad0",nullptr},
+    {"dart","dart/transition-grad-batch.onnx",173828,"5f0ec1022215cab1f4e2d1f43937c5fb17c598c30341ea76e6a751a6c64f23cd",nullptr},
+    {"dart","dart/soma-points-batch.onnx",224127,"9e47e3e9a3e5db360a9f16c0ddb590e40eb23d6f04498d2508a692ba6f095b2b",nullptr},
+    {"dart","dart/soma-points-grad-batch.onnx",578020,"040f144e0e3158177cfe07a0e3485527451f3f3d41779d8013f3a15cddc421fc",nullptr},
     v12_model,
     {"kimodo","kimodo.gguf",1133166784ULL,"3bf1229f4c1eff1d28f5196a854113da2df9a11a5e21c60694630903bf948ee4",
      "https://huggingface.co/LocalAI-io/Kimodo-SOMA-RP-v1.1-GGML/resolve/65f8b8ab34ee7524161cc87b20ae4cb4f5d3a12d/models/kimodo-soma-rp-v1.1-f32.gguf"},
@@ -57,9 +64,6 @@ constexpr ModelFile v12_sources[]={
 };
 void prepare_v12(const fs::path& root);
 void prepare_dart(const fs::path& root);
-struct DartSlice {const char* file;uint64_t source,bytes,destination;bool half;};
-#include "generated/dart-graphs.inc"
-#include "generated/dart-batch-graphs.inc"
 void selection_valid(const std::string& selection) {
     if(selection!="all"&&selection!="kimodo"&&selection!="bricks"&&selection!="kimodo-v1.2"&&selection!="text"&&selection!="dart")throw std::runtime_error("Model selection must be all, kimodo, kimodo-v1.2, text, bricks or dart");
 }
@@ -135,7 +139,7 @@ void prepare_dart(const fs::path& root) {
     auto weights=root/"dart/dart-weights.bin";
     if(!fs::exists(weights)) {
         auto part=weights;part+=".part";std::ofstream out(part,std::ios::binary|std::ios::trunc);
-        for(const auto& slice:dart_slices) {
+        for(const auto& slice:dart_tensor_slices()) {
             std::ifstream in(root/"dart"/slice.file,std::ios::binary);in.seekg(static_cast<std::streamoff>(slice.source));
             if(static_cast<uint64_t>(out.tellp())!=slice.destination)throw std::runtime_error("Invalid DART tensor table");
             if(slice.half)for(uint64_t i=0;i<slice.bytes/4;++i) {
@@ -156,8 +160,7 @@ void prepare_dart(const fs::path& root) {
         out.write(bytes.data(),static_cast<std::streamsize>(bytes.size()));
         out.close();if(!out)throw std::runtime_error("DART graph write failed");publish(path);
     };
-    graph("denoiser.onnx",denoiser_graph());graph("decoder.onnx",decoder_graph());graph("policy.onnx",policy_graph());graph("text.onnx",text_graph());
-    graph("denoiser-batch.onnx",denoiser_batch_graph());graph("decoder-batch.onnx",decoder_batch_graph());graph("policy-batch.onnx",policy_batch_graph());
+    for(const char* name:{"denoiser.onnx","decoder.onnx","policy.onnx","text.onnx","denoiser-batch.onnx","decoder-batch.onnx","policy-batch.onnx","decoder-grad-batch.onnx","denoiser-grad-batch.onnx","transition-batch.onnx","transition-grad-batch.onnx","soma-points-batch.onnx","soma-points-grad-batch.onnx"})graph(name,dart_graph_schema(name));
 }
 void prepare_v12(const fs::path& root) {
     for(const auto& source:v12_sources)install_file(root,source);

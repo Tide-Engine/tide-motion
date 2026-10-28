@@ -46,7 +46,8 @@ std::string normalized_path(const fs::path& path) {
     return n;
 }
 void write_json_new(const fs::path& path,const nlohmann::json& j) {
-    if(path.has_parent_path())fs::create_directories(path.parent_path());fs::path part=path.string()+".part";
+    if(path.has_parent_path())fs::create_directories(path.parent_path());
+    fs::path part=path.string()+".part";
 #ifdef _WIN32
     FILE* file=_wfopen(part.c_str(),L"wbx");
 #else
@@ -55,7 +56,9 @@ void write_json_new(const fs::path& path,const nlohmann::json& j) {
     if(!file)throw std::runtime_error("Cannot create equipment JSON partial exclusively: "+part.string());
     try {
         auto text=j.dump(2)+"\n";bool ok=std::fwrite(text.data(),1,text.size(),file)==text.size();
-        if(std::fclose(file))ok=false;file=nullptr;if(!ok)throw std::runtime_error("Cannot write equipment JSON");
+        if(std::fclose(file))ok=false;
+        file=nullptr;
+        if(!ok)throw std::runtime_error("Cannot write equipment JSON");
         fs::create_hard_link(part,path);std::error_code ignored;fs::remove(part,ignored);
     }catch(...){if(file)std::fclose(file);std::error_code ignored;fs::remove(part,ignored);throw;}
 }
@@ -93,7 +96,9 @@ int equipment_command(const std::vector<std::string>& args) {
     if(plan_path.empty())throw std::runtime_error("Equipment needs --plan FILE.json");
     if(action!="preview")for(const char* flag:{"--setup","--first-person","--frames","--capture","--gif","--tide","--texture"})if(seen.contains(flag))throw std::runtime_error(std::string(flag)+" is equipment preview only");
     if(action=="bake") {
-        if(output.extension()!=".glb")throw std::runtime_error("Equipment bake needs -o NEW.glb");new_file(output);new_file(output.string()+".json");
+        if(output.extension()!=".glb")throw std::runtime_error("Equipment bake needs -o NEW.glb");
+        new_file(output);
+        new_file(output.string()+".json");
     }else if(!output.empty())throw std::runtime_error("Equipment -o is bake only; inspect uses --report");
     if(!body_output.empty()) {
         if(action!="bake"||body_output.extension()!=".glb")throw std::runtime_error("--body-output needs equipment bake and a new .glb path");

@@ -1,5 +1,167 @@
 # Native animation authoring
 
+## DART complete authoring controls and native optimization (2026-10-28)
+
+Supersedes the earlier three-label/source/gradient capability limits below.
+Owner asked to expose the model's useful capabilities and continue implementation.
+Delivered native free-text timelines; saved history or explicit SOMA/mapped humanoid
+source conditioning; single-pose repeat; actor sample/mean/none; per-segment CFG;
+DDIM eta/ancestral DDPM; original-schedule timestep subsets; initial latent scale/
+zero initialization; ground height and opt-in floor projection. No Python runtime,
+new user library, hosted service, procedural generation or pose blending. Existing
+Kimodo/ARDY/MoMask defaults and code paths remain independent. Current schema,
+examples, exact limitations and reproduction commands are in [dart-controls.md](dart-controls.md).
+
+Native CLIP BPE reads one additional exact MIT archive (1356917 B,
+924691ac288e54409236115652ad4aa250f48203de50a9e4722a6ecd48d6804a), pinned to OpenAI
+CLIP d05afc436d78f1c48dc0dbf8e5980a9d471f35f6. Existing ufbx inflate avoids a new
+library. Generated Unicode 14/CPython 3.11 fact tables, licenses and generator are
+included; no vocabulary/learned data is embedded. Sixteen official-tokenizer
+comparisons cover English, contractions, case, accented/decomposed French, Greek,
+Chinese, Korean, emoji, entities, empty text and truncation. No arbitrary prompt
+whitelist remains. ftfy mojibake repair and some malformed numeric entity mappings
+are not implemented; the normal valid UTF-8 path is tested. Embeddings cache up to
+4096 prompts; motion and gradient sessions persist across batch actions.
+
+The prior exact-rights audit is retained: the author's public Apache-2.0 checkpoint
+statement, pinned release files and released normalizer support this inference set.
+AMASS/BABEL/HumanML training access is separate; no body model, SMPL rest extract,
+stand.pkl, upstream evaluation history or dataset is downloaded/used. Body-free
+fixed geometry comes from this model's generated positions/rotations, and pelvis
+offset from released inference coefficients. Native source adapters use explicit
+known topology/mapping and existing retargeting, not automatic bone identification.
+No person was contacted. No model/ONNX/tensor/reference/generated motion enters Git
+or runtime packages. Existing denoiser/VAE/actor/CLIP/tensor pins remain unchanged.
+
+Implemented real analytic native optimization: six additional standard-opset-17
+forward/VJP schemas (decoder gradient 1742 nodes; denoiser gradient 2618; history/
+world forward 546 and gradient 1618; SOMA FK 2364 and gradient 4474). Full operator
+inventories, sizes/hashes, shapes, primary URLs and licenses are in dart-models.json.
+All learned tensors reuse the same verified external 372168788 B file. Export uses
+pinned development-only PyTorch 2.7.1+cpu source e2d141dbde55c2a4370fac5165b0561b6af4798b,
+math SDPA/ATen decompositions, torch.func VJP and fixed symbolic lowering of softmax
+backward/slice_scatter. PyTorch BSD notices are retained; no training runtime ships.
+All inline floating constants were audited as mathematical scalars/zero masks;
+learned initializers remain external. Graph declarations moved to one cold-build
+translation unit; per-node cold lambdas avoid the giant-function stack overflow
+encountered during native schema construction. Native preparation matches all pins.
+
+Native Adam optimizes reparameterized latent noise through every CFG denoiser,
+DDIM/DDPM step, decoder, history recanonicalization and world transform across the
+entire timeline. Losses cover endpoint poses, arbitrary frame/joint/axis constraints,
+segment goals, max jerk, relative initial foot floor and owner-supplied dense SDF
+joint penetration. SDF samples are trilinear, border-clamped with zero outward
+derivative. The released actor is not a latent-optimization prior. Best measured
+candidate is retained; seed poses remain fixed, endpoints are soft. No snapping,
+blending, IK or finite-difference optimization. Optional directional finite
+differences only verify the analytic gradient. Iteration progress is printed.
+Default objective is canonical 30-joint SOMA FK including requested floor projection;
+raw 22-joint prediction objective remains selectable. Each default optimized asset
+independently checks graph coordinates against native retarget/FK, fails above
+0.2 mm. No SMPL body/surface/shape objective is claimed; fingers/eyes/jaw have no
+independent DART degrees of freedom. Scene joint penalties are not mesh contact,
+self-collision or collision-free motion guarantees.
+
+Source GLB/FBX animation names, selected frames, explicit maps and native first/last
+history states preflight before inference; earlier batch outputs are accepted as
+inputs and split execution groups. Existing-output protection is preserved. Native
+history saves both unnormalized rows, world transform, fixed reference and normalizer
+identity. Recipe inputs have SHA-256/size/path provenance. Batch forward inference
+still groups up to eight independent streams; optimization actions reuse sessions
+but run separately. Chunks/reverse history remain sequential, not falsely batched.
+Output is two initial frames plus eight/chunk, including repeat; source prefixes
+are not copied. Budgets remain <18000 frames. All model files stay outside Git.
+
+Windows ClangCL 18.1.8 Release/RTX 4080 SUPER, four CPU threads:
+
+- CPU/GPU six-graph reference comparison passes elementwise 2e-4 absolute + 2e-4
+  relative bounds. Maximum large denoiser gradient error .000249386/.000256062;
+  decoder VJP <=1.526e-5, transforms <=7.63e-6. Larger absolute derivative errors
+  are covered by the relative bound, not hidden by reporting only forward errors.
+- Whole-chain four-direction numerical checks pass on multi-chunk SOMA and raw
+  joints, DDPM, stochastic respaced DDIM, floor, jerk, SDF and sparse constraints.
+  Largest observed directional error in the eleven-asset test <9e-6 at epsilon .05.
+- tests/dart-controls.ps1 generates eleven real own-prompt assets with one model/
+  session set: wave/squat/jump, native/source/repeat continuation, actor mean and
+  an untrained backward-walk prompt, full-pose targets and scene regularizers.
+  Two six-chunk/50-frame inbetweens, 120 iterations/rate .05: objectives
+  .02161793/.00806799 -> .00000287268/.00000325300; independent max endpoint errors
+  over all 30 joints .00859128/.00964742 m. 30.55/30.02 s. These reachable target
+  poses were generated with the same model, not selected from evaluation data.
+- Independent test dart_controls_metrics.py confirms native-history/source first
+  two poses to 2.84e-7/3.42e-7 m and fixed seed poses. Independent GLB/FK lengths
+  <2.5e-7 m; 723 native half-frame samples position <2.4e-7 m/quaternion dot <7.3e-8.
+  Exported constraint errors/masks are independently recomputed in dart_metrics.py.
+- Own free-text adherence proxies: wave hand movement relative to pelvis spans
+  .458/.966 m; squat pelvis height .205.. .859 m; jump both-feet minimum peaks .206 m.
+  These are geometry observations, not a semantic benchmark. Segment-boundary root
+  steps .00215/.00418 m, velocity changes .114/.126 m/s in that timeline. Largest
+  joint step 25.39 degrees. Endpose foot-slide proxies 3.52/3.55 cm/frame; contact
+  quality is not fixed. A too-short 18-frame goal probe remains .662 m away.
+- Eleven-action sampled host peak 1124900864 B, GPU peak 680607744 B; sessions reused.
+  A later twelve-action/four-seed regression reaches 24/24 locomotion goals in
+  3.532 s incl verification/load, sampled host 773713920 B, default GPU batch 8.
+  Older matched batch-1/8 CPU/GPU timings below remain historical observations.
+- Additional packaged tests cover native targetFrame 0, mapped source/target,
+  named animation selection, repeat, stochastic sampler, analytic gradients and
+  SHA input provenance. Assets reimport and independent exported error checks pass.
+- All twelve Windows CTests pass; Ubuntu GCC 13 warnings-as-errors build/twelve
+  CTests, native six-graph parity, tokenizer and actual CPU optimized GLB pass.
+  Isolated per-worktree temps prevent cross-thread collisions. No macOS GPU or
+  full upstream SMPL rollout equivalence is claimed.
+- Packaged executable runs GPU by default, strict GPU refuses missing runtime,
+  auto actually generates on CPU with Windows-only PATH. ZIP installer/reinstaller,
+  path traversal and model-preservation checks pass. New controls/docs/licenses
+  are installed. The owner's installation is untouched.
+- Hidden 960x540 native mannequin capture at --frames 51 inspected successfully,
+  using Tide CLI/compiler/native platform built from clean D:/Projects/PurrEngine
+  367ae4da2d31913176ae1e2624e1d78a1204f03c. Private staging needed both release and
+  mingw-release runtime files; full engine install stops at unrelated unbuilt
+  tide-editor. No engine sources changed and no engine installer claim is made.
+  TideMotionGpuValidation held for every GPU inference and renderer test.
+
+DART's distinct value versus independently implemented ARDY is eight-frame action
+changes, released waypoint actor and reverse full-timeline latent optimization.
+No ARDY implementation was duplicated or quality-ranked. Remaining limits are
+measured prompt/contact/constraint quality, fixed representation/checkpoint,
+sequential optimization requests, no SMPL shape/mesh workflow, no independent fine
+hand animation, and tokenizer repair differences. No training, research assets,
+automatic rigging/skinning or non-humanoid claim.
+
+First combined integration rebased onto c239748, preserving the concurrent ARDY, MoMask,
+first-person/equipment and native advisory review work. CMake's source-list and
+notes insertion conflicts retain both sides. GCC 13 exposed five incoming
+misleading-indentation warnings (GLB/FBX bounds and review radius validation);
+only statement layout was changed, with no behavior or inference arithmetic change.
+All fifteen combined Windows and Ubuntu CTests pass; affected native review,
+preview, CLI, retarget and DART checks pass after those formatting fixes.
+Six new gradient/mathematical graph profiles show only DmlExecutionProvider:
+3/3/1/80/1/120 kernel events for decoder-VJP, denoiser-VJP, transition,
+transition-VJP, SOMA FK and SOMA VJP respectively; zero CPU-provider kernels.
+These graph partitions are not a claim that host control/text encoding runs on GPU.
+A fresh Windows native cache reuses the five hash-verified raw model files,
+fetches BPE by the pinned HTTPS URL and constructs/validates thirteen schemas and
+shared tensors without Python. All sixteen tokenizer fixtures pass on that cache.
+Final Windows ZIP installer/reinstaller and installed GPU/default/strict refusal/
+actual CPU fallback tests pass; installed native GPU gradient optimization also
+passes with Windows-only PATH. The native Linux archive/installer passes, and its
+installed CPU binary generates/validates real goal and optimized GLBs with system-
+only PATH and no LD_LIBRARY_PATH. A reused scratch output initially caused the
+expected overwrite refusal; the subsequent native run uses a fresh unique directory.
+The combined preview also captures the second optimized asset at --frames 51
+using the same checkout-built engine; image inspected. No owner installation,
+engine source, model data distribution, force push, extra CI dispatch or PR.
+
+Final rebase onto f08cb0e also preserves native equipment/grip/object/bow authoring.
+Twenty further GCC misleading-indentation warnings in incoming equipment source,
+export and CLI are fixed by splitting statements only; whitespace-stripped source
+is identical to origin/dev. All eighteen combined Windows/Ubuntu CTests pass;
+affected equipment, CLI and DART checks pass after the layout fixes. DART model
+arithmetic, schemas and previously measured assets are unchanged. Native optimizer
+and forward GPU profiles remain valid; no expensive inference benchmark is repeated
+for these unrelated source-layout fixes. Final package and installed runtime smoke
+checks cover the combined executable before the direct non-force dev push.
+
 ## Native equipment grips, object export and bow release (2026-10-28)
 
 Owner explicitly requested implementing the remaining tool authoring work and

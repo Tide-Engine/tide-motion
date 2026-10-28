@@ -58,7 +58,8 @@ MeshBounds mesh_bounds(const fs::path& path) {
     std::vector<bool> seen(data->nodes_count);
     std::function<void(const cgltf_node*,const float*,size_t)> visit=[&](const cgltf_node* node,const float* parent,size_t depth) {
         size_t index=static_cast<size_t>(node-data->nodes);
-        if(depth>128||seen[index])throw std::runtime_error("Prop scene repeats a node or has a cycle");seen[index]=true;
+        if(depth>128||seen[index])throw std::runtime_error("Prop scene repeats a node or has a cycle");
+        seen[index]=true;
         float local[16],t[16]{};cgltf_node_transform_local(node,local);
         for(size_t col=0;col<4;++col)for(size_t row=0;row<4;++row)for(size_t k=0;k<4;++k)
             t[col*4+row]+=parent[k*4+row]*local[col*4+k];
@@ -72,7 +73,8 @@ MeshBounds mesh_bounds(const fs::path& path) {
     else {
         for(size_t i=0;i<data->meshes_count;++i)mesh(&data->meshes[i],identity);
     }
-    if(first)throw std::runtime_error("Prop mesh has no positions");return bounds;
+    if(first)throw std::runtime_error("Prop mesh has no positions");
+    return bounds;
 }
 std::vector<std::string> node_names(const fs::path& path) {
     if(is_fbx(path))return fbx_node_names(path);

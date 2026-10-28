@@ -47,22 +47,26 @@ std::vector<EquipmentKey> keys(const json& list,bool point_only=false) {
             k.mesh_scale=vec(j["meshScale"],1000);
             for(float s:{k.mesh_scale.x,k.mesh_scale.y,k.mesh_scale.z})if(s<0.000001f)throw std::runtime_error("Equipment meshScale must be positive");
         }
-        if(!out.empty()&&k.frame<=out.back().frame)throw std::runtime_error("Equipment keys must be strictly ordered");out.push_back(k);
+        if(!out.empty()&&k.frame<=out.back().frame)throw std::runtime_error("Equipment keys must be strictly ordered");
+        out.push_back(k);
     }
     return out;
 }
 EquipmentKey at(const std::vector<EquipmentKey>& keys,size_t f,bool step=false) {
     auto hi=std::upper_bound(keys.begin(),keys.end(),f,[](size_t v,const auto& k){return v<k.frame;});
-    if(hi==keys.begin())return keys.front();if(hi==keys.end()||step)return *std::prev(hi);
+    if(hi==keys.begin())return keys.front();
+    if(hi==keys.end()||step)return *std::prev(hi);
     const auto& a=*std::prev(hi);const auto& b=*hi;float t=static_cast<float>(f-a.frame)/static_cast<float>(b.frame-a.frame);
     return {f,blend(a.local,b.local,t),a.mesh_scale*(1-t)+b.mesh_scale*t};
 }
 size_t joint(const Clip& c,const std::string& n) {
     size_t found=c.joints.size();
     for(size_t j=0;j<c.joints.size();++j)if(c.joints[j].name==n) {
-        if(found!=c.joints.size())throw std::runtime_error("Ambiguous equipment bone: "+n);found=j;
+        if(found!=c.joints.size())throw std::runtime_error("Ambiguous equipment bone: "+n);
+        found=j;
     }
-    if(found==c.joints.size())throw std::runtime_error("Equipment bone not found: "+n);return found;
+    if(found==c.joints.size())throw std::runtime_error("Equipment bone not found: "+n);
+    return found;
 }
 Quat aim(Vec3 a,Vec3 b) {
     a=normalized(a);b=normalized(b);float d=dot(a,b);
@@ -75,7 +79,8 @@ json measure(const Clip& c,const EquipmentTrack& o,const EquipmentGrip& g) {
         auto hand=world_pose(c,c.frame(f))[j]*g.hand_offset,goal=o.poses[f]*g.target;
         Vec3 error=rotate(inverse(o.poses[f].q),hand.p-goal.p);float e=length(error),a=angle(hand.q,goal.q);
         sum+=e;angles+=a;if(e>max){max=e;worst=f;}max_angle=std::max(max_angle,a);
-        if(f>g.start)drift+=length(error-previous);previous=error;
+        if(f>g.start)drift+=length(error-previous);
+        previous=error;
     }
     size_t samples=g.end-g.start+1;
     return {{"samples",samples},{"positionMeanMetres",sum/static_cast<double>(samples)},{"positionMaxMetres",max},{"positionWorstFrame",worst},
@@ -135,7 +140,8 @@ EquipmentPlan load_equipment_plan(const fs::path& path) {
             s.name=name(j.at("name"));s.object=name(j.at("object"));s.top=vec(j.at("top"));s.bottom=vec(j.at("bottom"));s.nock=keys(j.at("nock"),true);
             s.top_anchor=j.value("topAnchor",s.object);s.bottom_anchor=j.value("bottomAnchor",s.object);s.nock_anchor=j.value("nockAnchor",s.object);
             if(!names.contains(s.object)||!names.insert(s.name+".top").second||!names.insert(s.name+".bottom").second)throw std::runtime_error("Invalid string object or duplicate part name");
-            if(j.contains("thickness"))s.thickness=number(j["thickness"],0.0001f,0.1f);p.strings.push_back(s);
+            if(j.contains("thickness"))s.thickness=number(j["thickness"],0.0001f,0.1f);
+            p.strings.push_back(s);
         }
     }
     if(d.contains("events")) {
@@ -157,7 +163,8 @@ EquipmentResult author_equipment(const Clip& source,const EquipmentPlan& p,bool 
         for(size_t i=0;i<list.size();++i) {
             const auto& k=list[i];if(k.frame<start||k.frame>end||(i&&k.frame<=list[i-1].frame))throw std::runtime_error("Invalid equipment key ordering");
             for(float x:{k.local.p.x,k.local.p.y,k.local.p.z,k.mesh_scale.x,k.mesh_scale.y,k.mesh_scale.z})if(!std::isfinite(x))throw std::runtime_error("Nonfinite equipment key");
-            if(k.mesh_scale.x<=0||k.mesh_scale.y<=0||k.mesh_scale.z<=0)throw std::runtime_error("Equipment meshScale must be positive");(void)normalized(k.local.q);
+            if(k.mesh_scale.x<=0||k.mesh_scale.y<=0||k.mesh_scale.z<=0)throw std::runtime_error("Equipment meshScale must be positive");
+            (void)normalized(k.local.q);
         }
     };
     EquipmentResult out;out.body=source;out.events=p.events;
@@ -169,7 +176,8 @@ EquipmentResult author_equipment(const Clip& source,const EquipmentPlan& p,bool 
         if(o.segments.empty()||o.segments.back().end!=source.frames()-1)throw std::runtime_error("Equipment segments must cover every source frame");
         size_t next=0;
         for(const auto& s:o.segments) {
-            if(s.start!=next||s.end<s.start||s.end>=source.frames())throw std::runtime_error("Invalid equipment segment coverage");next=s.end+1;
+            if(s.start!=next||s.end<s.start||s.end>=source.frames())throw std::runtime_error("Invalid equipment segment coverage");
+            next=s.end+1;
             if(s.space!="world"&&s.space!="bone"&&s.space!="object")throw std::runtime_error("Unknown equipment space");
             if(s.interpolation!="linear"&&s.interpolation!="step")throw std::runtime_error("Unknown equipment interpolation");
             check_keys(s.keys,s.start,s.end);
@@ -180,7 +188,9 @@ EquipmentResult author_equipment(const Clip& source,const EquipmentPlan& p,bool 
     for(size_t f=0;f<source.frames();++f)body_world.push_back(world_pose(source,source.frame(f)));
     std::vector<unsigned char> state(p.objects.size());
     std::function<void(size_t)> evaluate=[&](size_t index) {
-        if(state[index]==2)return;if(state[index]==1)throw std::runtime_error("Equipment object anchor cycle");state[index]=1;
+        if(state[index]==2)return;
+        if(state[index]==1)throw std::runtime_error("Equipment object anchor cycle");
+        state[index]=1;
         for(const auto& seg:p.objects[index].segments) {
             size_t anchor=0;
             if(seg.space=="bone")anchor=joint(source,seg.anchor);
@@ -227,7 +237,8 @@ EquipmentResult author_equipment(const Clip& source,const EquipmentPlan& p,bool 
         const auto& g=p.grips[i];if(g.end>=source.frames()||g.start>g.end||!objects.contains(g.object))throw std::runtime_error("Grip outside clip or unknown object");(void)joint(source,g.bone);
         if(!correct)continue;
         if(g.chain.size()!=3||g.chain.back()!=g.bone)throw std::runtime_error("Correction needs an explicit upper-arm/forearm/hand chain ending at bone");
-        for(size_t k=0;k<3;++k)chains[i][k]=joint(source,g.chain[k]);auto [a,b,e]=chains[i];
+        for(size_t k=0;k<3;++k)chains[i][k]=joint(source,g.chain[k]);
+        auto [a,b,e]=chains[i];
         if(source.joints[a].parent<0||a==source.motion_root||source.joints[b].parent!=static_cast<int>(a)||source.joints[e].parent!=static_cast<int>(b))throw std::runtime_error("Grip correction requires direct three-bone chains below the root");
         for(size_t j=0;j<i;++j)if(g.start<=p.grips[j].end&&p.grips[j].start<=g.end) {
             for(size_t n:chains[i])for(size_t m:chains[j])if(n==m)throw std::runtime_error("Overlapping grip corrections share a joint");

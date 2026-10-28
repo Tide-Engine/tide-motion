@@ -43,6 +43,11 @@ def measure(path):
         for a,b in zip(q,q[1:]):
             assert all(math.isfinite(x) for x in a+b)
             angular=max(angular,2*math.acos(min(1,abs(sum(a[k]*b[k] for k in range(4)))))*180/math.pi)
+    for c in recipe['metrics'].get('optimization',{}).get('constraints',[]):
+        if 'axes' not in c:continue  # Historical recipes lack the explicit mask.
+        actual=frames[c['frame']][c['joint']]
+        error=math.sqrt(sum((actual[k]-c['target'][k])**2 for k in range(3) if c['axes'][k]))
+        assert abs(error-c['exportedErrorMetres'])<1e-4,'optimized constraint/export mismatch'
     return dict(metrics(path),maxBoneLengthErrorMetres=max_length_error,maxJointStepDegrees=angular,seconds=recipe['metrics']['seconds'],segments=segments)
 
 if __name__=='__main__':

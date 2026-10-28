@@ -1,4 +1,15 @@
-# Native DART locomotion backend
+# Native DART authoring
+
+Current controls are documented in [dart-controls.md](dart-controls.md): free text,
+source/history continuation, sampler/actor controls, native gradient inbetweening,
+sparse joints and joint/SDF optimization. GPU acceleration and real forward
+batching remain available. Rerun models install dart after upgrading.
+
+## Historical initial implementation and GPU validation
+
+The following records the earlier bounded rollout implementation. Its statements
+that arbitrary text, source clips and optimization are unavailable are superseded
+by dart-controls.md. The checkpoint/dependency rights findings remain applicable.
 
 Implemented 2026-10-28. `dart PLAN.json -o CLIP.glb` is an explicit opt-in native
 backend for continuation and waypoint locomotion, with the released policy's

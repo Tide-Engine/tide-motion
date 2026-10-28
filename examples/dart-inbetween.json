@@ -1,0 +1,1 @@
+{"version":1,"history":"start.glb.json","segments":[{"text":"walk forward","chunks":12}],"optimization":{"target":"finish.glb","targetJoints":["Hips","LeftFoot","RightFoot","LeftHand","RightHand"],"iterations":120,"learningRate":0.05}}

@@ -1,4 +1,5 @@
 #include "dart.hpp"
+#include "clip_text.hpp"
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
@@ -36,9 +37,15 @@ void assets(const fs::path& directory) {
 }
 }
 int main(int argc,char** argv) try {
+    if(argc==5&&std::string_view(argv[1])=="--gradient-reference"){DartModel model(utf8path(argv[2]),4,argv[4]);std::cout<<model.verify_gradient_reference(utf8path(argv[3]))<<'\n';return 0;}
+    if(argc==4&&std::string_view(argv[1])=="--tokens") {
+        ClipTokenizer tokenizer(utf8path(argv[2]));std::ifstream f(utf8path(argv[3]));nlohmann::json fixtures;f>>fixtures;
+        for(const auto& item:fixtures){auto tokens=tokenizer.encode(item.at("text"));if(nlohmann::json(tokens)!=item.at("tokens"))throw std::runtime_error("CLIP token mismatch: "+item.at("text").get<std::string>());}
+        std::cout<<"Native CLIP token parity: "<<fixtures.size()<<" prompts\n";return 0;
+    }
     if(argc==5&&std::string_view(argv[1])=="--batch-reference"){DartModel model(utf8path(argv[2]),4,argv[4]);std::cout<<"Batched reference max "<<model.verify_batch_reference(utf8path(argv[3]))<<'\n';return 0;}
     if(argc==3&&std::string_view(argv[1])=="--assets"){assets(utf8path(argv[2]));return 0;}
-    if(argc==3){DartModel model(utf8path(argv[1]),4);std::cout<<"Native/PyTorch max absolute error "<<model.verify_reference(utf8path(argv[2]))<<'\n';return 0;}
+    if(argc==3){DartModel model(utf8path(argv[1]),4,"cpu");std::cout<<"Native/PyTorch max absolute error "<<model.verify_reference(utf8path(argv[2]))<<'\n';return 0;}
     auto path=fs::temp_directory_path()/("dart-plan-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".json");
     struct Cleanup {fs::path path;~Cleanup(){std::error_code e;fs::remove(path,e);}} cleanup{path};
     auto plan=nlohmann::json{{"version",1},{"segments",nlohmann::json::array({{{"text","walk"},{"chunks",12},{"target",{0,2}}}})}};
@@ -47,7 +54,9 @@ int main(int argc,char** argv) try {
     auto refuses=[&](const nlohmann::json& j){bool refused=false;try{(void)load(j);}catch(const std::exception&){refused=true;}if(!refused)throw std::runtime_error("DART accepted invalid plan");};
     for(const auto& value:{nlohmann::json(-1),nlohmann::json(0),nlohmann::json(1.5),nlohmann::json(513)}){auto bad=plan;bad["segments"][0]["chunks"]=value;refuses(bad);}
     auto bad=plan;bad["segments"][0]["target"]={0,2,3};refuses(bad);
-    bad=plan;bad["segments"][0]["text"]="fly";refuses(bad);
+    bad=plan;bad["segments"][0]["text"]=42;refuses(bad);
+    auto flexible=plan;flexible["segments"][0]["text"]="wave then squat";flexible["sampler"]="ddpm";flexible["eta"]=.5;flexible["policyMode"]="none";flexible["timesteps"]={0,3,6,9};flexible["optimization"]={{"iterations",2},{"constraints",nlohmann::json::array({{{"frame",5},{"joint","LeftHandThumbEnd"},{"position",{0,1,0}}}})}};if(!load(flexible).optimization->soma_joints)throw std::runtime_error("SOMA objective lost");
+    bad=flexible;bad["timesteps"]={0,3,3,9};refuses(bad);bad=flexible;bad["eta"]=2;refuses(bad);bad=flexible;bad["optimization"]["jointSpace"]="predicted";refuses(bad);bad=flexible;bad["optimization"]["constraints"][0]["frame"]=1000;refuses(bad);
     bad=plan;bad["seed"]=-1;refuses(bad);bad=plan;bad["unrecognized"]=true;refuses(bad);
     bad=plan;bad["segments"]=nlohmann::json::array();refuses(bad);
     bad=plan;bad["segments"][0]["target"]={101,0};refuses(bad);

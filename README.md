@@ -723,7 +723,7 @@ both installers together. A failed build publishes nothing; a publish retry can
 resume a draft but cannot overwrite an already published release. The Windows
 release is built with Vulkan; the others use CPU inference.
 
-## DART waypoint control and continuation (opt-in)
+## DART text, continuation and motion control (opt-in)
 
 `dart` runs the released DART locomotion policy, diffusion model and motion decoder
 natively on Windows DirectML GPU (default `--device auto`) or CPU (`--device cpu`).
@@ -740,10 +740,17 @@ tide-motion dart examples/dart-continuation.json -o continuation.glb --threads 4
 
 A plan contains `version: 1`, optional `seed` (default 1), `warmupChunks` (1..32,
 default 8), and 1..64 `segments`. Each segment has `text`, `chunks` (1..512) and
-an optional `target: [x,z]` in absolute world metres. The supported text labels
-are **`walk`, `run`, `hop on left leg`**, matching the released policy's skills.
-Arbitrary prompts, imported start clips, inbetweening, terrain and scene targets
-are not exposed by this bounded backend.
+an optional `target: [x,z]` in absolute world metres. Free UTF-8 prompts and empty
+unconditional prompts are supported. The released actor was trained for **walk,
+run, hop on left leg**; other prompts remain available with explicit skill metadata.
+Use `history` from an earlier GLB recipe or `source` with optional explicit mapping
+to continue existing motion; `seedMode` supports moving history or a single pose.
+Native gradient optimization adds soft pose inbetweening, arbitrary frame/joint
+targets, jerk/floor penalties and owner-supplied joint/SDF scene objectives.
+Sampler, guidance, timestep, noise, actor mean/sample and floor settings are exposed.
+See [the complete controls/schema](notes/dart-controls.md),
+[free-text example](examples/dart-text.json) and
+[inbetweening template](examples/dart-inbetween.json).
 
 Each primitive adds eight frames at 30 Hz. Without a target, `chunks` is its
 exact count. With a target, it is the maximum budget: the controller advances
@@ -753,7 +760,8 @@ goal control, not exact endpoint correction. The output includes two initial
 history frames and is capped below 18,000 frames. Plans and paths remain local.
 Batch actions use `{"action":"dart","plan":"plan.json","output":"clip.glb","threads":4}`;
 plans resolve relative to the batch manifest and all are preflighted before
-any inference. One set of sessions and three text embeddings is reused.
+any inference. One session set and cached free-text embeddings are reused. Optimization jobs run
+individually with session reuse; dependent outputs split forward batch groups.
 Consecutive DART actions share real policy/decoder calls and both guidance branches
 across up to eight independent streams; action `batchSize` (1..8) limits grouping.
 Set `device` per action. Run `models install dart --accept-licenses` again after
@@ -767,7 +775,7 @@ warmup. The predicted-joint path derives its pelvis offset from the released
 normalizer and constructs a fixed reference skeleton from generated output;
 it requires no SMPL-X mesh, shape model, sample motion or user Python. Native
 installation verifies the official checkpoint bytes and constructs the pinned
-ONNX graphs/float tensors locally. About 875 MB of model/cache disk space is
+ONNX graphs/float tensors locally. About 880 MB of model/cache disk space is
 needed. Code/model pins and the licensing scope are in
 [notes/dart-backend.md](notes/dart-backend.md).
 

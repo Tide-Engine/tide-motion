@@ -101,17 +101,26 @@ manual import does not grant commercial rights. See notes/momask-local.md.
 )";
     if(command=="dart")return R"(tide-motion dart PLAN.json -o OUT.glb [--models DIR] [--threads N] [--device auto|gpu|cpu]
 
-Native offline DART continuation and waypoint control on canonical SOMA at 30 Hz.
-Install explicitly with models install dart --accept-licenses.
-Version-1 plan: seed, warmupChunks, segments [{text, chunks, target?: [x,z]}].
-Supported text: walk, run, hop on left leg. Targets are world metres; chunks is
-the maximum 8-frame primitive count. Target segments stop within 0.3 m or at the
-budget, reporting misses in the recipe. No inbetweening or scene constraints.
+Native offline DART free-text timelines, source continuation, goals and inbetweening.
+Install explicitly with models install dart --accept-licenses. Canonical SOMA, 30 Hz.
+Version-1 plan: seed, warmupChunks, segments [{text, chunks, target?: [x,z], guidance?}].
+Any valid UTF-8 text is accepted; an empty prompt is unconditional. Goal targets are
+world metres. Policy training skills are walk/run/hop on left leg; other texts
+remain available with measured misses. Targets stop within 0.3 m or at the budget.
+Optional history/historyState or source/sourceFrame/sourceMap seed continuation;
+seedMode history or repeat supports moving history or a single pose.
+Sampler controls: guidance, sampler ddim|ddpm, timesteps (increasing 0..9), eta,
+noiseScale, zeroNoise, policyMode sample|mean|none, fixFloor and groundHeight.
+optimization enables native analytic gradients/Adam over the whole latent timeline:
+constraints [{frame,joint,position,axes?,weight?}], target/targetFrame/targetJoints,
+iterations, learningRate, unitGradient, anneal, jerkWeight, floorWeight, and scene SDF.
+Default jointSpace soma optimizes exported FK; predicted uses raw model joints.
+These are soft objectives: recipes report actual errors, not guaranteed endpoints.
+See notes/dart-backend.md for input schemas, examples and measured limitations.
 auto prefers native Windows DirectML and restarts on CPU if GPU execution fails.
 gpu is strict; cpu forces CPU. Text/model conversion stay native CPU operations.
-Consecutive batch actions share real policy/CFG/decoder calls (up to eight plans).
-Action batchSize (1..8, default 8) limits grouping; --batch-size is its CLI form.
-No Python is required. Rerun models install dart to prepare the new batch graphs.
+Consecutive forward batch actions share neural calls (batchSize 1..8, default 8).
+Optimization jobs reuse sessions and run individually; no Python runtime required.
 )";
     if(command=="generate")return R"(tide-motion generate "PROMPT" -o CLIP.glb [options]
 
@@ -712,7 +721,9 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
             if(action.value("inPlace",false))argv.push_back("--in-place");
             for(auto pair:{std::pair{"device","--device"},std::pair{"rig","--rig"},std::pair{"tide","--tide"}})if(action.contains(pair.first))argv.insert(argv.end(),{pair.second,action[pair.first].get<std::string>()});
         } else if(type=="dart") {
-            keys.insert({"plan","threads","device","batchSize"});auto plan=path(action.at("plan"));(void)load_dart_plan(plan);argv.push_back(plan.string());
+            keys.insert({"plan","threads","device","batchSize"});auto plan=path(action.at("plan"));auto p=load_dart_plan(plan,true);
+            for(const auto& input:{p.history_file,p.source_file,p.optimization?p.optimization->target_file:fs::path{}})if(!input.empty()&&!fs::exists(input)){auto parent=input;bool known=outputs.contains(parent);if(parent.extension()==".json"){parent.replace_extension();known=known||outputs.contains(parent);}if(!known)throw std::runtime_error("DART input does not exist and is not an earlier batch output: "+input.string());}
+            argv.push_back(plan.string());
             if(action.contains("device")){auto d=action["device"].get<std::string>();if(d!="auto"&&d!="cpu"&&d!="gpu")throw std::runtime_error("DART device is auto, cpu or gpu");argv.insert(argv.end(),{"--device",d});}
             if(action.value("device",std::string("auto"))=="gpu"&&!dart_gpu_compiled())throw std::runtime_error("DART GPU: this build has no DirectML support");
             if(action.contains("batchSize")){if(!action["batchSize"].is_number_integer())throw std::runtime_error("batchSize must be integer");auto v=integer(action["batchSize"].dump(),1,8,"DART batchSize");argv.insert(argv.end(),{"--batch-size",std::to_string(static_cast<unsigned>(v))});}
@@ -946,7 +957,8 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
         if(commands[i][1]=="dart"&&context->dart_ready.empty()) {
             auto threads=option(commands[i],"--threads"),device=option(commands[i],"--device"),limit=option(commands[i],"--batch-size");
             size_t end=i;std::vector<DartPlan> plans;size_t maximum=limit.empty()?8:static_cast<size_t>(std::stoul(limit));
-            for(;end<commands.size()&&end-i<maximum&&commands[end][1]=="dart"&&option(commands[end],"--threads")==threads&&option(commands[end],"--device")==device&&option(commands[end],"--batch-size")==limit;++end)plans.push_back(load_dart_plan(utf8path(commands[end][2])));
+            for(;end<commands.size()&&end-i<maximum&&commands[end][1]=="dart"&&option(commands[end],"--threads")==threads&&option(commands[end],"--device")==device&&option(commands[end],"--batch-size")==limit;++end){auto p=load_dart_plan(utf8path(commands[end][2]),true);if((!p.history_file.empty()&&!fs::exists(p.history_file))||(!p.source_file.empty()&&!fs::exists(p.source_file))||(p.optimization&&!p.optimization->target_file.empty()&&!fs::exists(p.optimization->target_file)))break;if(p.optimization&&!plans.empty())break;plans.push_back(std::move(p));if(plans.back().optimization){++end;break;}}
+            if(plans.empty())throw std::runtime_error("DART input is not available at this batch action");
             std::cerr<<"DART neural batch actions "<<i+1<<"-"<<end<<" ("<<plans.size()<<" independent streams)\n";
             auto results=dart_session(models,threads.empty()?0:static_cast<unsigned>(std::stoul(threads)),device.empty()?"auto":device,context).generate(plans);
             for(size_t k=0;k<results.size();++k)context->dart_ready.push_back({fs::absolute(utf8path(option(commands[i+k],"-o"))),std::move(results[k])});
@@ -1270,10 +1282,11 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         if(!context->dart_ready.empty()){auto ready=std::move(context->dart_ready.front());context->dart_ready.pop_front();if(ready.output!=fs::absolute(output))throw std::runtime_error("DART batch output order mismatch");result=std::move(ready.result);}
         else result=dart_session(models,threads,device,context).generate(plan);
         result.clip.name=output.stem().string();save_glb(result.clip,output);
-        nlohmann::json recipe={{"tool","tide-motion"},{"version",MOTION_VERSION},{"command","dart"},{"authoring",plan.recipe},{"threads",threads?threads:4},{"device",result.metrics.at("device")},{"accelerator",result.metrics.at("device")=="gpu"?"directml":"cpu"},{"fps",30},{"frames",result.clip.frames()},{"metrics",result.metrics},
-            {"sourceRevision","bb67ae1ed6ce051080468bf15bc6e54a6c3f8417"},{"weightsSha256","6c186ea7807efe7cef02e639726bb94040f1c44fb8beef0621c667440d7b7877"},{"sampler","x0 cosine10 DDIM eta0 CFG5"},
+        nlohmann::json recipe={{"tool","tide-motion"},{"version",MOTION_VERSION},{"command","dart"},{"authoring",plan.recipe},{"threads",threads?threads:4},{"device",result.metrics.at("device")},{"accelerator",result.metrics.at("device")=="gpu"?"directml":"cpu"},{"fps",30},{"frames",result.clip.frames()},{"metrics",result.metrics},{"dartState",result.history},{"dartInitialState",result.initial_history},
+            {"sourceRevision","bb67ae1ed6ce051080468bf15bc6e54a6c3f8417"},{"weightsSha256","6c186ea7807efe7cef02e639726bb94040f1c44fb8beef0621c667440d7b7877"},{"sampler",{{"prediction","x0"},{"schedule","cosine10"},{"method",plan.sampler},{"timesteps",plan.timesteps},{"eta",plan.eta},{"guidance",plan.guidance},{"noiseScale",plan.noise_scale},{"zeroNoise",plan.zero_noise},{"policyMode",plan.policy_mode},{"fixFloor",plan.fix_floor},{"groundHeight",plan.ground_height},{"seedMode",plan.seed_mode}}},
             {"randomGenerator","std::mt19937 + std::normal_distribution<float>; compiler-dependent normal transform"},
             {"checkpoints",{{"denoiser","e6c550641deaaccb6313f3529a4ca6602eb00d675dcff3aa47217825b5a43615"},{"decoder","b818cc8704ad9b408c745cac48943c99bf5402ffca521b25ffaf6639a5d5d276"},{"policy","81af5cda56e519afadb7bdf74ba82322cc79f903c1cbea151b05fdc71f460a0e"},{"text","40d365715913c9da98579312b702a82c18be219cc2a73407c4526f58eba950af"},{"normalizer","cb442539380d15a5763b799ba063d9b0b6574a751a03ae0c86d4a6f24bff5bd4"}}}};
+        recipe["inputs"]=nlohmann::json::array();for(const auto& input:{plan.history_file,plan.source_file,plan.source_map_file,plan.optimization?plan.optimization->target_file:fs::path{},plan.optimization?plan.optimization->target_map_file:fs::path{},plan.optimization&&plan.optimization->scene?plan.optimization->scene->file:fs::path{}})if(!input.empty())recipe["inputs"].push_back({{"path",input.string()},{"bytes",fs::file_size(input)},{"sha256",sha256_file(input)}});
         std::ofstream metadata(output.string()+".json");metadata<<recipe.dump(2)<<"\n";metadata.close();if(!metadata)throw std::runtime_error("Animation saved but could not write DART recipe");
         std::cout<<"Saved "<<output.string()<<" ("<<result.clip.frames()<<" frames)\n";return 0;
     }
