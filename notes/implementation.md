@@ -3778,3 +3778,145 @@ automatically cause cleanup or turn lower statistics into artistic rankings.
 No detector, inference, threshold, dependency, installation or runtime changes.
 Documentation/feedback-only validation: diff checks; existing native validation
 remains the previously passed combined 18-test suite.
+
+
+## Guided sampling: grips, holds and capsules inside Kimodo (2026-10-29)
+
+Owner request: Kimodo walks well but with an item in the hands "its really
+struggling without us adding post processing". Before considering training, move
+tide-prototypes' post-pass solver rules (tools/motion/solve.py: a per-frame
+Levenberg-Marquardt over the upper body) into Kimodo's sampling as guidance; first
+grips/holds and no self-intersection by mesh-fitted capsules. Baseline origin/dev
+e15b8f2 (Kimodo and MotionBricks only). No model, weights, dependency, Python or
+service added; the guide is native C++ and offline.
+
+Hook: patches/kimodo-guidance.patch (third patch, applied after conditioning and
+runtime by cmake/apply-patch.cmake from the pinned tree) adds
+`motion_condition::guide`, a callback given each denoising step's separated-CFG clean
+prediction of the first segment, unnormalized ([frames, 369]), before `ddim_step`.
+The DDIM update derives epsilon from that prediction, so an edit carries through the
+remaining steps (reconstruction guidance on x0, as constraintGuidance's pins act
+through the constraint branch). Without a guide nothing changes: a free-placement,
+Kimodo-corrected 1.4 s v1.2 generate is byte-identical to the installed 0.8.0. The
+three patches re-applied to a fresh pinned checkout reproduce the edited tree.
+
+src/guide.cpp: decode the prediction (decode_kimodo), then per frame solve the
+turns (rotation vectors on top of the predicted local rotations, default the upper
+body: Spine2, Chest, Neck1, Head, both shoulders, arms, forearms, hands; stiffness per
+degree 0.3/0.3/0.25/0.2/0.15/0.08 as solve.py) that keep the rules at least cost:
+forward from the frame before, then a backward sweep from the frame after starting
+at the forward answer (only frames the forward pass changed); no smoothness term
+where there is no neighbour. LM with forward differences (0.5 degree), Cholesky,
+`iterations` (6). Positions, cont6d rotations and velocities move by the solved
+pose's change; velocities by fps x the forward difference of the position change,
+the last frame repeating the one before, as upstream compute_vel_xyz (upstream
+kimodo_motionrep.py/feature_utils.py at e1c219c9, read only). Root, heading and
+contacts stay predicted. `strength` scales the step's move, `from`/`until` select
+the sampling progress guided.
+
+Rules (residuals, weights per cm or degree as solve.py): grip (hand on an object or
+bone, target position/rotation or from a pose, turned about `axis` within
+`around` to the best fit by position or orientation, raised-cosine `ease`, eased by
+moving the target from the predicted hand at full strength; 3/cm, 0.3/deg); hold
+(hands relative to `relativeTo` as a pose has them 3/cm, 0.3/deg; SOMA arm joints to
+the pose's local turns 0.15/deg); keep (bones where predicted 0.5/cm, 0.3/deg);
+capsules (joint-to-joint, a segment between two points in one bone's frame - a blade
+with radius 0 - or a sphere; overlap past `slack` (5 mm) less each pair's slack,
+3/cm); smoothness 0.3/deg. Rules name SOMA joints, or with `character` {rig, map,
+bones} the character's bones: src/retarget.cpp's calibration was split into
+`calibrate`, now shared by retarget and a `RetargetProxy` posing the character from
+SOMA world rotations (mapped bones W_soma x constant; others calibrated reference
+locals; the mapping's heading alignment and travel omitted, as every rule is
+relative). Contract: every bone at and below the motion root matches retargeted
+output relative to the root on the fixture; retargeted payload byte-identical to
+0.8.0 on a real clip.
+
+Contract: `generate --guide FILE|JSON` (`--guide-base` for inline paths; batch
+`guide`: a file relative to the manifest or an inline object, preflighted before any
+action runs). One prompt only (no --then). Fields, ranges and refusals in README
+"Guided sampling". Recipes record the effective guide, guided steps, milliseconds and
+each rule measured as sampled (`guideResultAsSampled`) and as saved (`guideResult`).
+examples/guide.json shows the SOMA fields.
+
+Finding: `--correction kimodo` undoes guidance. Its effector IK puts pinned hands
+back at their keys: on the diagonal cut (5 two-handed key pins), guided grip as
+sampled 0.7/1.1 cm mean (2 seeds), capsules 0.3-0.6 cm; after kimodo correction 5.2
+cm and 7-11 cm. Guided runs therefore use `correction: none` (tide also works).
+
+Evaluation (RTX 4080 SUPER, Vulkan, v1.2, 50 steps, 8 seeds each, holding
+TideMotionGpuValidation): the owner's set2h batch (idle, walk, strafes, back, run
+from and to guard2h, both hands pinned twice) and diagonal2h's cut (the strike), as
+written except `guide` and `correction: none`. Parry data (in the prototypes'
+ignored out/set2h/guided-sampling with the scripts): character = Parry's
+PolygonSyntyCharacter.fbx + examples/synty-polygon.json + Prop_R; capsules =
+clash.py's parts and pairs with body.json's fitted radii, touching slack, and the
+blade (Prop_R +Y 0.14..0.95 m) against the parts; grip = the left hand at hilt.json's
+place on Prop_R, turning 90 degrees about the blade (strike: frames 18-39, ease 4.5,
+keep Prop_R; set moves: whole clip, plus a hold of guard2h's hands on Spine_03).
+Judged by tide-prototypes compare.py's judge() on the fighter (its numbers for the
+owner's seeds reproduce compare.md), plus forearm roll (elbow twist about the forearm,
+range over the clip) and body-in-itself excluding the pinned end frames. raw = the
+owner's seeds as made (correction kimodo), solved = after their pipeline (steadyhand,
+forearm, solve.py), guided = this, guided-free5 = guidance stopped for the last 5 of
+50 steps. Mean over seeds (worst seed):
+
+| move | check | raw | solved | guided | guided-free5 |
+|---|---|---|---|---|---|
+| strike | sword in body cm | 0.4 (1.7) | 0.0 (0.0) | 0.0 (0.0) | 1.0 (7.9) |
+| | body in itself cm | 17.3 (20.5) | 1.7 (3.1) | 0.7 (0.9) | 5.8 (7.7) |
+| | hands apart, most cm | 25.4 | 11.9 | 14.1 | 18.0 |
+| | frames beyond natural | 36.2 (46) | 2.5 (9) | 42.8 (52) | 42.0 (50) |
+| | left forearm roll range deg | 57.8 | 225.5 | 23.3 | 24.4 |
+| | jitter mean / worst | 3.0 / 69.4 | 3.7 / 81.9 | 3.3 / 52.8 | 3.2 / 48.7 |
+| idle | body in itself cm | 8.3 (11.1) | 0.8 | 0.6 | 4.3 |
+| | hands apart cm | 13.1 | 11.5 | 11.7 | 15.6 |
+| | left forearm roll deg | 41.1 | 15.0 | 4.1 | 3.9 |
+| | jitter mean / worst | 0.2 / 2.3 | 0.2 / 1.2 | 0.2 / 4.2 | 0.2 / 3.5 |
+| walk | body in itself cm | 8.5 (11.8) | 0.8 | 0.6 | 4.2 |
+| | hands apart cm | 13.2 | 11.5 | 11.8 | 16.1 |
+| | left forearm roll deg | 32.1 | 13.8 | 5.3 | 8.7 |
+| | jitter mean / worst | 0.7 / 4.6 | 0.5 / 2.9 | 0.5 / 5.1 | 0.7 / 6.1 |
+| strafe-l | body in itself cm | 9.1 (11.4) | 2.9 (7.8) | 3.1 (5.5) | 4.8 |
+| | left forearm roll deg | 27.1 | 13.1 | 5.2 | 10.5 |
+| strafe-r | body in itself cm | 8.4 (11.7) | 3.4 (6.6) | 4.4 (8.0) | 5.3 |
+| | left forearm roll deg | 28.2 | 12.2 | 5.4 | 9.3 |
+| back | body in itself cm | 8.2 (12.9) | 0.8 | 0.6 | 4.3 |
+| | hands apart cm | 15.9 | 11.5 | 11.7 | 16.1 |
+| | left forearm roll deg | 28.0 | 11.3 | 6.1 | 10.4 |
+| run | body in itself cm | 8.9 (11.6) | 0.8 | 0.6 | 4.0 |
+| | hands apart cm | 21.3 | 11.6 | 11.8 | 15.9 |
+| | left forearm roll deg | 23.6 | 15.1 | 8.3 | 13.7 |
+| | jitter mean / worst | 1.8 / 7.9 | 1.1 / 4.5 | 1.1 / 6.5 | 1.5 / 10.2 |
+
+No sword in body on any set move in any variant; frames beyond natural 0 on all set
+moves. Strafes' hands apart 11.7 (solved 11.5). Solved forearm roll includes
+forearm.py giving wrist twist to the forearm, so its strike roll range is large by
+design. Guidance cost: median 4.9 s a clip (4.1..9.1), 50 guided steps; one pass
+over 42/72 frames 0.10/0.12 s (guide-tests --bench).
+
+Reading: guidance reaches solve.py's results without the post-pass for grips,
+holds, body-in-itself and the sword (equal or better on idle, walk, back, run and
+the strike; within about 1 cm on the strafes), and holds the forearms steadier.
+It does not replace solve.py's joint realism: the strike has 42.8 frames beyond
+natural against 2.5 (raw 36.2), as no realism rule exists natively (natural.py's
+library is built from licensed pack clips; the poser's natural.json is a reduced,
+mirrored form). Worst-frame jitter is higher than solved (4-6 against 1-3 deg per
+frame^2; means equal), and the strike's hands open to 14 cm (solved 12) at the
+ease frames. Honest limit: most of the effect is the guidance on the late steps;
+with the last 5 steps unguided the model drifts about half way back (body 4-6 cm,
+hands 16 cm, grip 2.5-5 cm mean). It is projection-style guidance through the
+model, not a model that has learned the grip. The owner's guard itself has the right
+upper arm 3.7 cm in the belly by these capsules; with correction none the pinned
+ends are near (not exactly) the guard and come out clear. --correction tide
+would make them exact again (not measured here).
+
+Validation: Windows x64 ClangCL Release, Vulkan, warnings as errors; all 15 CTests
+pass, including new guide-contracts (grip reach, root/heading/contact invariance,
+velocity consistency, strength 0, spans and easing, capsule push-out, blade
+measure, hold, step selection, 15 refusals), the retarget proxy contract and CLI
+contracts for --guide/--guide-base and batch guide (file, inline, preflight refusal,
+the example). Linux/macOS are left to CI.
+
+Left to the post-pass (or next): joint realism (needs a library given as data), the
+sword's path/plane beyond keeping its bone, forearm.py's wrist-twist rule, guidance
+for --then sequences, and a smoother worst frame.

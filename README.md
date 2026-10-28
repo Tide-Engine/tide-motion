@@ -271,6 +271,54 @@ retarget, constraints and pose-sequence write SOMA-30); `mirror` and `cleanup` k
 all 77 joints, and `inspect` reports `soma77`. Previews show the SOMA-30 subset on
 the mannequin, or all 77 joints with `--skeleton`.
 
+### Guided sampling: holding things (`--guide`)
+
+Kimodo walks well, but with something held in the hands it misses contacts the model
+was never trained on: the free hand comes near a two-handed hilt and not onto it, arms
+pass through the body, forearms roll with the steps. `--guide GUIDE.json` (batch
+`"guide"`: a file, or the guide inline) applies rules **inside the sampling**: at
+every denoising step the model's clean prediction is decoded, its upper body (spine,
+neck, head, collarbones, arms, hands) is turned as little as it can be to keep the
+rules (a small least-squares solve per frame, from the frame before), and the
+prediction moves to that pose before the step, so the rest of the sampling carries
+on from it. Legs, hips, travel, facing and foot contacts stay as the model predicts
+them. The rules:
+
+- **grips**: a hand held on an object over frames `start`..`end` (inclusive, negative
+  from the end), eased over `ease` frames: an object rigid on a bone (`objects`:
+  `bone`, `position`, `rotation` as `[x, y, z, w]`), or a bone itself (`bone`). The
+  hand's place is `position`/`rotation` in the object's frame, or taken from a pose
+  (`"pose": "guard.glb@0"`). `axis` and `around` (degrees) let it turn about the
+  object's handle to whatever fits; `"orientation": false` keeps only its place;
+- **holds**: hands kept where a pose has them relative to another bone
+  (`relativeTo`, default `Chest`), and the arm joints (`arms`, SOMA) drawn to the
+  pose's turns: a weapon kept in guard while walking;
+- **capsules**: parts of the body (`from` a bone `to` another, or a sphere at a
+  `centre` in a bone's frame, each with a `radius` in metres) and the `pairs` that
+  must not overlap (an optional `slack` per pair, for hands that meet on a hilt);
+  a file or inline;
+- **keep**: bones kept where the model put them (the hand holding the weapon).
+
+Bones are SOMA's, or with `"character": {"rig": "MODEL.fbx", "map": "BONES.json",
+"bones": ["Prop_R"]}` your character's: the rules are measured on it as `retarget
+--target` would pose it, so a prop bone, a grip place and capsules fitted to its mesh
+can be used as they are (`bones` adds bones without skin weights, such as a prop
+bone). `weights` sets each rule's cost (`gripPlace`, `gripTurn`, `holdPlace`,
+`holdTurn`, `holdArm`, `keepPlace`, `keepTurn`, `inside` per cm or degree, `smooth`
+per degree of change from the frame before, `slack` metres), `joints` the turned
+SOMA joints and their stiffness, `from`/`until` the part of the sampling guided (0
+the first step, 1 the last), `strength` how far each step moves (0..1) and
+`iterations` the solver's. [examples/guide.json](examples/guide.json) shows the
+fields on SOMA bones. Guides act on one prompt (no `--then`). The recipe records the
+effective guide and each rule measured as sampled (`guideResultAsSampled`) and as
+saved (`guideResult`).
+
+Use `--correction none` or `tide` with a guide: `--correction kimodo`'s effector IK
+puts pinned hands back where their keys have them after the sampling, undoing a grip
+that differs from the keys. A pinned start or end pose is kept: if it has the body
+in itself (by the guide's capsules), the clip does too at those frames. See
+notes/implementation.md for measurements against a post-pass solver.
+
 ## Connect clips
 
 ```sh
@@ -625,7 +673,8 @@ every constraint option:
 ```
 
 Every generate option has a field: `variants`, `variantsGif`, `guidance`,
-`constraintGuidance`, `correction` (`"tide"`, `"kimodo"`, `"none"`), `follow`
+`constraintGuidance`, `correction` (`"tide"`, `"kimodo"`, `"none"`), `guide` (a file or
+inline), `follow`
 (`"world"`, `"ends"`), `rig`
 (`"soma30"`, `"soma77"`), `densePath`, `poseMap`, `correctionFrames`, `inPlace`, `device` (`"auto"`,
 `"gpu"`, `"cpu"`), `threads` and `tide`; `connect` takes `threads` too. Variant

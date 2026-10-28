@@ -1,4 +1,5 @@
 #include "motion.hpp"
+#include "guide.hpp"
 #include "equipment.hpp"
 #include "author.hpp"
 #include "upgrade.hpp"
@@ -100,6 +101,9 @@ Generates a SOMA-30 clip from text (30 fps).
                               moved by the share of the end pose's --end-at (or
                               final --path) placement their frame has reached,
                               counted from the start pose
+  --guide GUIDE.json          Rules applied at every denoising step: a hand held on
+                              an object over a span, hands held as a pose has them,
+                              the body kept out of itself by capsules (one prompt)
   --dense-path                Kimodo: constrain the root on every frame from frame 0
                               to the last waypoint, interpolated and smoothed as
                               upstream's dense 2D root path (see below)
@@ -595,13 +599,21 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
         std::vector<std::string> argv{"tide-motion",type};
         unsigned variants=1;bool sheet_gif=false;
         if(type=="generate") {
-            keys.insert({"prompt","prompts","duration","seed","steps","transition","startPose","endPose","endAt","keyframes","effectors","path","placement","follow","correct","fitPoses","footsteps","attempts",
+            keys.insert({"prompt","prompts","duration","seed","steps","transition","startPose","endPose","endAt","keyframes","effectors","path","placement","follow","guide","correct","fitPoses","footsteps","attempts",
                 "variants","variantsGif","tide","guidance","constraintGuidance","device","threads","correctionFrames","inPlace","model","rig","densePath","correction","poseMap"});
             if(action.contains("fitPoses")&&action["fitPoses"].get<bool>())argv.push_back("--fit-poses");
             if(action.contains("placement")) {
                 auto value=action["placement"].get<std::string>();
                 if(value!="auto"&&value!="world"&&value!="free")throw std::runtime_error("placement is auto, world or free");
                 argv.insert(argv.end(),{"--placement",value});
+            }
+            if(action.contains("guide")) {
+                // A guide file, or the guide inline; either way its paths are the manifest's.
+                const auto& value=action["guide"];
+                if(value.is_string())argv.insert(argv.end(),{"--guide",path(value).string()});
+                else if(value.is_object())argv.insert(argv.end(),{"--guide",value.dump(),"--guide-base",base.string()});
+                else throw std::runtime_error("guide is a guide file or an object");
+                (void)load_guide(value.is_string()?nlohmann::json(path(value).string()):value,base);
             }
             if(action.contains("follow")) {
                 auto value=action["follow"].get<std::string>();
@@ -864,7 +876,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     BricksRequest bricks_request;std::string tokens_text;fs::path contacts_out;float contact_threshold=0.5f;
     bool accept=false,joined=false,skeleton=false,to_soma=false,correct=true,dense_path=false;Vec3 offset{};
     std::string correction,rig="soma30";fs::path pose_map_file;
-    Placement placement=Placement::automatic;std::string placement_name="auto",follow="world";
+    Placement placement=Placement::automatic;std::string placement_name="auto",follow="world",guide_text;fs::path guide_base;
     unsigned variants=1,threads=0;int correction_frames=10;bool variants_gif=false,in_place=false;
     Guidance guidance;std::string device="auto",model_version="v1.1";
     bool fit_poses=false;int wanted_footsteps=-1;unsigned attempts=8;
@@ -891,6 +903,8 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         else if(a=="--effector") {unsigned bits=parse_effectors(value());long f=frame_index(value(),"effector frame");pose_specs.push_back({"effector",f,value(),bits});}
         else if(a=="--path") {long f=0;auto p=path_point(value(),&f);path_specs.push_back({p,f});}
         else if(a=="--gif")gif=utf8path(value());
+        else if(a=="--guide")guide_text=value();
+        else if(a=="--guide-base")guide_base=utf8path(value());
         else if(a=="--follow") {follow=value();if(follow!="world"&&follow!="ends")throw std::runtime_error("--follow is world or ends");}
         else if(a=="--placement") {
             placement_name=value();
@@ -960,7 +974,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     }
     if(!prop.mesh.empty())props.push_back(prop);
     std::set<std::string> allowed;
-    if(command=="generate")allowed={"--models","-o","--output","--duration","--seed","--steps","--then","--transition","--start-pose","--end-pose","--end-at","--keyframe","--effector","--path","--placement","--follow","--fit-poses","--footsteps","--attempts","--no-correction",
+    if(command=="generate")allowed={"--models","-o","--output","--duration","--seed","--steps","--then","--transition","--start-pose","--end-pose","--end-at","--keyframe","--effector","--path","--placement","--follow","--guide","--guide-base","--fit-poses","--footsteps","--attempts","--no-correction",
         "--correction","--rig","--dense-path","--pose-map",
         "--correction-frames","--in-place","--variants","--variants-gif","--tide","--guidance","--constraint-guidance","--device","--threads","--model"};
     else if(command=="connect")allowed={"--models","-o","--output","--tokens","--target-poses","--contacts-out","--contact-threshold","--joined","--offset","--from-clip","--to-clip","--threads"};
@@ -1201,6 +1215,14 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
             parts.push_back({segments[i].first,count});total+=count;
         }
         if(total>18000)throw std::runtime_error("Generation exceeds 18000 frames");
+        // The sampling guide is read and checked before any model is loaded.
+        std::optional<Guide> guide;
+        if(!guide_text.empty()) {
+            if(parts.size()>1)throw std::runtime_error("--guide acts on one prompt; generate each part separately and join them with connect");
+            const fs::path base=guide_base.empty()?fs::current_path():guide_base;
+            nlohmann::json spec=guide_text.front()=='{'?nlohmann::json::parse(guide_text):nlohmann::json(guide_text);
+            guide=load_guide(spec,base);resolve_guide(*guide,total);
+        } else if(!guide_base.empty())throw std::runtime_error("--guide-base goes with --guide");
         // Resolve and load every constraint before any model is loaded.
         auto resolve=[&](long frame,const char* label) {
             long resolved=frame<0?static_cast<long>(total)+frame:frame;
@@ -1270,7 +1292,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         kimodo::motion_condition native;
         if(!conditions.empty()) {
             condition=build_condition(conditions,total);
-            native={condition->observed,condition->mask,condition->first_heading};
+            native={condition->observed,condition->mask,condition->first_heading,{}};
         }
         if(in_place&&!conditions.path.empty())throw std::runtime_error("--in-place removes the root travel --path asks for; use one or the other");
         if(variants_gif&&variants<2)throw std::runtime_error("--variants-gif goes with --variants 2 or more");
@@ -1295,7 +1317,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         clip=Clip{};generate_recipe=nlohmann::json::object();
         if(variants>1)std::cerr<<"Generating variant "<<v+1<<"/"<<variants<<" (seed "<<used_seed<<")...\n";
         else std::cerr<<"Generating motion...\n";
-        auto effective=conditions;bool floating=false;std::vector<float> contacts;
+        auto effective=conditions;bool floating=false;std::vector<float> contacts;double guide_ms=0;unsigned guided_steps=0;
         {
         // Partial root masks are outside the upstream full-pose conditioning contract.
         // Choose floating locations with a learned motion pass, then condition complete
@@ -1307,7 +1329,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
             auto guide=conditions;
             std::erase_if(guide.poses,[](const auto& p){return !p.anchored;});
             auto gc=build_condition(guide,total);
-            kimodo::motion_condition gn{gc.observed,gc.mask,gc.first_heading};
+            kimodo::motion_condition gn{gc.observed,gc.mask,gc.first_heading,{}};
             std::cerr<<"Choosing free pose locations with a learned motion pass...\n";
             auto travel=generate_motion(models,context,parts,transition,steps,used_seed,guidance,guide.empty()?nullptr:&gn);
             if(travel.frames!=total||travel.root_positions.size()!=total*3)throw std::runtime_error("Unexpected free placement guide layout");
@@ -1317,9 +1339,21 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
                 p.anchored=true;
             }
             placed=build_condition(effective,total);
-            placed_native={placed->observed,placed->mask,placed->first_heading};
+            placed_native={placed->observed,placed->mask,placed->first_heading,{}};
         }
-        auto result=generate_motion(models,context,parts,transition,steps,used_seed,guidance,floating?&placed_native:condition?&native:nullptr);
+        // Sampling guidance acts in the final pass only (the free placement pass above
+        // only chooses where floating poses go).
+        const kimodo::motion_condition* final_condition=floating?&placed_native:condition?&native:nullptr;
+        kimodo::motion_condition guided;
+        if(guide) {
+            guided=final_condition?*final_condition:kimodo::motion_condition{};
+            guided.guide=[&](unsigned step,unsigned count,std::span<float> clean){
+                if(!guide_step(*guide,step,count))return;
+                guide_ms+=guide_clean(*guide,clean,total);++guided_steps;
+            };
+            final_condition=&guided;
+        }
+        auto result=generate_motion(models,context,parts,transition,steps,used_seed,guidance,final_condition);
         if(result.joints!=30||result.local_rotations_xyzw.size()!=static_cast<size_t>(result.frames)*30*4||result.root_positions.size()!=static_cast<size_t>(result.frames)*3)throw std::runtime_error("Kimodo returned an unexpected SOMA output layout");
         contacts=std::move(result.foot_contacts);
         clip.joints=soma();clip.name=outputs[output_index].stem().string();
@@ -1333,6 +1367,8 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         }
         }
         if(shift)shift_to_last_pose(clip,conditions);
+        // The rules as sampled, before any correction moves the body.
+        nlohmann::json sampled_guide;if(guide)sampled_guide=guide_report(*guide,clip);
         generate_recipe["prompts"]=nlohmann::json::array();
         for(size_t i=0;i<parts.size();++i)generate_recipe["prompts"].push_back({{"prompt",parts[i].prompt},{"duration",segments[i].second},{"frames",parts[i].frames}});
         generate_recipe["transition"]=parts.size()>1?transition:0;
@@ -1408,6 +1444,14 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
             if(point.has_heading)item["yaw"]=point.heading;
             generate_recipe["constraints"].push_back(item);
             std::cerr<<"path at frame "<<point.frame<<": hips "<<round(e*100,0.1f)<<" cm from "<<point.x<<", "<<point.z<<"\n";
+        }
+        if(guide) {
+            // Each rule measured on the output as saved (after any correction).
+            generate_recipe["guide"]=guide->effective;generate_recipe["guideSteps"]=guided_steps;
+            generate_recipe["guideMilliseconds"]=std::round(guide_ms);
+            generate_recipe["guideResultAsSampled"]=sampled_guide;
+            generate_recipe["guideResult"]=guide_report(*guide,clip);
+            std::cerr<<"Guided "<<guided_steps<<" of "<<steps<<" steps ("<<std::round(guide_ms)<<" ms): "<<generate_recipe["guideResult"].dump()<<"\n";
         }
         // Recorded errors are measured before the travel is removed.
         if(in_place)remove_root_travel(clip);

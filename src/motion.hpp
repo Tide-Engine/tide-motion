@@ -97,6 +97,17 @@ std::vector<ContactReport> cleanup_contacts(Clip&,const CleanupPlan&,const Retar
 struct RetargetResult { Clip clip; float scale=1, heading_degrees=0; bool discarded_translations=false; };
 RetargetMapping load_mapping(const fs::path&);
 RetargetResult retarget(const Clip& source, const Clip& target, const RetargetMapping&, bool to_soma=false);
+// A character posed from SOMA world rotations as retarget --target poses it: mapped bones
+// take SOMA's world turn times a calibrated constant, others their calibrated local
+// reference. World positions start at the root bone's reference (travel is not
+// included) and the whole is turned by the inverse of the mapping's heading alignment,
+// so it suits relative measures (one bone in another's frame, distances).
+struct RetargetProxy {
+    std::vector<Joint> joints; std::vector<Transform> local; std::vector<int> source;
+    std::vector<Quat> turn; std::vector<float> scales;
+};
+RetargetProxy retarget_proxy(const Clip& target, const RetargetMapping&);
+void proxy_world(const RetargetProxy&, std::span<const Transform> soma_world, std::vector<Transform>& out);
 // Kimodo SOMA-30 motion representation rows (upstream kimodo_motionrep.py): smooth root
 // xyz, heading cos/sin, root-relative joint positions, global cont6d rotations,
 // velocities and foot contacts. Constraints fill the first three blocks.

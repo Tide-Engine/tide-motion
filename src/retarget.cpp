@@ -79,10 +79,14 @@ RetargetMapping load_mapping(const fs::path& path) {
     return out;
 }
 
-RetargetResult retarget(const Clip& source,const Clip& target,const RetargetMapping& map,bool to_soma) {
-    source.validate();target.validate();
-    const auto& custom=to_soma?source:target;
-    const auto& canonical=to_soma?target:source;
+namespace {
+// The mapping's reference poses: SOMA's rest and the character's rest with mapped
+// segments aimed along SOMA's, the heading between them and the bone correspondence.
+struct Calibration {
+    std::array<int,30> custom_index; std::vector<int> semantic;
+    std::vector<Transform> soma_ref,custom_ref,soma_world,custom_world; Quat alignment; float heading=0;
+};
+Calibration calibrate(const Clip& canonical,const Clip& custom,const RetargetMapping& map) {
     require_soma(canonical);
     std::set<std::string> names;
     for(const auto& joint:custom.joints)if(joint.name.empty()||!names.insert(joint.name).second)
@@ -136,6 +140,41 @@ RetargetResult retarget(const Clip& source,const Clip& target,const RetargetMapp
         custom_ref[j].q=parent<0?world:normalized(inverse(custom_world[static_cast<size_t>(parent)].q)*world);
     }
     custom_world=world_pose(custom,custom_ref);
+    return {custom_index,semantic,soma_ref,custom_ref,soma_world,custom_world,alignment,heading};
+}
+}
+RetargetProxy retarget_proxy(const Clip& target,const RetargetMapping& map) {
+    target.validate();
+    Clip canonical;canonical.joints=soma();for(const auto& joint:canonical.joints)canonical.poses.push_back(joint.rest);
+    auto c=calibrate(canonical,target,map);
+    RetargetProxy proxy;proxy.joints=target.joints;proxy.local=c.custom_ref;proxy.source=c.semantic;
+    proxy.turn.resize(target.joints.size());proxy.scales.resize(target.joints.size());
+    for(size_t j=0;j<target.joints.size();++j) {
+        proxy.scales[j]=target.joints[j].scale*(target.joints[j].parent<0?1.0f:proxy.scales[static_cast<size_t>(target.joints[j].parent)]);
+        if(c.semantic[j]>=0)proxy.turn[j]=normalized(inverse(c.soma_world[static_cast<size_t>(c.semantic[j])].q)*inverse(c.alignment)*c.custom_world[j].q);
+    }
+    return proxy;
+}
+void proxy_world(const RetargetProxy& proxy,std::span<const Transform> soma_world,std::vector<Transform>& out) {
+    out.resize(proxy.joints.size());
+    for(size_t j=0;j<proxy.joints.size();++j) {
+        const int parent=proxy.joints[j].parent;
+        Transform t=proxy.local[j];
+        if(parent>=0) {const auto& p=out[static_cast<size_t>(parent)];t.p=p.p+rotate(p.q,t.p*proxy.scales[static_cast<size_t>(parent)]);t.q=normalized(p.q*t.q);}
+        if(proxy.source[j]>=0)t.q=normalized(soma_world[static_cast<size_t>(proxy.source[j])].q*proxy.turn[j]);
+        out[j]=t;
+    }
+}
+RetargetResult retarget(const Clip& source,const Clip& target,const RetargetMapping& map,bool to_soma) {
+    source.validate();target.validate();
+    const auto& custom=to_soma?source:target;
+    const auto& canonical=to_soma?target:source;
+    auto calibration=calibrate(canonical,custom,map);
+    auto& custom_index=calibration.custom_index;auto& semantic=calibration.semantic;
+    auto& soma_ref=calibration.soma_ref;auto& custom_ref=calibration.custom_ref;
+    auto& soma_world=calibration.soma_world;auto& custom_world=calibration.custom_world;
+    const Quat alignment=calibration.alignment;const float heading=calibration.heading;
+    auto at=[&](size_t s)->size_t{return static_cast<size_t>(custom_index[s]);};
     float source_legs=0,target_legs=0;
     for(size_t thigh:{size_t{22},size_t{26}}) {
         source_legs+=length(soma_world[thigh+1].p-soma_world[thigh].p)+length(soma_world[thigh+2].p-soma_world[thigh+1].p);

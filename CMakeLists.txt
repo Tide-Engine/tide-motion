@@ -21,7 +21,7 @@ set(MOTION_ORT_ROOT "" CACHE PATH "Existing ONNX Runtime CPU distribution")
 # The patches expose the pinned revision's conditioned sampler publicly (pose
 # constraints over one prompt or a sequence), then its runtime options and foot
 # contacts; see notes/implementation.md.
-set(kimodo_patches "${CMAKE_CURRENT_SOURCE_DIR}/patches/kimodo-conditioning.patch" "${CMAKE_CURRENT_SOURCE_DIR}/patches/kimodo-runtime.patch")
+set(kimodo_patches "${CMAKE_CURRENT_SOURCE_DIR}/patches/kimodo-conditioning.patch" "${CMAKE_CURRENT_SOURCE_DIR}/patches/kimodo-runtime.patch" "${CMAKE_CURRENT_SOURCE_DIR}/patches/kimodo-guidance.patch")
 string(REPLACE ";" "|" kimodo_patch_list "${kimodo_patches}")
 FetchContent_Declare(kimodo GIT_REPOSITORY https://github.com/localai-org/kimodo.cpp.git
   GIT_TAG ed8a931aedb132f768190f6931c365855caba74c GIT_SUBMODULES ggml SOURCE_SUBDIR _unused
@@ -110,7 +110,7 @@ elseif(APPLE)
 else()
   set_target_properties(motion-ort PROPERTIES IMPORTED_LOCATION "${MOTION_ORT_ROOT}/lib/libonnxruntime.so")
 endif()
-add_library(motion-core STATIC src/motion.cpp src/gltf.cpp src/retarget.cpp src/bricks.cpp src/platform.cpp src/preview_setup.cpp src/equipment.cpp src/equipment_gltf.cpp src/constraints.cpp src/fbx.cpp src/mannequin.cpp src/edit.cpp src/author.cpp src/cleanup.cpp src/soma77.cpp src/correction.cpp)
+add_library(motion-core STATIC src/motion.cpp src/gltf.cpp src/retarget.cpp src/bricks.cpp src/platform.cpp src/preview_setup.cpp src/equipment.cpp src/equipment_gltf.cpp src/constraints.cpp src/fbx.cpp src/mannequin.cpp src/edit.cpp src/author.cpp src/cleanup.cpp src/soma77.cpp src/correction.cpp src/guide.cpp)
 target_include_directories(motion-core PUBLIC src PRIVATE "${cgltf_SOURCE_DIR}" "${kimodo_SOURCE_DIR}/src")
 target_link_libraries(motion-core PUBLIC nlohmann_json::nlohmann_json motion-ort PRIVATE motion-ufbx)
 target_sources(motion-core PRIVATE src/review.cpp)
@@ -206,6 +206,9 @@ if(BUILD_TESTING)
   target_link_libraries(capability-tests PRIVATE motion-core motion-kimodo)
   add_custom_command(TARGET capability-tests POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:motion-ort>" "$<TARGET_FILE_DIR:capability-tests>")
   add_test(NAME capability-contracts COMMAND capability-tests)
+  add_executable(guide-tests tests/guide.cpp)
+  target_link_libraries(guide-tests PRIVATE motion-core)
+  add_test(NAME guide-contracts COMMAND guide-tests)
   add_executable(cleanup-tests tests/cleanup.cpp)
   target_link_libraries(cleanup-tests PRIVATE motion-core)
   add_test(NAME cleanup-contracts COMMAND cleanup-tests)

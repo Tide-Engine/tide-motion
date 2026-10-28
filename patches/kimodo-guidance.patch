@@ -1,0 +1,144 @@
+diff --git a/include/kimodo/kimodo.hpp b/include/kimodo/kimodo.hpp
+index a9cd3ac..2a59342 100644
+--- a/include/kimodo/kimodo.hpp
++++ b/include/kimodo/kimodo.hpp
+@@ -5,6 +5,7 @@
+ #include <array>
+ #include <cstdint>
+ #include <expected>
++#include <functional>
+ #include <memory>
+ #include <span>
+ #include <string>
+@@ -51,6 +52,11 @@ struct motion_condition {
+     std::vector<float> observed;
+     std::vector<float> mask;
+     float first_heading = 0.f;
++    // Optional sampling guidance (Tide Motion patch): called at every denoising step
++    // with that step's guided clean prediction of the first segment, unnormalized
++    // ([frames, motion_dim()], in the condition's origin), before the DDIM update.
++    // It may edit the prediction in place. step counts down from steps-1 to 0.
++    std::function<void(unsigned step, unsigned steps, std::span<float> clean)> guide;
+ };
+ 
+ class KIMODO_API model {
+diff --git a/src/denoiser.cpp b/src/denoiser.cpp
+index cce9991..664b0f9 100644
+--- a/src/denoiser.cpp
++++ b/src/denoiser.cpp
+@@ -485,7 +485,7 @@ std::expected<std::vector<float>, std::string> run_separated_cfg_denoiser_condit
+ std::expected<std::vector<float>, std::string> sample_motion_from_noise(
+     const ggml_motion_weights &weights, std::span<const float> initial,
+     std::span<const float> embedding, std::size_t frames, unsigned steps,
+-    float text_weight, float constraint_weight) {
++    float text_weight, float constraint_weight, const clean_guide *guide) {
+     if(initial.size()!=frames*weights.motion_dim()) return std::unexpected("invalid initial motion noise dimensions");
+     auto schedule=make_cosine_schedule(1000,steps); if(!schedule)return std::unexpected(schedule.error());
+     std::vector<float> state(initial.begin(),initial.end()), next(state.size());
+@@ -493,6 +493,7 @@ std::expected<std::vector<float>, std::string> sample_motion_from_noise(
+         const auto step_started = std::chrono::steady_clock::now();
+         auto clean=run_separated_cfg_denoiser(weights,state,embedding,float(schedule->use_timesteps[i]),text_weight,constraint_weight,frames);
+         if(!clean)return std::unexpected(clean.error());
++        if(guide&&*guide)(*guide)(i,steps,*clean);
+         auto stepped=ddim_step(*schedule,i,state.data(),clean->data(),next.data(),state.size());
+         if(!stepped)return std::unexpected(stepped.error());
+         state.swap(next);
+@@ -506,7 +507,7 @@ std::expected<std::vector<float>, std::string> sample_motion_from_noise_conditio
+     const ggml_motion_weights &weights, std::span<const float> initial,
+     std::span<const float> embedding, std::span<const float> observed,
+     std::span<const float> observed_mask, float heading, std::size_t frames,
+-    unsigned steps, float text_weight, float constraint_weight) {
++    unsigned steps, float text_weight, float constraint_weight, const clean_guide *guide) {
+     if(initial.size()!=frames*weights.motion_dim() || observed.size()!=initial.size() || observed_mask.size()!=initial.size())
+         return std::unexpected("invalid conditioned motion noise dimensions");
+     auto schedule=make_cosine_schedule(1000,steps); if(!schedule)return std::unexpected(schedule.error());
+@@ -515,6 +516,7 @@ std::expected<std::vector<float>, std::string> sample_motion_from_noise_conditio
+         auto clean=run_separated_cfg_denoiser_conditioned(weights,state,embedding,observed,observed_mask,
+                                                            float(schedule->use_timesteps[i]),heading,text_weight,constraint_weight,frames);
+         if(!clean)return std::unexpected(clean.error());
++        if(guide&&*guide)(*guide)(i,steps,*clean);
+         auto stepped=ddim_step(*schedule,i,state.data(),clean->data(),next.data(),state.size());
+         if(!stepped)return std::unexpected(stepped.error());
+         state.swap(next);
+diff --git a/src/denoiser.hpp b/src/denoiser.hpp
+index 09cc86f..30c8aea 100644
+--- a/src/denoiser.hpp
++++ b/src/denoiser.hpp
+@@ -1,4 +1,5 @@
+ #pragma once
++#include <functional>
+ 
+ #include <cstddef>
+ #include <expected>
+@@ -49,10 +50,12 @@ std::expected<std::vector<float>, std::string> run_separated_cfg_denoiser(
+     float constraint_weight, std::size_t frames);
+ 
+ // Deterministic eta=0 DDIM sampling from caller-supplied F32 initial noise.
++// Called with each step's normalized clean prediction before the DDIM update.
++using clean_guide = std::function<void(unsigned step, unsigned steps, std::span<float> clean)>;
+ std::expected<std::vector<float>, std::string> sample_motion_from_noise(
+     const ggml_motion_weights &weights, std::span<const float> initial_noise,
+     std::span<const float> embedding, std::size_t frames, unsigned steps,
+-    float text_weight, float constraint_weight);
++    float text_weight, float constraint_weight, const clean_guide *guide = nullptr);
+ 
+ // Multi-prompt transition sampler. `observed` and `observed_mask` are [T,motion_dim]
+ // normalized motion-representation values/masks. This mirrors the upstream
+@@ -61,7 +64,7 @@ std::expected<std::vector<float>, std::string> sample_motion_from_noise_conditio
+     const ggml_motion_weights &weights, std::span<const float> initial_noise,
+     std::span<const float> embedding, std::span<const float> observed,
+     std::span<const float> observed_mask, float first_heading, std::size_t frames,
+-    unsigned steps, float text_weight, float constraint_weight);
++    unsigned steps, float text_weight, float constraint_weight, const clean_guide *guide = nullptr);
+ 
+ // End-to-end upstream `_multiprompt` orchestration.  DDIM operates in
+ // normalized motion space; the returned joined representation is raw so its
+@@ -76,7 +79,7 @@ std::expected<std::vector<float>, std::string> sample_motion_sequence_from_noise
+ std::expected<std::vector<float>, std::string> sample_motion_sequence_conditioned(
+     const ggml_motion_weights &weights, std::span<const sampled_sequence_segment> segments,
+     unsigned transition_frames, unsigned steps, float text_weight, float constraint_weight,
+-    std::span<const float> observed, std::span<const float> observed_mask, float first_heading);
++    std::span<const float> observed, std::span<const float> observed_mask, float first_heading, const clean_guide &guide = {});
+ 
+ // Build the exact condition consumed by the next `_multiprompt` DDIM run.
+ // Exposed for the raw fixture test as well as the runtime orchestrator.
+diff --git a/src/model.cpp b/src/model.cpp
+index 3185798..f0f38d0 100644
+--- a/src/model.cpp
++++ b/src/model.cpp
+@@ -203,7 +203,7 @@ std::expected<motion_data, std::string> model::generate_text_conditioned(
+         for (float &value : noise.back()) value=normal(rng);
+         sampled.push_back({embeddings[index], noise.back(), segment.frames});
+     }
+-    auto joined=detail::sample_motion_sequence_conditioned(*impl_->weights,sampled,transition_frames,steps,text_cfg,constraint_cfg,condition.observed,condition.mask,condition.first_heading);
++    auto joined=detail::sample_motion_sequence_conditioned(*impl_->weights,sampled,transition_frames,steps,text_cfg,constraint_cfg,condition.observed,condition.mask,condition.first_heading,condition.guide);
+     if (!joined) return std::unexpected(joined.error());
+     const size_t motion_dim=impl_->skeleton->motion_dim(), body_dim=impl_->skeleton->body_dim();
+     const auto frames=static_cast<unsigned>(joined->size()/motion_dim);
+diff --git a/src/sequence.cpp b/src/sequence.cpp
+index 7666f83..1c02248 100644
+--- a/src/sequence.cpp
++++ b/src/sequence.cpp
+@@ -63,7 +63,7 @@ std::expected<std::vector<float>, std::string> sample_motion_sequence_from_noise
+ std::expected<std::vector<float>, std::string> sample_motion_sequence_conditioned(
+     const ggml_motion_weights &weights, std::span<const sampled_sequence_segment> segments,
+     unsigned transition_frames, unsigned steps, float text_weight, float constraint_weight,
+-    std::span<const float> condition, std::span<const float> condition_mask, float first_heading) {
++    std::span<const float> condition, std::span<const float> condition_mask, float first_heading, const clean_guide &guide) {
+     const size_t D=weights.motion_dim(),body=D-5;
+     if(segments.empty()||!transition_frames||!D)return std::unexpected("sequence requires segments and a transition");
+     size_t total=0;for(const auto&segment:segments)total+=segment.frames;
+@@ -78,9 +78,12 @@ std::expected<std::vector<float>, std::string> sample_motion_sequence_conditione
+     // Rows of the caller condition for one segment, beginning at output frame first and
+     // written after offset rows; x/z move with the segment origin as upstream translate_2d.
+     auto crop=[&](size_t first,size_t frames,size_t offset,float origin_x,float origin_z,std::vector<float>&observed,std::vector<float>&mask){bool any=false;for(size_t frame=0;frame<frames;++frame){const size_t from=(first+frame)*D,to=(offset+frame)*D;for(size_t d=0;d<D;++d){const float m=condition_mask[from+d];if(m==0.F)continue;any=true;mask[to+d]=m;observed[to+d]=condition[from+d]-(d==0?origin_x:d==2?origin_z:0.F);}}return any;};
++    // The caller's guide sees the first segment's clean prediction unnormalized.
++    const clean_guide first_guide=[&](unsigned step,unsigned count,std::span<float> clean){std::vector<float> values(clean.begin(),clean.end());unnormalize(values);guide(step,count,values);normalize(values);std::copy(values.begin(),values.end(),clean.begin());};
++    const clean_guide *guided=guide?&first_guide:nullptr;
+     std::vector<float> joined,previous;size_t current_frame=0;
+     for(size_t index=0;index<segments.size();++index){const auto&segment=segments[index];const size_t sampled_frames=segment.frames+(index?transition_frames:0);if(segment.frames<2||segment.embedding.size()!=4096||segment.initial_noise.size()!=sampled_frames*D)return std::unexpected("invalid sampled sequence segment");std::vector<float>current;
+-        if(!index){std::vector<float>observed(sampled_frames*D),mask(observed.size());const bool any=conditioned&&crop(0,segment.frames,0,0.F,0.F,observed,mask);std::expected<std::vector<float>,std::string>sampled;if(any){normalize(observed);sampled=sample_motion_from_noise_conditioned(weights,segment.initial_noise,segment.embedding,observed,mask,first_heading,sampled_frames,steps,text_weight,constraint_weight);}else sampled=sample_motion_from_noise(weights,segment.initial_noise,segment.embedding,sampled_frames,steps,text_weight,constraint_weight);if(!sampled)return std::unexpected(sampled.error());current=std::move(*sampled);unnormalize(current);}
++        if(!index){std::vector<float>observed(sampled_frames*D),mask(observed.size());const bool any=conditioned&&crop(0,segment.frames,0,0.F,0.F,observed,mask);std::expected<std::vector<float>,std::string>sampled;if(any){normalize(observed);sampled=sample_motion_from_noise_conditioned(weights,segment.initial_noise,segment.embedding,observed,mask,first_heading,sampled_frames,steps,text_weight,constraint_weight,guided);}else sampled=sample_motion_from_noise(weights,segment.initial_noise,segment.embedding,sampled_frames,steps,text_weight,constraint_weight,guided);if(!sampled)return std::unexpected(sampled.error());current=std::move(*sampled);unnormalize(current);}
+         else{const size_t overlap=transition_frames;if(overlap>=segment.frames||previous.size()<overlap*D)return std::unexpected("transition must be shorter than every following segment");auto transition=prepare_sequence_transition(weights,previous,segment.frames,transition_frames);if(!transition)return std::unexpected(transition.error());const float origin_x=transition->origin_x,origin_z=transition->origin_z;if(conditioned)crop(current_frame,segment.frames,overlap,origin_x,origin_z,transition->observed,transition->observed_mask);normalize(transition->observed);auto sampled=sample_motion_from_noise_conditioned(weights,segment.initial_noise,segment.embedding,transition->observed,transition->observed_mask,transition->first_heading,sampled_frames,steps,text_weight,constraint_weight);if(!sampled)return std::unexpected(sampled.error());current=std::move(*sampled);unnormalize(current);for(size_t frame=0;frame<sampled_frames;++frame){auto*row=current.data()+frame*D;row[0]+=origin_x;row[2]+=origin_z;}const size_t start=joined.size()-overlap*D;for(size_t frame=0;frame<overlap;++frame){const float alpha=overlap==1?.5F:1.F-float(frame)/float(overlap-1);for(size_t d=0;d<D;++d)joined[start+frame*D+d]=alpha*joined[start+frame*D+d]+(1.F-alpha)*current[frame*D+d];}joined.insert(joined.end(),current.begin()+static_cast<std::ptrdiff_t>(overlap*D),current.end());}
+         if(!index)joined=current;previous=std::move(current);current_frame+=segment.frames;}
+     return joined;

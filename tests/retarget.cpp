@@ -183,6 +183,22 @@ Connections: {
     auto map=load_mapping(dir/"bones.json");
     auto target=load_rig_glb(dir/"target.glb");
     auto result=retarget(f.source,target,map);
+    {
+        // The proxy (sampling guides) poses the character as retargeting does, up to its
+        // placement and heading: every bone matches relative to the root, every frame.
+        auto proxy=retarget_proxy(target,map);std::vector<Transform> posed;
+        const size_t root=result.clip.motion_root;
+        for(size_t fr=0;fr<f.source.frames();++fr) {
+            proxy_world(proxy,world_pose(f.source,f.source.frame(fr)),posed);
+            auto real=world_pose(result.clip,result.clip.frame(fr));
+            for(size_t j=0;j<real.size();++j) {
+                int up=static_cast<int>(j);while(up>=0&&static_cast<size_t>(up)!=root)up=result.clip.joints[static_cast<size_t>(up)].parent;
+                if(up<0)continue; // above the root: placement only
+                auto a=inverse(posed[root])*posed[j],b=inverse(real[root])*real[j];
+                check(close(a.p,b.p,1e-4f)&&close(a.q,b.q),"Retarget proxy matches retargeted bones relative to the root");
+            }
+        }
+    }
     check(std::abs(result.scale-1.3f)<1e-4f,"Root scale follows leg length rather than arm or torso length");
     check(std::abs(result.heading_degrees*3.14159265358979323846f/180-0.65f)<1e-4f,"Character heading comes from geometry, independently of bone axes");
     check(result.clip.frames()==f.source.frames(),"Retarget frame count");
