@@ -8,6 +8,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <optional>
 #include <set>
@@ -96,6 +97,9 @@ Generates a SOMA-30 clip from text (30 fps).
                               90 faces +X); repeat for waypoints
   --placement auto|world|free
                               Ground placement of poses after frame 0 (see below)
+  --fit-poses                 Select the lowest raw pose rotation error across seeds
+  --footsteps N               Select a clip with N measured travelling footfalls
+  --attempts N                Seed budget for either selection, 1..64 (default 8)
   --no-correction             Keep the model's poses as generated instead of making
                               full-body poses exact
   --correction-frames N       Frames each side the correction fades over, 0..60
@@ -482,11 +486,12 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
                 if(action.value("device",std::string("auto"))=="gpu")throw std::runtime_error("ARDY currently uses native ONNX CPU");
                 if(action.contains("transition"))throw std::runtime_error("ARDY does not take transition");
             } else if(action.contains("history")||action.contains("historyFrames"))throw std::runtime_error("history requires backend ardy");
-            keys.insert({"prompt","prompts","duration","seed","steps","transition","startPose","endPose","endAt","keyframes","effectors","path","placement","correct",
+            keys.insert({"prompt","prompts","duration","seed","steps","transition","startPose","endPose","endAt","keyframes","effectors","path","placement","correct","fitPoses","footsteps","attempts",
                 "variants","variantsGif","tide","guidance","constraintGuidance","device","threads","correctionFrames","inPlace","model","backend","history","historyFrames"});
             if(action.contains("backend")) {auto b=action["backend"].get<std::string>();if(b!="kimodo"&&b!="ardy")throw std::runtime_error("backend is kimodo or ardy");argv.insert(argv.end(),{"--backend",b});}
             if(action.contains("history"))argv.insert(argv.end(),{"--history",path(action["history"]).string()});
             if(action.contains("historyFrames")) {if(!action["historyFrames"].is_number_integer())throw std::runtime_error("historyFrames must be integer");auto h=action["historyFrames"].get<int>();if(h<4||h>240||h%4)throw std::runtime_error("historyFrames must be 4..240, multiple of four");argv.insert(argv.end(),{"--history-frames",std::to_string(h)});}
+            if(action.contains("fitPoses")&&action["fitPoses"].get<bool>())argv.push_back("--fit-poses");
             if(action.contains("placement")) {
                 auto value=action["placement"].get<std::string>();
                 if(value!="auto"&&value!="world"&&value!="free")throw std::runtime_error("placement is auto, world or free");
@@ -497,7 +502,17 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
                 if(!value.is_number())throw std::runtime_error(std::string(label)+" must be numeric");
                 return value.dump();
             };
+            for(auto pair:{std::pair{"footsteps","--footsteps"},std::pair{"attempts","--attempts"}})if(action.contains(pair.first)) {
+                auto text=numeric(action[pair.first],pair.first);integer(text,pair.first==std::string("attempts")?1:0,64,pair.first);argv.insert(argv.end(),{pair.second,text});
+            }
             if(action.contains("variants")) {auto text=numeric(action["variants"],"variants");variants=static_cast<unsigned>(integer(text,1,64,"variants"));argv.insert(argv.end(),{"--variants",text});}
+            if(action.contains("attempts")&&!action.contains("footsteps")&&!action.value("fitPoses",false))throw std::runtime_error("attempts requires footsteps or fitPoses");
+            if(action.contains("footsteps")||action.value("fitPoses",false)) {
+                if(variants>1)throw std::runtime_error("selection takes one clip; use variants separately");
+                const auto first=action.contains("seed")?static_cast<uint64_t>(integer(numeric(action["seed"],"seed"),0,4294967295.0,"seed")):uint64_t{0};
+                const auto limit=action.value("attempts",unsigned{8});
+                if(first+limit-1>4294967295ULL)throw std::runtime_error("seed plus attempts passes 4294967295");
+            }
             if(action.contains("variantsGif")&&action["variantsGif"].get<bool>()) {sheet_gif=true;argv.push_back("--variants-gif");}
             if(action.contains("inPlace")&&action["inPlace"].get<bool>())argv.push_back("--in-place");
             for(auto pair:{std::pair{"guidance","--guidance"},std::pair{"constraintGuidance","--constraint-guidance"}})if(action.contains(pair.first)) {
@@ -663,6 +678,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     Placement placement=Placement::automatic;std::string placement_name="auto";
     unsigned variants=1,threads=0;int correction_frames=10;bool variants_gif=false,in_place=false;
     Guidance guidance;std::string device="auto",backend="kimodo",model_version="v1.1";fs::path history_file;unsigned history_frames=240;
+    bool fit_poses=false;int wanted_footsteps=-1;unsigned attempts=8;
     std::vector<std::string> pos;
     std::vector<std::string> flags;
     // Prompt durations; index 0 is the positional prompt, later ones come from --then.
@@ -696,6 +712,9 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
             else if(placement_name=="free")placement=Placement::free;
             else throw std::runtime_error("--placement is auto, world or free");
         }
+        else if(a=="--fit-poses")fit_poses=true;
+        else if(a=="--footsteps")wanted_footsteps=static_cast<int>(integer(value(),0,64,"footsteps"));
+        else if(a=="--attempts")attempts=static_cast<unsigned>(integer(value(),1,64,"attempts"));
         else if(a=="--no-correction")correct=false;
         else if(a=="--correction-frames")correction_frames=static_cast<int>(integer(value(),0,60,"correction frames"));
         else if(a=="--in-place")in_place=true;
@@ -730,7 +749,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         else pos.push_back(a);
     }
     std::set<std::string> allowed;
-    if(command=="generate")allowed={"--models","-o","--output","--duration","--seed","--steps","--then","--transition","--start-pose","--end-pose","--end-at","--keyframe","--effector","--path","--placement","--no-correction",
+    if(command=="generate")allowed={"--models","-o","--output","--duration","--seed","--steps","--then","--transition","--start-pose","--end-pose","--end-at","--keyframe","--effector","--path","--placement","--fit-poses","--footsteps","--attempts","--no-correction",
         "--correction-frames","--in-place","--variants","--variants-gif","--tide","--guidance","--constraint-guidance","--device","--threads","--model","--backend","--history","--history-frames"};
     else if(command=="connect")allowed={"--models","-o","--output","--tokens","--joined","--offset","--from-clip","--to-clip","--threads"};
     else if(command=="mirror")allowed={"-o","--output","--clip"};
@@ -803,6 +822,11 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
             nlohmann::json info={{"name",clip.name},{"rig",canonical?"soma30":"custom"},{"joints",clip.joints.size()},{"frames",clip.frames()},{"fps",clip.fps},{"duration",clip.duration()}};
             if(!skeleton) {
                 auto travel=root_travel(clip);
+                if(canonical) {
+                    const auto events=footfalls(clip);
+                    info["footfalls"]={{"rule","soma-travelling-footfalls-v1"},{"count",events.size()},{"events",nlohmann::json::array()}};
+                    for(const auto& e:events)info["footfalls"]["events"].push_back({{"foot",e.foot?"right-foot":"left-foot"},{"lift",e.lift},{"landing",e.landing},{"distanceMetres",e.distance},{"heightMetres",e.height}});
+                }
                 info["rootTravel"]={{"displacementMetres",travel.displacement},{"pathMetres",travel.distance},{"peakSpeedMetresPerSecond",travel.peak_speed}};
             }
             if(skeleton) {
@@ -844,6 +868,12 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     auto finish=[](const Clip& made,const fs::path& path,const nlohmann::json& recipe) {
         save_glb(made,path);
         auto measured=recipe;const auto travel=root_travel(made);
+        bool canonical=true;try{require_soma(made);}catch(const std::exception&){canonical=false;}
+        if(canonical) {
+            auto events=footfalls(made);
+            measured["footfalls"]={{"rule","soma-travelling-footfalls-v1"},{"count",events.size()},{"events",nlohmann::json::array()}};
+            for(const auto& e:events)measured["footfalls"]["events"].push_back({{"foot",e.foot?"right-foot":"left-foot"},{"lift",e.lift},{"landing",e.landing},{"distanceMetres",e.distance},{"heightMetres",e.height}});
+        }
         measured["rootTravel"]={{"displacementMetres",travel.displacement},{"pathMetres",travel.distance},{"peakSpeedMetresPerSecond",travel.peak_speed}};
         std::ofstream metadata(path.string()+".json");metadata<<measured.dump(2)<<"\n";metadata.close();
         if(!metadata)throw std::runtime_error("Animation saved but could not write its recipe");
@@ -935,6 +965,12 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         if(std::find(flags.begin(),flags.end(),"--end-at")!=flags.end()&&
            std::none_of(conditions.poses.begin(),conditions.poses.end(),[](const auto& p){return p.kind=="end-pose";}))
             throw std::runtime_error("--end-at requires --end-pose");
+        if(fit_poses&&std::none_of(conditions.poses.begin(),conditions.poses.end(),[](const auto& p){return !p.effectors;}))
+            throw std::runtime_error("--fit-poses requires a full-body pose");
+        const bool selecting=wanted_footsteps>=0||fit_poses;
+        if(selecting&&variants>1)throw std::runtime_error("selection takes one clip; use --variants separately to inspect candidates");
+        if(!selecting&&std::find(flags.begin(),flags.end(),"--attempts")!=flags.end())throw std::runtime_error("--attempts requires --footsteps or --fit-poses");
+        if(selecting&&seed+attempts-1>4294967295ULL)throw std::runtime_error("--seed plus --attempts passes 4294967295");
         bool shift=place_constraints(conditions,placement);
         std::optional<KimodoCondition> condition;
         kimodo::motion_condition native;
@@ -966,8 +1002,13 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
             if(condition&&context->kimodo->motion_dim()!=kimodo_features)throw std::runtime_error("Constraints need the SOMA-30 Kimodo model");
         }
         std::vector<Clip> made;std::vector<std::string> labels;
-        for(unsigned v=0;v<variants;++v) {
+        nlohmann::json searched=nlohmann::json::array();
+        const unsigned candidates=selecting?attempts:variants;
+        std::optional<Clip> best_clip; nlohmann::json best_recipe;
+        float best_score=std::numeric_limits<float>::infinity();
+        for(unsigned v=0;v<candidates;++v) {
         const uint64_t used_seed=seed+v;
+        const size_t output_index=selecting?0:v;
         clip=Clip{};generate_recipe=nlohmann::json::object();
         if(variants>1)std::cerr<<"Generating variant "<<v+1<<"/"<<variants<<" (seed "<<used_seed<<")...\n";
         else std::cerr<<"Generating motion...\n";
@@ -975,7 +1016,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         if(backend=="ardy") {
             std::vector<ArdyPrompt> prompts;for(const auto& p:parts)prompts.push_back({p.prompt,p.frames});
             clip=context->ardy->generate(prompts,ArdyOptions{steps,threads,history_frames,used_seed,guidance.text,guidance.constraint},conditions,imported?&*imported:nullptr);
-            clip.name=outputs[v].stem().string();
+            clip.name=outputs[output_index].stem().string();
             generate_recipe["backend"]="ardy";generate_recipe["checkpointRevision"]="e6c6804fb6b55636ad927145d74959fd46882ccd";
             generate_recipe["history"]=history_file.string();generate_recipe["historyFrames"]=history_frames;
             generate_recipe["modelManifestSha256"]="aac3b966ed1368c4ec126c969f0763d59126b047a1053a2394c20983acb917d2";
@@ -1005,7 +1046,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         }
         auto result=generate_motion(models,context,parts,transition,steps,used_seed,guidance,floating?&placed_native:condition?&native:nullptr);
         if(result.joints!=30||result.local_rotations_xyzw.size()!=static_cast<size_t>(result.frames)*30*4||result.root_positions.size()!=static_cast<size_t>(result.frames)*3)throw std::runtime_error("Kimodo returned an unexpected SOMA output layout");
-        clip.joints=soma();clip.name=outputs[v].stem().string();
+        clip.joints=soma();clip.name=outputs[output_index].stem().string();
         // Constraints were expressed relative to the frame-0 origin; return to their world.
         Vec3 origin=condition?condition->origin:Vec3{};
         for(size_t f=0;f<result.frames;++f)for(size_t j=0;j<30;++j) {
@@ -1025,6 +1066,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
             for(size_t i=0;i<conditions.poses.size();++i)if(!conditions.poses[i].anchored)
                 generate_recipe["inferredPoseLocations"].push_back({{"frame",effective.poses[i].frame},{"x",effective.poses[i].pose[0].p.x},{"z",effective.poses[i].pose[0].p.z}});
         }
+        generate_recipe["fitPoses"]=fit_poses;
         generate_recipe["placement"]=placement_name;generate_recipe["corrected"]=correct&&!conditions.poses.empty();
         generate_recipe["correctionFrames"]=correction_frames;generate_recipe["inPlace"]=in_place;
         generate_recipe["guidance"]=guidance.text;generate_recipe["constraintGuidance"]=guidance.constraint;
@@ -1037,11 +1079,13 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         if(variants>1)generate_recipe["variants"]={{"count",variants},{"firstSeed",seed},{"sheet",sheet.png.filename().string()}};
         generate_recipe["constraints"]=nlohmann::json::array();
         auto round=[](float value,float unit){return std::round(value/unit)*unit;};
+        float pose_score=0;
         // Errors are the model's own; correction then makes full-body poses exact.
         for(const auto& pose:conditions.poses) {
             auto e=constraint_error(clip,pose);
+            if(!pose.effectors)pose_score=std::max(pose_score,e.rotation_mean);
             nlohmann::json item={{"kind",pose.kind},{"frame",pose.frame},{"file",pose.file},{"sourceFrame",pose.source_frame},{"anchored",pose.anchored},
-                {"modelError",{{"rootMetres",round(e.root,1e-4f)},{"positionMeanMetres",round(e.position_mean,1e-4f)},{"positionMaxMetres",round(e.position_max,1e-4f)},{"rotationMeanDegrees",round(e.rotation_mean,0.01f)},{"rotationMaxDegrees",round(e.rotation_max,0.01f)}}}};
+                {"modelError",{{"rootMetres",round(e.root,1e-4f)},{"positionMeanMetres",round(e.position_mean,1e-4f)},{"positionMaxMetres",round(e.position_max,1e-4f)},{"rotationMeanDegrees",round(e.rotation_mean,0.01f)},{"rotationMaxDegrees",round(e.rotation_max,0.01f)},{"rotationMaxJoint",e.rotation_max_joint}}}};
             if(pose.effectors)item["effectors"]=effector_list(pose.effectors);
             generate_recipe["constraints"].push_back(item);
             std::cerr<<pose.kind<<(pose.effectors?" "+effector_list(pose.effectors):std::string())<<" at frame "<<pose.frame<<(pose.anchored?"":" (free on the ground)")<<": root "<<round(e.root*100,0.1f)<<" cm; "<<(pose.effectors?"effector":"joint")<<" positions mean "<<round(e.position_mean*100,0.1f)<<" / max "<<round(e.position_max*100,0.1f)<<" cm; rotations mean "<<round(e.rotation_mean,0.1f)<<" / max "<<round(e.rotation_max,0.1f)<<" degrees"<<(correct&&!pose.effectors?"; corrected to exact":"")<<"\n";
@@ -1063,13 +1107,34 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         }
         // Recorded errors are measured before the travel is removed.
         if(in_place)remove_root_travel(clip);
+        const auto events=footfalls(clip);
+        if(selecting) {
+            searched.push_back({{"seed",used_seed},{"footfalls",events.size()},{"poseMeanRotationDegrees",pose_score}});
+            std::cerr<<"Seed "<<used_seed<<": "<<events.size()<<" travelling footfalls; worst pose mean rotation "<<pose_score<<" degrees\n";
+            if(wanted_footsteps>=0&&events.size()!=static_cast<size_t>(wanted_footsteps))continue;
+            generate_recipe["selection"]={{"firstSeed",seed},{"attemptLimit",attempts},{"attempted",searched}};
+            if(wanted_footsteps>=0)generate_recipe["selection"]["requestedFootsteps"]=wanted_footsteps;
+        }
         auto recipe=recipe_for(clip,used_seed);
         double requested=0;for(const auto& segment:segments)requested+=segment.second;
         recipe["requestedDuration"]=requested;
         for(const auto& item:generate_recipe.items())recipe[item.key()]=item.value();
-        finish(clip,outputs[v],recipe);
-        if(variants>1) {made.push_back(clip);labels.push_back("seed "+std::to_string(used_seed));}
+        if(fit_poses) {
+            if(pose_score<best_score){best_score=pose_score;best_clip=std::move(clip);best_recipe=std::move(recipe);}
+            continue;
         }
+        finish(clip,outputs[output_index],recipe);
+        if(variants>1) {made.push_back(clip);labels.push_back("seed "+std::to_string(used_seed));}
+        if(selecting)return 0;
+        }
+        if(best_clip) {
+            best_recipe["selection"]["attempted"]=searched;
+            best_recipe["selection"]["rankBy"]="worstPoseMeanRotationDegrees";
+            best_recipe["selection"]["scoreDegrees"]=best_score;
+            std::cerr<<"Selected seed "<<best_recipe["seed"]<<" with worst pose mean rotation "<<best_score<<" degrees from "<<attempts<<" attempts\n";
+            finish(*best_clip,output,best_recipe);return 0;
+        }
+        if(selecting)throw std::runtime_error("No candidate matched --footsteps after "+std::to_string(attempts)+" attempts; no output saved. Counts: "+searched.dump());
         if(variants>1) {
             // The clips are kept whatever happens to the sheet.
             try {preview_variants(made,labels,sheet);std::cout<<"Saved "<<sheet.png.string()<<(sheet.gif.empty()?"":" and "+sheet.gif.string())<<"\n";}

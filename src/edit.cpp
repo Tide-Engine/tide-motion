@@ -4,6 +4,52 @@
 #include <stdexcept>
 
 namespace motion {
+std::vector<Footfall> footfalls(const Clip& c) {
+    require_soma(c);
+    std::vector<Footfall> events;
+    for(unsigned foot=0;foot<2;++foot) {
+        const size_t ankle=foot?28:24,toe=ankle+1;
+        std::vector<Vec3> positions;std::vector<float> heights;
+        for(size_t f=0;f<c.frames();++f) {
+            const auto pose=world_pose(c,c.frame(f));
+            positions.push_back(pose[ankle].p);heights.push_back(std::min(pose[ankle].p.y,pose[toe].p.y));
+        }
+        auto sorted=heights;std::sort(sorted.begin(),sorted.end());
+        const float floor=sorted[(sorted.size()-1)/10];
+        const size_t settle=std::max(size_t{2},static_cast<size_t>(std::ceil(c.fps*0.06f)));
+        const size_t swing_min=std::max(size_t{2},static_cast<size_t>(std::ceil(c.fps*0.10f)));
+        bool supported=false,air=false;size_t stable=0,high=0,lift=0,landing=0;
+        Vec3 anchor{};float peak=0;
+        for(size_t f=0;f<c.frames();++f) {
+            const float speed=f?std::hypot(positions[f].x-positions[f-1].x,positions[f].z-positions[f-1].z)*c.fps:0;
+            const bool low=heights[f]<=floor+0.02f&&speed<=0.8f;
+            if(!air) {
+                if(low) {if(++stable>=settle){supported=true;anchor=positions[f];}high=0;}
+                else {
+                    stable=0;
+                    if(supported&&heights[f]>=floor+0.04f) {
+                        if(!high){lift=f;peak=0;}
+                        ++high;peak=std::max(peak,heights[f]-floor);
+                        if(high>=swing_min){air=true;stable=0;}
+                    } else high=0;
+                }
+            } else {
+                peak=std::max(peak,heights[f]-floor);
+                if(low) {
+                    if(!stable)landing=f;
+                    if(++stable>=settle) {
+                        float distance=std::hypot(positions[landing].x-anchor.x,positions[landing].z-anchor.z);
+                        if(distance>=0.08f)events.push_back({foot,lift,landing,distance,peak});
+                        air=false;high=0;supported=true;anchor=positions[f];
+                    }
+                } else stable=0;
+            }
+        }
+    }
+    std::sort(events.begin(),events.end(),[](const auto& a,const auto& b){return a.landing<b.landing||(a.landing==b.landing&&a.foot<b.foot);});
+    return events;
+}
+
 RootTravel root_travel(const Clip& c) {
     c.validate();
     RootTravel out;

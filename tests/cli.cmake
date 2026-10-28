@@ -234,3 +234,21 @@ file(REMOVE "${source}.json")
 # Keep a manifest-relative source path so Windows separators need no JSON escaping.
 file(WRITE "${WORK}/bad-bounds-batch.json" "{\"actions\":[{\"action\":\"generate\",\"prompt\":\"walk\",\"output\":\"unused-bounds.glb\"},{\"action\":\"cleanup\",\"source\":\"clean.glb\",\"contacts\":\"bad-step-plan.json\",\"output\":\"unused-clean-bounds.glb\"}]}")
 refuses("Batch action 2.*maxAnkleStepIncrease" batch "${WORK}/bad-bounds-batch.json" --models "${empty}")
+
+# Counted native selection and pose-fit controls are preflighted without models.
+refuses("out of range" generate "walk" --footsteps -1 -o "${WORK}/fit.glb" --models "${empty}")
+refuses("integer" generate "walk" --footsteps 1.5 -o "${WORK}/fit.glb" --models "${empty}")
+refuses("out of range" generate "walk" --attempts 65 --footsteps 2 -o "${WORK}/fit.glb" --models "${empty}")
+refuses("requires --footsteps" generate "walk" --attempts 2 -o "${WORK}/fit.glb" --models "${empty}")
+refuses("selection takes one clip" generate "walk" --footsteps 2 --variants 2 -o "${WORK}/fit.glb" --models "${empty}")
+refuses("passes 4294967295" generate "walk" --footsteps 2 --seed 4294967295 --attempts 2 -o "${WORK}/fit.glb" --models "${empty}")
+refuses("Missing or incomplete" generate "walk" --fit-poses --start-pose "${source}" --footsteps 2 --attempts 2 -o "${WORK}/fit.glb" --models "${empty}")
+file(WRITE "${WORK}/selection-batch.json" "{\"actions\":[{\"action\":\"generate\",\"prompt\":\"walk\",\"output\":\"never-select.glb\"},{\"action\":\"generate\",\"prompt\":\"walk\",\"attempts\":2,\"output\":\"fit.glb\"}]}")
+refuses("Batch action 2.*attempts requires footsteps or fitPoses" batch "${WORK}/selection-batch.json" --models "${empty}")
+
+refuses("requires a full-body pose" generate "walk" --fit-poses -o "${WORK}/fit.glb" --models "${empty}")
+
+help_lists("--fit-poses.*--footsteps.*--attempts" generate --help)
+refuses("Missing or incomplete" generate "walk" --fit-poses --start-pose "${source}" --attempts 2 -o "${WORK}/fit.glb" --models "${empty}")
+file(WRITE "${WORK}/fit-batch.json" "{\"actions\":[{\"action\":\"generate\",\"prompt\":\"walk\",\"startPose\":\"with spaces and 'quotes'/source.glb\",\"fitPoses\":true,\"footsteps\":2,\"attempts\":2,\"output\":\"fit.glb\"}]}")
+refuses("Missing or incomplete" batch "${WORK}/fit-batch.json" --models "${empty}")

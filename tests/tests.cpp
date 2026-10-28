@@ -65,6 +65,35 @@ void mannequin_contracts() {
 // the correction window.
 bool same(Quat a,Quat b) {return a.x==b.x&&a.y==b.y&&a.z==b.z&&a.w==b.w;}
 void edit_contracts() {
+    // Authored support -> lifted leg -> stable landing, no inference fixtures.
+    Clip stepping;stepping.joints=soma();
+    for(size_t f=0;f<70;++f) {
+        std::vector<Transform> pose;for(const auto& joint:stepping.joints)pose.push_back(joint.rest);
+        pose[0].p={0,1,0};
+        if(f>=10&&f<25) {pose[22].q=axis_angle({1,0,0},0.8f);pose[0].p.z=0.3f*static_cast<float>(f-10)/15;}
+        else if(f>=25)pose[0].p.z=0.3f;
+        if(f>=40&&f<55) {pose[26].q=axis_angle({1,0,0},0.8f);pose[0].p.z=0.3f+0.3f*static_cast<float>(f-40)/15;}
+        else if(f>=55)pose[0].p.z=0.6f;
+        stepping.poses.insert(stepping.poses.end(),pose.begin(),pose.end());
+    }
+    auto falls=footfalls(stepping);
+    check(falls.size()==2&&falls[0].foot==0&&falls[1].foot==1,"Two authored travelling footfalls counted in order");
+    check(falls[0].lift==10&&falls[0].landing==26&&falls[1].landing==56,"Footfall frames identify complete swings");
+    auto placed_steps=stepping;
+    for(size_t f=0;f<placed_steps.frames();++f)placed_steps.frame(f)[0]=Transform{{7,2,-3},yaw(0.8f)}*placed_steps.frame(f)[0];
+    check(footfalls(placed_steps).size()==2,"Footfalls independent of world translation and heading");
+    auto on_spot=stepping;for(size_t f=0;f<on_spot.frames();++f)on_spot.frame(f)[0].p.z=0;
+    check(footfalls(on_spot).empty(),"Kicks returning to the same ground position do not count as travelling steps");
+    auto unfinished=stepping;unfinished.poses.resize(20*30);
+    check(footfalls(unfinished).empty(),"Unfinished swing is excluded");
+    auto sliding=stepping;
+    for(size_t f=0;f<sliding.frames();++f) {sliding.frame(f)[22].q={};sliding.frame(f)[26].q={};}
+    check(footfalls(sliding).empty(),"Ground sliding without a swing does not count as footsteps");
+    auto airborne_start=stepping;airborne_start.poses.erase(airborne_start.poses.begin(),airborne_start.poses.begin()+15*30);
+    auto later=footfalls(airborne_start);
+    check(later.size()==1&&later[0].foot==1,"Incomplete initial swing is excluded");
+
+
     check(variant_path(fs::path("out")/"kick.glb",7)==fs::path("out")/"kick.seed7.glb","Variant names carry the seed");
     check(variant_path("a.b.glb",4294967295ull)==fs::path("a.b.seed4294967295.glb"),"Variant names keep earlier dots");
     check(variants_path("kick.glb",".png")==fs::path("kick.variants.png")&&variants_path("kick.glb",".gif")==fs::path("kick.variants.gif"),"Contact sheet names");
@@ -156,6 +185,13 @@ void kimodo_contracts() {
     // Heading follows upstream: atan2 of the right-to-left hip line; 0 faces +Z.
     auto rest=rig.joints;std::vector<Transform> standing;for(const auto& joint:rest)standing.push_back(joint.rest);
     for(float facing:{0.0f,0.5f,1.5707964f,-2.0f}) {standing[0].q=yaw(facing);check(std::abs(std::remainder(kimodo_heading(rig,standing)-facing,6.2831853f))<2e-3f,"Heading is yaw about +Y");}
+    // A leaf orientation can be wrong while every joint position is exact.
+    Clip leaf;leaf.joints=soma();for(const auto& joint:leaf.joints)leaf.poses.push_back(joint.rest);
+    PoseConstraint leaf_target{"start-pose",0,"leaf.glb",0,leaf.poses,0};
+    leaf.frame(0)[15].q=yaw(1.5707963268f);
+    auto leaf_error=constraint_error(leaf,leaf_target);
+    check(leaf_error.position_max<1e-6f&&std::abs(leaf_error.rotation_mean-3)<0.01f,"Raw rotation score includes terminal orientations even with exact positions");
+    check(leaf_error.rotation_max_joint=="LeftHandMiddleEnd"&&std::abs(leaf_error.rotation_max-90)<0.01f,"Worst raw rotation names its actual joint");
     // Conditions: a start pose sets the origin and first heading; masks per constraint kind.
     MotionConditions conditions;
     conditions.poses.push_back({"start-pose",0,"a.glb",-1,pose,0});
@@ -217,11 +253,18 @@ void kimodo_contracts() {
     check(angle(out.frame(15)[3].q,before.frame(15)[3].q)>1e-3f,"Correction fades in before the keyframe");
 }
 int main(int argc,char** argv) try {
+    if(argc>=6&&std::string(argv[1])=="--variant-sheet") {
+        std::vector<Clip> clips;std::vector<std::string> labels;
+        for(int i=4;i<argc;++i) {clips.push_back(load_glb(argv[i]));labels.push_back(fs::path(argv[i]).stem().string());}
+        preview_variants(clips,labels,VariantSheet{argv[2],argv[3],{}});return 0;
+    }
     if(argc==7&&std::string(argv[1])=="--verify-placed") {
         auto source=load_glb(argv[2]),output=load_glb(argv[3]);
         std::vector<Transform> end(source.frame(0).begin(),source.frame(0).end());
-        const float facing=std::stof(argv[6])*3.14159265358979323846f/180;
-        end[0].q=normalized(yaw(facing-kimodo_heading(source,end))*end[0].q);
+        if(std::string(argv[6])!="keep") {
+            const float facing=std::stof(argv[6])*3.14159265358979323846f/180;
+            end[0].q=normalized(yaw(facing-kimodo_heading(source,end))*end[0].q);
+        }
         end[0].p.x=std::stof(argv[4]);end[0].p.z=std::stof(argv[5]);
         for(size_t f:{size_t{0},output.frames()-1}) {
             auto want=f?std::span<const Transform>(end):source.frame(source.frames()-1);

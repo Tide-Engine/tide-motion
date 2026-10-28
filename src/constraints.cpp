@@ -167,7 +167,7 @@ ConstraintError constraint_error(const Clip& result,const PoseConstraint& pose) 
     for(size_t j:joints) {
         Vec3 p=got[j].p-want[j].p;float distance=std::sqrt(dot(p,p)),angle=angle_between(got[j].q,want[j].q);
         e.position_mean+=distance;e.position_max=std::max(e.position_max,distance);
-        e.rotation_mean+=angle;e.rotation_max=std::max(e.rotation_max,angle);
+        e.rotation_mean+=angle;if(angle>e.rotation_max){e.rotation_max=angle;e.rotation_max_joint=result.joints[j].name;}
     }
     e.position_mean/=static_cast<float>(joints.size());e.rotation_mean/=static_cast<float>(joints.size());
     return e;

@@ -1479,3 +1479,118 @@ Validation is documentation-only: local guide/report links and the example JSON
 parse, native batch preflight accepts the documented options before the
 expected empty-cache refusal, runtime staging carries updated guides/report, and
 git diff --check passes. No inference, GPU allocation or model download is needed.
+
+## Measured footfalls and pose-ranked selection (2026-10-28)
+
+Follow-up owner request: close the step-count and raw-pose-fit workflow gaps.
+Located an existing private sword idle at
+D:/Projects/tide-motion-scratch/prompts/idle-soma.glb. Thus the earlier claim that
+its source was unavailable is superseded. This file remains outside Git and is
+not packaged. Native CPU reproduction (v1.1, 4 threads, 2 s, 50 diffusion steps,
+seeds 1/3, start/end idle with endAt [0,-1]) gives end-pose raw rotation mean
+15.88/16.62 degrees and maximum 53.59/51.09, matching the reported scale.
+
+Investigated stronger rotation observation masks against the unchanged pinned
+native model/source. Observing all 30 global rotations lowered mean error to
+11.13/11.45 degrees but worsened end-root error from about 1.7 cm to 24.3/27.2 cm.
+Observing just upper-arm/forearm rotations gave mean 16.08/16.07 and maxima
+57.28/56.07 with root errors 5.3/7.1 cm. These are regressions for this workflow;
+both experimental masks and their flags were removed. Existing model conditioning,
+weights, dependency revisions, native endpoint correction and licenses are kept.
+Raw error recipes now name rotationMaxJoint; the arm experiment's maximum was
+LeftHandMiddleEnd, making terminal-joint orientation error visible rather than
+silently hiding it from the existing all-joint metrics.
+
+New explicit native selection controls:
+- --footsteps N (0..64) accepts only a candidate with N measured travelling
+  footfalls, trying consecutive seeds up to --attempts N (1..64, default 8).
+- --fit-poses evaluates the complete attempt budget and chooses the lowest
+  worst mean joint rotation error across full-body pose constraints, measured
+  before correction. Requires a start/end/full-body keyframe. Combined with
+  --footsteps, only candidates passing the count are eligible. Equal scores
+  keep the earlier seed. No arbitrary guidance increase or altered pose mask.
+- Both select one plain output, so --variants remains a separate operation with
+  its existing seed-based names. Exhaustion writes no asset/recipe for that
+  action and reports attempted counts; prior completed batch actions survive.
+  All arguments/seed bounds/output paths are checked before model loading.
+  Batch fields are footsteps, fitPoses and attempts. One RunContext/model load
+  is retained. Model sampling alone generates every candidate; selection does
+  not alter root travel, poses, timing or contacts to force a measured match.
+- The saved seed is the selected candidate's actual seed. Selection metadata
+  stores requested count (when used), firstSeed, attemptLimit, every attempted
+  seed/count/raw score, and the fit ranking rule/selected score when used.
+  Remake it with that seed and identical generation controls without selection.
+  Ranking is a defined angular metric, not a claim of perceptually best motion.
+
+Footfall measurement is a native SOMA FK state machine, rule
+soma-travelling-footfalls-v1. Per foot, the lower tenth-percentile ankle/toe
+minimum estimates ground height. Establish support for at least two samples /
+0.06 s within 2 cm of that floor and with ankle horizontal speed <=0.8 m/s.
+A completed swing clears 4 cm for at least two samples / 0.10 s and returns to
+settled support at least 8 cm from its prior support. Durations round upward to
+whole samples. Exclude incomplete initial/final swings and same-place kicks.
+Report foot, lift, first settled landing sample, distance and peak clearance.
+Sheet/GIF labels, inspect and saved recipes now carry count/events as appropriate.
+The counter only measures; it does not infer IK contacts or run cleanup.
+It is conservative on flat ground: tiny shuffles, sliding landings, stairs and
+uneven surfaces can be missed; travelling hops can qualify as footfalls. Preserve
+this explicit definition rather than claiming semantic recognition of steps.
+Explicitly mapped custom rigs first retarget to SOMA; no automatic bone mapping.
+
+Validation so far: Windows ClangCL 18 Release Vulkan build, all six CTests pass.
+Authored independent support/swing/landing clips verify two alternating events,
+settled landing frames, world translation/yaw invariance, same-place kick and
+sliding exclusions, and unfinished initial/final swing exclusions. CLI/batch
+checks cover numeric/type bounds, seed-budget overflow, incompatible variants,
+missing full-body poses, orphan attempts, accepted controls and complete late
+batch preflight. tests/selection-inference.ps1 provides opt-in real native
+ranking/count/exhaustion, model reuse, exported endpoint and bounded sheet checks.
+It coordinates CPU as well as GPU runs through TideMotionGpuValidation.
+
+Successful CPU native count selection on the sword idle: seed 0 measured three
+footfalls and was rejected; seed 1 measured two and was saved with actual seed
+and attempted-count metadata. An impossible 64-footfall request evaluated exactly
+two seeds (both measured two), returned nonzero and wrote neither GLB nor recipe.
+The four prototype-batch actions (six candidates) reused one model load. Those CPU runs were
+outside the GPU mutex while ARDY's CPU benchmark held it; they used explicit
+--device cpu --threads 4 (no GPU inference), and the other task was informed so
+its timing is reported as contended. Subsequent native measurement also acquires
+the coordination mutex for CPU work. No throughput claims derive from these runs.
+
+Limits: selection improves the recorded metric within a finite candidate set;
+it does not retrain the model or promise a lower raw error than every possible
+seed. Existing exact full-body endpoint correction remains in effect. Maximum
+rotation/position errors stay reported alongside the ranking score so a lower
+mean cannot hide a worse joint. Broad action/rig coverage and non-Windows builds
+are not claimed here. No evaluation motion data or research-only weights enter
+Git; no new model/runtime dependency was added.
+
+Final native pose ranking ran on the CPU after acquiring TideMotionGpuValidation:
+seed 2 worst pose mean rotation 17.3862 degrees; seed 3 16.8359 degrees. The
+2-attempt --fit-poses action selected seed 3 and recorded both unrounded scores.
+The native exported-GLB verifier passes for ranked and counted outputs, checking
+all 30 local translations/rotations at both source/placed endpoints. Its optional
+"keep" heading argument checks a two-coordinate endAt without imposing a new yaw.
+All six CTests pass on the final pre-integration source. Bounded three-frame
+TIDE_HIDDEN=1 sheet capture with the same engine-built Tide/platform succeeds at
+960x998; labelled footfall counts and metrics were visually inspected. The
+successful ranking/capture runs held the shared mutex. No timing claim is made.
+
+Integrated onto origin/dev 93a92e3 (ARDY native backend/history, bounded cleanup,
+HumanML and MoMask research retained). Combined shared CLI field/option sets so
+--backend/--history/--history-frames and selection remain additive. The ARDY
+candidate name uses the selected-output slot rather than attempt index, avoiding
+an out-of-range output lookup on a second selection attempt. The integrated
+Windows Vulkan build passes all eight CTests, including a new independently
+predictable terminal-joint error diagnostic (90 degrees at LeftHandMiddleEnd,
+zero position error, mean 3 degrees over 30 joints). Exported ranked/counted
+endpoint checks pass again. Under TideMotionGpuValidation, the integrated ARDY
+CPU executable with imported four-frame history, full-body start pose, --fit-poses
+and an impossible --footsteps 64 budget of two generates both six-frame candidates,
+reports zero footfalls and distinct raw pose scores, then correctly fails without
+writing output. This exercises backend/history preservation and the second-attempt
+output-slot fix with real inference; no ARDY quality or speedup claim is added.
+
+Final integration also retains origin/dev 43f146c's paired SOMA-version comparison
+suite and report. No runtime/source conflicts; append-only implementation notes
+were combined. Reconfigured/rebuilt and all eight CTests pass on that final tree.

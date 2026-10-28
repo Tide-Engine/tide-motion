@@ -709,3 +709,44 @@ path fixes the world; world placement uses the same masks as before.
 Variant sheets print horizontal root displacement, accumulated path length and
 peak horizontal root speed for every seed (also in recipes and `inspect`), exposing stationary clips and endpoint
 jumps even though each key pose remains centred for body comparison.
+
+### Counted steps and pose-fit selection
+
+Use `--footsteps 2 --attempts 8` to try consecutive seeds and save the first clip
+with two measured travelling footfalls. Add `--fit-poses` to evaluate the whole
+budget and choose the matching clip with the lowest raw pose rotation error.
+`--fit-poses --attempts 8` also works on its own with a start, end or full-body
+keyframe. Its score is the worst mean joint rotation error among those full-body
+constraints, measured before endpoint correction. It includes terminal joints;
+the recipe also names the joint with the largest raw rotation error.
+
+For example:
+
+```powershell
+tide-motion generate "A person stumbles backwards in two steps" --duration 2 --start-pose idle.glb --end-pose idle.glb@0 --end-at 0,-1 --footsteps 2 --fit-poses --attempts 8 -o stumble.glb
+```
+
+Selection reuses the native model and keeps one candidate in memory. `--attempts`
+is 1..64 (default 8); seeds are S through S+N-1. The recipe's seed is the actual
+selected seed; `selection` records every attempted seed, measured count, raw pose
+score and ranking rule. Remake it with that seed and the same generation controls,
+omitting selection flags. Selection takes one output and cannot be combined with
+`--variants`; ordinary variants keep their seed names and now label footfall counts.
+If no seed matches the count, the command fails with the counts and saves no clip
+or recipe for that action. Earlier successful batch actions remain saved.
+Batch generate actions accept `footsteps`, `fitPoses` and `attempts`.
+
+`inspect`, recipes and sheets report **travelling footfalls**, using rule
+`soma-travelling-footfalls-v1`: a supported foot clears the estimated floor by
+4 cm for at least 0.10 s, then lands within 2 cm of it with horizontal ankle speed
+at most 0.8 m/s for at least two frames / 0.06 s, at least 8 cm from its previous
+support. The floor is each foot's tenth-percentile ankle/toe minimum height.
+Events give foot, lift/landing frame, travel and peak clearance. Initial/unfinished
+swings and kicks returning to the same spot are excluded. This is a conservative
+flat-ground geometric measure: tiny shuffles, stairs and sliding landings can
+be missed, and travelling hops can qualify. Review the events and preview for
+action quality. Custom rigs first need explicit retargeting to SOMA.
+
+Selection changes which learned sample is saved; it does not alter poses, timing,
+root travel or foot trajectories to obtain a count. Endpoint correction still
+makes full-body poses exact, and `--no-correction` remains available.

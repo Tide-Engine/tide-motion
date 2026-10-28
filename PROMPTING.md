@@ -266,7 +266,15 @@ makes the selected pose exact, including sword-idle wrist/spine rotations;
 motion or velocity exact. A wider correction window spreads that residual.
 
 "Two steps" in text is a preference, not a count constraint: the model may take
-2–4. There is no reliable exact step-count control in this backend. For explicit
+2–4. Text alone does not enforce the count; use `--footsteps` for measured sample
+selection. For explicit
 footfall timing use authored SOMA targets with `pose-sequence` and inspect the
 result; intermediate contacts remain a model quality limitation. Do not shorten
 or time-warp a clip and assume that enforces the requested step count.
+
+For a counted-step request, use `--footsteps 2 --attempts 8` alongside the prompt.
+This selects a sample with two measured travelling landings; inspect its event
+frames and preview it. Add `--fit-poses` to prefer the lowest raw pose rotation
+error across the matching samples, or use that flag alone to choose a closer
+start/end pose fit. This scores the original model prediction before correction;
+it does not increase guidance or distort the motion to meet the count.

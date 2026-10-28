@@ -111,7 +111,7 @@ void shift_to_last_pose(Clip& result, const MotionConditions&);
 void correct_poses(Clip& result, const MotionConditions&, int frames=10);
 struct KimodoCondition { std::vector<float> observed, mask; float first_heading=0; Vec3 origin; };
 KimodoCondition build_condition(const MotionConditions&, size_t frames);
-struct ConstraintError { float root=0, position_mean=0, position_max=0, rotation_mean=0, rotation_max=0; };
+struct ConstraintError { float root=0, position_mean=0, position_max=0, rotation_mean=0, rotation_max=0; std::string rotation_max_joint; };
 ConstraintError constraint_error(const Clip& result, const PoseConstraint&);
 float path_error(const Clip& result, const PathConstraint&);
 struct BricksInputs {
@@ -147,6 +147,9 @@ void mirror_soma(Clip&);
 // Removes horizontal root travel (a one-second moving average of the root's ground path),
 // keeping height, facing and sway; frame 0 stays where it was.
 void remove_root_travel(Clip&);
+struct Footfall { unsigned foot=0; size_t lift=0,landing=0; float distance=0,height=0; };
+// Completed travelling footfalls on SOMA, not an action classifier.
+std::vector<Footfall> footfalls(const Clip&);
 struct RootTravel { float displacement=0, distance=0, peak_speed=0; };
 RootTravel root_travel(const Clip&);
 // Frames that show a clip at a glance: first, last and its strongest moments, in order.
