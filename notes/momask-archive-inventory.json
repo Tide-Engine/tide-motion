@@ -1,0 +1,136 @@
+{
+  "url": "https://drive.google.com/file/d/1vXS7SHJBgWPt59wupQ5UUzhFObrnGkQ0/view",
+  "observed": "2026-10-28",
+  "archive_bytes": 188067025,
+  "central_directory_offset": 188064796,
+  "central_directory_bytes": 2207,
+  "central_directory_sha256": "5073f02c987cddfb93c66eecc134463e483ad22d4f6f8259198eecc191b0a9ac",
+  "entries": [
+    {
+      "name": "length_estimator/",
+      "compressed": 0,
+      "size": 0,
+      "local_offset": 0,
+      "method": 0
+    },
+    {
+      "name": "length_estimator/model/",
+      "compressed": 0,
+      "size": 0,
+      "local_offset": 79,
+      "method": 0
+    },
+    {
+      "name": "length_estimator/model/finest.tar",
+      "compressed": 1618508,
+      "size": 1745581,
+      "local_offset": 164,
+      "method": 8
+    },
+    {
+      "name": "rvq_nq6_dc512_nc512_noshare_qdp0.2/",
+      "compressed": 0,
+      "size": 0,
+      "local_offset": 1618767,
+      "method": 0
+    },
+    {
+      "name": "rvq_nq6_dc512_nc512_noshare_qdp0.2/meta/",
+      "compressed": 0,
+      "size": 0,
+      "local_offset": 1618864,
+      "method": 0
+    },
+    {
+      "name": "rvq_nq6_dc512_nc512_noshare_qdp0.2/model/",
+      "compressed": 0,
+      "size": 0,
+      "local_offset": 1618966,
+      "method": 0
+    },
+    {
+      "name": "rvq_nq6_dc512_nc512_noshare_qdp0.2/opt.txt",
+      "compressed": 407,
+      "size": 687,
+      "local_offset": 1619069,
+      "method": 8
+    },
+    {
+      "name": "rvq_nq6_dc512_nc512_noshare_qdp0.2/meta/mean.npy",
+      "compressed": 2130,
+      "size": 2232,
+      "local_offset": 1619580,
+      "method": 8
+    },
+    {
+      "name": "rvq_nq6_dc512_nc512_noshare_qdp0.2/meta/std.npy",
+      "compressed": 143,
+      "size": 2232,
+      "local_offset": 1621820,
+      "method": 8
+    },
+    {
+      "name": "rvq_nq6_dc512_nc512_noshare_qdp0.2/model/net_best_fid.tar",
+      "compressed": 78167331,
+      "size": 84070519,
+      "local_offset": 1622072,
+      "method": 8
+    },
+    {
+      "name": "t2m_nlayer8_nhead6_ld384_ff1024_cdp0.1_rvq6ns/",
+      "compressed": 0,
+      "size": 0,
+      "local_offset": 79789522,
+      "method": 0
+    },
+    {
+      "name": "t2m_nlayer8_nhead6_ld384_ff1024_cdp0.1_rvq6ns/model/",
+      "compressed": 0,
+      "size": 0,
+      "local_offset": 79789630,
+      "method": 0
+    },
+    {
+      "name": "t2m_nlayer8_nhead6_ld384_ff1024_cdp0.1_rvq6ns/opt.txt",
+      "compressed": 345,
+      "size": 576,
+      "local_offset": 79789744,
+      "method": 8
+    },
+    {
+      "name": "t2m_nlayer8_nhead6_ld384_ff1024_cdp0.1_rvq6ns/model/latest.tar",
+      "compressed": 51680649,
+      "size": 55933307,
+      "local_offset": 79790204,
+      "method": 8
+    },
+    {
+      "name": "tres_nlayer8_ld384_ff1024_rvq6ns_cdp0.2_sw/",
+      "compressed": 0,
+      "size": 0,
+      "local_offset": 131470977,
+      "method": 0
+    },
+    {
+      "name": "tres_nlayer8_ld384_ff1024_rvq6ns_cdp0.2_sw/model/",
+      "compressed": 0,
+      "size": 0,
+      "local_offset": 131471082,
+      "method": 0
+    },
+    {
+      "name": "tres_nlayer8_ld384_ff1024_rvq6ns_cdp0.2_sw/opt.txt",
+      "compressed": 359,
+      "size": 601,
+      "local_offset": 131471193,
+      "method": 8
+    },
+    {
+      "name": "tres_nlayer8_ld384_ff1024_rvq6ns_cdp0.2_sw/model/net_best_fid.tar",
+      "compressed": 56593005,
+      "size": 61196511,
+      "local_offset": 131471664,
+      "method": 8
+    }
+  ]
+}

@@ -1,0 +1,624 @@
+{
+  "purpose": "random-weight CPU operator proof; no CLIP or pretrained inference",
+  "source": "94a6636c9c463b7a9414c3401a6f1b67e6c51824",
+  "torch": "2.7.1+cpu",
+  "onnx": "1.18.0",
+  "ort": "1.22.0",
+  "attention_decomposition_max_abs": {
+    "masked_step": 7.152557373046875e-07,
+    "residual_step": 3.725290298461914e-07
+  },
+  "components": {
+    "masked_step": {
+      "sha256": "5af57af622293db92b9b8f99593860fb7de5518afba7ae391a76c93e2558db9e",
+      "operators": [
+        "Add",
+        "Cast",
+        "Concat",
+        "Constant",
+        "ConstantOfShape",
+        "Div",
+        "Erf",
+        "Gather",
+        "Gemm",
+        "Identity",
+        "LayerNormalization",
+        "MatMul",
+        "Mul",
+        "Reshape",
+        "Shape",
+        "Slice",
+        "Softmax",
+        "Transpose",
+        "Unsqueeze",
+        "Where"
+      ],
+      "cases": [
+        {
+          "tokens": 4,
+          "shape": [
+            1,
+            512,
+            4
+          ],
+          "max_abs": 1.0132789611816406e-06,
+          "fixtures": [
+            {
+              "name": "input0",
+              "file": "masked_step-4-input0.bin",
+              "dtype": "int64",
+              "shape": [
+                1,
+                4
+              ]
+            },
+            {
+              "name": "input1",
+              "file": "masked_step-4-input1.bin",
+              "dtype": "float32",
+              "shape": [
+                1,
+                512
+              ]
+            },
+            {
+              "name": "input2",
+              "file": "masked_step-4-input2.bin",
+              "dtype": "bool",
+              "shape": [
+                1,
+                4
+              ]
+            },
+            {
+              "name": "expected",
+              "file": "masked_step-4-expected.bin",
+              "dtype": "float32",
+              "shape": [
+                1,
+                512,
+                4
+              ]
+            }
+          ]
+        },
+        {
+          "tokens": 7,
+          "shape": [
+            1,
+            512,
+            7
+          ],
+          "max_abs": 9.834766387939453e-07,
+          "fixtures": [
+            {
+              "name": "input0",
+              "file": "masked_step-7-input0.bin",
+              "dtype": "int64",
+              "shape": [
+                1,
+                7
+              ]
+            },
+            {
+              "name": "input1",
+              "file": "masked_step-7-input1.bin",
+              "dtype": "float32",
+              "shape": [
+                1,
+                512
+              ]
+            },
+            {
+              "name": "input2",
+              "file": "masked_step-7-input2.bin",
+              "dtype": "bool",
+              "shape": [
+                1,
+                7
+              ]
+            },
+            {
+              "name": "expected",
+              "file": "masked_step-7-expected.bin",
+              "dtype": "float32",
+              "shape": [
+                1,
+                512,
+                7
+              ]
+            }
+          ]
+        },
+        {
+          "tokens": 49,
+          "shape": [
+            1,
+            512,
+            49
+          ],
+          "max_abs": 1.3113021850585938e-06,
+          "fixtures": [
+            {
+              "name": "input0",
+              "file": "masked_step-49-input0.bin",
+              "dtype": "int64",
+              "shape": [
+                1,
+                49
+              ]
+            },
+            {
+              "name": "input1",
+              "file": "masked_step-49-input1.bin",
+              "dtype": "float32",
+              "shape": [
+                1,
+                512
+              ]
+            },
+            {
+              "name": "input2",
+              "file": "masked_step-49-input2.bin",
+              "dtype": "bool",
+              "shape": [
+                1,
+                49
+              ]
+            },
+            {
+              "name": "expected",
+              "file": "masked_step-49-expected.bin",
+              "dtype": "float32",
+              "shape": [
+                1,
+                512,
+                49
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "residual_step": {
+      "sha256": "152a1e71591171dd2e3853163facbe0127afb204d0eb9819bb891f3fe2f141ae",
+      "operators": [
+        "Add",
+        "Cast",
+        "Concat",
+        "Constant",
+        "ConstantOfShape",
+        "Div",
+        "Einsum",
+        "Erf",
+        "Gather",
+        "Gemm",
+        "Identity",
+        "LayerNormalization",
+        "MatMul",
+        "Mul",
+        "OneHot",
+        "Reshape",
+        "Shape",
+        "Slice",
+        "Softmax",
+        "Sub",
+        "Transpose",
+        "Unsqueeze",
+        "Where"
+      ],
+      "cases": [
+        {
+          "tokens": 4,
+          "shape": [
+            1,
+            513,
+            4
+          ],
+          "max_abs": 7.152557373046875e-07,
+          "fixtures": [
+            {
+              "name": "input0",
+              "file": "residual_step-4-input0.bin",
+              "dtype": "float32",
+              "shape": [
+                1,
+                4,
+                512
+              ]
+            },
+            {
+              "name": "input1",
+              "file": "residual_step-4-input1.bin",
+              "dtype": "int64",
+              "shape": [
+                1
+              ]
+            },
+            {
+              "name": "input2",
+              "file": "residual_step-4-input2.bin",
+              "dtype": "float32",
+              "shape": [
+                1,
+                512
+              ]
+            },
+            {
+              "name": "input3",
+              "file": "residual_step-4-input3.bin",
+              "dtype": "bool",
+              "shape": [
+                1,
+                4
+              ]
+            },
+            {
+              "name": "expected",
+              "file": "residual_step-4-expected.bin",
+              "dtype": "float32",
+              "shape": [
+                1,
+                513,
+                4
+              ]
+            }
+          ]
+        },
+        {
+          "tokens": 7,
+          "shape": [
+            1,
+            513,
+            7
+          ],
+          "max_abs": 6.556510925292969e-07,
+          "fixtures": [
+            {
+              "name": "input0",
+              "file": "residual_step-7-input0.bin",
+              "dtype": "float32",
+              "shape": [
+                1,
+                7,
+                512
+              ]
+            },
+            {
+              "name": "input1",
+              "file": "residual_step-7-input1.bin",
+              "dtype": "int64",
+              "shape": [
+                1
+              ]
+            },
+            {
+              "name": "input2",
+              "file": "residual_step-7-input2.bin",
+              "dtype": "float32",
+              "shape": [
+                1,
+                512
+              ]
+            },
+            {
+              "name": "input3",
+              "file": "residual_step-7-input3.bin",
+              "dtype": "bool",
+              "shape": [
+                1,
+                7
+              ]
+            },
+            {
+              "name": "expected",
+              "file": "residual_step-7-expected.bin",
+              "dtype": "float32",
+              "shape": [
+                1,
+                513,
+                7
+              ]
+            }
+          ]
+        },
+        {
+          "tokens": 49,
+          "shape": [
+            1,
+            513,
+            49
+          ],
+          "max_abs": 6.854534149169922e-07,
+          "fixtures": [
+            {
+              "name": "input0",
+              "file": "residual_step-49-input0.bin",
+              "dtype": "float32",
+              "shape": [
+                1,
+                49,
+                512
+              ]
+            },
+            {
+              "name": "input1",
+              "file": "residual_step-49-input1.bin",
+              "dtype": "int64",
+              "shape": [
+                1
+              ]
+            },
+            {
+              "name": "input2",
+              "file": "residual_step-49-input2.bin",
+              "dtype": "float32",
+              "shape": [
+                1,
+                512
+              ]
+            },
+            {
+              "name": "input3",
+              "file": "residual_step-49-input3.bin",
+              "dtype": "bool",
+              "shape": [
+                1,
+                49
+              ]
+            },
+            {
+              "name": "expected",
+              "file": "residual_step-49-expected.bin",
+              "dtype": "float32",
+              "shape": [
+                1,
+                513,
+                49
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "rvq_encoder": {
+      "sha256": "8e7be061d3ab71e1f08602446046f257faa973fb2037addf58e84dc1b7f78918",
+      "operators": [
+        "Add",
+        "ArgMax",
+        "Cast",
+        "Concat",
+        "Constant",
+        "ConstantOfShape",
+        "Conv",
+        "Expand",
+        "Gather",
+        "MatMul",
+        "Mul",
+        "Neg",
+        "Pow",
+        "ReduceSum",
+        "Relu",
+        "Reshape",
+        "Shape",
+        "Sub",
+        "Transpose",
+        "Unsqueeze"
+      ],
+      "cases": [
+        {
+          "tokens": 4,
+          "shape": [
+            1,
+            4,
+            6
+          ],
+          "max_abs": 0.0,
+          "fixtures": [
+            {
+              "name": "input0",
+              "file": "rvq_encoder-4-input0.bin",
+              "dtype": "float32",
+              "shape": [
+                1,
+                16,
+                263
+              ]
+            },
+            {
+              "name": "expected",
+              "file": "rvq_encoder-4-expected.bin",
+              "dtype": "int64",
+              "shape": [
+                1,
+                4,
+                6
+              ]
+            }
+          ]
+        },
+        {
+          "tokens": 7,
+          "shape": [
+            1,
+            7,
+            6
+          ],
+          "max_abs": 0.0,
+          "fixtures": [
+            {
+              "name": "input0",
+              "file": "rvq_encoder-7-input0.bin",
+              "dtype": "float32",
+              "shape": [
+                1,
+                28,
+                263
+              ]
+            },
+            {
+              "name": "expected",
+              "file": "rvq_encoder-7-expected.bin",
+              "dtype": "int64",
+              "shape": [
+                1,
+                7,
+                6
+              ]
+            }
+          ]
+        },
+        {
+          "tokens": 49,
+          "shape": [
+            1,
+            49,
+            6
+          ],
+          "max_abs": 0.0,
+          "fixtures": [
+            {
+              "name": "input0",
+              "file": "rvq_encoder-49-input0.bin",
+              "dtype": "float32",
+              "shape": [
+                1,
+                196,
+                263
+              ]
+            },
+            {
+              "name": "expected",
+              "file": "rvq_encoder-49-expected.bin",
+              "dtype": "int64",
+              "shape": [
+                1,
+                49,
+                6
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "rvq_decoder": {
+      "sha256": "6a0d63ac7589c079f973774459a30515d74cd45dc449734cc1d7ac5ef965b0b3",
+      "operators": [
+        "Add",
+        "Cast",
+        "Concat",
+        "Constant",
+        "ConstantOfShape",
+        "Conv",
+        "Equal",
+        "Expand",
+        "Gather",
+        "GatherElements",
+        "Mul",
+        "ReduceSum",
+        "Relu",
+        "Reshape",
+        "Resize",
+        "Shape",
+        "Transpose",
+        "Unsqueeze",
+        "Where"
+      ],
+      "cases": [
+        {
+          "tokens": 4,
+          "shape": [
+            1,
+            16,
+            263
+          ],
+          "max_abs": 3.632158041000366e-07,
+          "fixtures": [
+            {
+              "name": "input0",
+              "file": "rvq_decoder-4-input0.bin",
+              "dtype": "int64",
+              "shape": [
+                1,
+                4,
+                6
+              ]
+            },
+            {
+              "name": "expected",
+              "file": "rvq_decoder-4-expected.bin",
+              "dtype": "float32",
+              "shape": [
+                1,
+                16,
+                263
+              ]
+            }
+          ]
+        },
+        {
+          "tokens": 7,
+          "shape": [
+            1,
+            28,
+            263
+          ],
+          "max_abs": 3.818422555923462e-07,
+          "fixtures": [
+            {
+              "name": "input0",
+              "file": "rvq_decoder-7-input0.bin",
+              "dtype": "int64",
+              "shape": [
+                1,
+                7,
+                6
+              ]
+            },
+            {
+              "name": "expected",
+              "file": "rvq_decoder-7-expected.bin",
+              "dtype": "float32",
+              "shape": [
+                1,
+                28,
+                263
+              ]
+            }
+          ]
+        },
+        {
+          "tokens": 49,
+          "shape": [
+            1,
+            196,
+            263
+          ],
+          "max_abs": 2.60770320892334e-07,
+          "fixtures": [
+            {
+              "name": "input0",
+              "file": "rvq_decoder-49-input0.bin",
+              "dtype": "int64",
+              "shape": [
+                1,
+                49,
+                6
+              ]
+            },
+            {
+              "name": "expected",
+              "file": "rvq_decoder-49-expected.bin",
+              "dtype": "float32",
+              "shape": [
+                1,
+                196,
+                263
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

@@ -33,6 +33,38 @@ in ignored scratch; no research-only checkpoint or evaluation motion data was
 used or committed. Kimodo v1.2, contact cleanup and MotionBricks authoring are
 untouched. Existing runtime behavior and dependencies are unchanged.
 
+## MoMask investigation and native source work (2026-10-28)
+
+See [momask.md](momask.md) for checkpoint-specific rights evidence, exact release
+artifact inventory, native conversion/edit contracts and executed operator proof.
+Commercial eligibility of the official RVQ/masked/residual checkpoints and their
+statistics could not be established from primary release artifacts. The MIT code
+grant and AMASS's separate dataset/training restriction do not independently
+decide those checkpoint/output rights. A bounded ZIP-directory/configuration
+inspection found no checkpoint license text. No checkpoint or evaluation motion
+was integrated or distributed; no MoMask backend/default/install entry is exposed.
+
+Lawful source-only work is implemented: C++ HumanML normalization, root/RIC/edge
+FK, lossy canonical SOMA conversion/resampling and exact outside-range splice
+with endpoint refusal. These compile only into model-free tests. Random-weight
+RVQ encoder/decoder and both transformer steps export at opset 17 after fixing
+dynamic attention and tied projection export issues; all 12 cases pass native
+ONNX Runtime 1.31.1 against PyTorch (encoder IDs exact, worst float error 1.20e-6).
+Pinned source/configuration hashes, tooling lock, notices and numerical results
+are committed; weights/ONNX/fixtures remain ignored. SMPL/SMPL-X research body
+assets can be omitted entirely for skeleton-only inference. Real checkpoint
+parity, native CLIP/RNG, source encoding/calibration and end-to-end generation/
+inpainting/quality comparisons remain untested, not claimed as functional support.
+
+Integration validation: rebased onto origin/dev 15c78fd, preserving concurrent
+ARDY notes, DART evidence, SOMA-RP v1.2, pose authoring/placement and contact
+cleanup. Resolved additive CMake/notes conflicts; fresh local Windows CPU Release
+build passes all seven CTests with worktree-local TEMP/TMP and TIDE_HIDDEN=1.
+Native synthetic canonical GLB export/reload and all 12 native ORT fixture cases
+pass; runtime staging includes the report, pin files and notice. Source verification
+checks 52 hashes and refuses a deliberately modified source file. No GPU, inference
+benchmark, engine preview, PR or manual CI dispatch was used for this work.
+
 ## Scope agreed with the owner
 
 Separate repository, CLI and installer. Native executables with minimal user
