@@ -45,6 +45,10 @@ static Clip read_glb(const fs::path& path,const std::string& selected,bool canon
     Clip c; c.name=path.stem().string();
     std::vector<cgltf_node*> nodes;
     if(canonical) {
+      // A SOMA-77 presentation clip enters canonical paths as its exact SOMA-30 subset.
+      for(size_t i=0;i<data->nodes_count;++i)if(data->nodes[i].name&&std::strcmp(data->nodes[i].name,"LeftHandIndex1")==0) {
+          data.reset();return soma77_to_30(read_glb(path,selected,false,rest_only));
+      }
       c.joints=soma();
       for(auto& joint:c.joints) {
         cgltf_node* found=nullptr;

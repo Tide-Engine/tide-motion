@@ -41,18 +41,8 @@ std::string vulkan_unavailable() {
     return "no supported Vulkan device";
 }
 #endif
-// Sets an environment variable for Kimodo, which reads them when it loads; empty removes it.
-void set_env(const char* name,const std::string& value) {
-#ifdef _WIN32
-    _putenv_s(name,value.c_str());
-#else
-    if(value.empty())unsetenv(name);else setenv(name,value.c_str(),1);
-#endif
-}
-std::optional<std::string> get_env(const char* name) { const char* v=std::getenv(name);if(!v)return std::nullopt;return std::string(v); }
 void use_cpu(const std::string& reason) {
     std::cerr<<reason<<"; generating on the CPU.\n";
-    set_env("KIMODO_BACKEND","cpu");
 }
 // Whether Kimodo will try the GPU. It takes the first Vulkan device unless
 // KIMODO_BACKEND=cpu, and fails rather than falling back when Vulkan is present
@@ -100,13 +90,25 @@ Generates a SOMA-30 clip from text (30 fps).
   --path X,Z[,YAW]@FRAME      Put the root over ground point X,Z (metres) at output
                               FRAME, optionally facing YAW degrees (0 faces +Z,
                               90 faces +X); repeat for waypoints
+  --dense-path                Kimodo: constrain the root on every frame from frame 0
+                              to the last waypoint, interpolated and smoothed as
+                              upstream's dense 2D root path (see below)
+  --pose-map BONES.json       Retarget pose files on another mapped humanoid rig
+                              (GLB or FBX) to SOMA first, as retarget --to-soma
   --placement auto|world|free
                               Ground placement of poses after frame 0 (see below)
   --fit-poses                 Select the lowest raw pose rotation error across seeds
   --footsteps N               Select a clip with N measured travelling footfalls
   --attempts N                Seed budget for either selection, 1..64 (default 8)
-  --no-correction             Keep the model's poses as generated instead of making
-                              full-body poses exact
+  --correction tide|kimodo|none
+                              tide (default) makes full-body poses exact with a
+                              fade; kimodo runs the native port of upstream's
+                              MotionCorrection (root warps, effector IK and foot
+                              contact IK from the model's contacts); none keeps the
+                              model's output
+  --no-correction             Same as --correction none
+  --rig soma30|soma77         Output skeleton (default soma30); soma77 adds
+                              upstream's relaxed fingers, toe ends and head end
   --correction-frames N       Frames each side the correction fades over, 0..60
                               (default 10; 0 sets only the constrained frame)
   --in-place                  Remove horizontal root travel, keeping height, facing
@@ -131,8 +133,9 @@ Generates a SOMA-30 clip from text (30 fps).
 
 F is a frame of the pose file; negative counts from its end (-1 is the last),
 and "first" or "last" also work. Output FRAME is 0-based at 30 fps; negative
-counts from the end. Pose files must be SOMA-30 clips (convert other rigs with
-retarget --to-soma).
+counts from the end. Pose files are SOMA-30 or SOMA-77 GLBs; give --pose-map for
+another mapped humanoid (retargeted as --to-soma: rotations and root only, with its
+calibration limits, so the constraint is the retargeted SOMA pose).
 
 Placement: a start pose (or a path point at frame 0) fixes where the output
 begins, in that clip's world. world also pins later poses to their ground
@@ -148,6 +151,21 @@ constraint is printed and stored in the recipe. Full-body poses are then made
 exact, fading the correction out over up to --correction-frames frames either
 side (effector targets and path points are left as generated). --in-place is
 applied last: frame 0 stays put and later poses move with the removed travel.
+
+--correction kimodo instead warps the root and every rotation to full-body poses
+(exact), pins effector targets with two-bone IK and the root within 4 cm of path
+points, then locks feet and toes where Kimodo predicts contacts. Its counts are
+stored in the recipe; it is an alternative to the default, not added to it.
+
+Dense paths: waypoints (plus frame 0 where the output starts) are interpolated
+linearly to every frame up to the last waypoint and, with three or more, smoothed
+within 6 cm as upstream; every frame then constrains the root, and poses on the
+path measure their joints from it. Waypoint yaws are kept. The recipe records the
+output's smooth-root distance from the path.
+
+--rig soma77 writes the 77-joint presentation skeleton: the same 30 joints plus
+constant relaxed fingers. Every command reads SOMA-77 clips as their exact
+SOMA-30 subset; mirror and cleanup keep the 77 joints.
 
 Variants: -o kick.glb --seed 4 --variants 3 writes kick.seed4.glb,
 kick.seed5.glb and kick.seed6.glb, each with its recipe; generate with --seed S
@@ -407,10 +425,9 @@ struct RunContext {
     std::unique_ptr<kimodo::model> kimodo;
     // strict: an explicit --device, which never falls back. gpu_failed: auto fell back
     // in this run, so later auto actions stay on the CPU.
-    bool kimodo_gpu=false,kimodo_strict=false,gpu_failed=false,env_saved=false;
+    bool kimodo_gpu=false,kimodo_strict=false,gpu_failed=false;
     std::string kimodo_version="v1.1";std::set<std::string> checked_versions;
     std::string kimodo_device;unsigned kimodo_threads=0;
-    std::optional<std::string> backend_env,threads_env;
     std::unique_ptr<BricksModel> bricks;unsigned bricks_threads=0;
     // Batch connect runs: prepare records each request without inference; the
     // following normal execution of the same actions takes its bridge in order.
@@ -430,7 +447,12 @@ void load_kimodo(const fs::path& models,RunContext* context) {
     std::cerr<<"Loading Kimodo SOMA and text encoder (native GGML)...\n";
     std::string failure;
     try {
-        auto model=kimodo::model::load((models/(context->kimodo_version=="v1.2"?"kimodo-v1.2.gguf":"kimodo.gguf")).string(),(models/"text/encoder.gguf").string());
+        // The device and threads go to Kimodo as runtime options (kimodo_runtime_options),
+        // not through KIMODO_BACKEND/KIMODO_THREADS; threads 0 still honours KIMODO_THREADS.
+        kimodo::runtime_options options;
+        options.device=context->kimodo_gpu?kimodo::runtime_options::device_kind::vulkan:kimodo::runtime_options::device_kind::cpu;
+        options.threads=context->kimodo_threads;
+        auto model=kimodo::model::load((models/(context->kimodo_version=="v1.2"?"kimodo-v1.2.gguf":"kimodo.gguf")).string(),(models/"text/encoder.gguf").string(),options);
         if(model) {context->kimodo=std::move(*model);return;}
         failure=model.error();
     } catch(const std::exception& e) {failure=e.what();}
@@ -441,26 +463,25 @@ void load_kimodo(const fs::path& models,RunContext* context) {
 // --device and --threads apply when Kimodo loads; a batch action asking for others reloads it.
 void ensure_kimodo(const fs::path& models,RunContext* context,const std::string& device,unsigned threads,const std::string& version) {
     if(context->kimodo&&context->kimodo_device==device&&context->kimodo_threads==threads&&context->kimodo_version==version)return;
-    if(!context->env_saved) {context->backend_env=get_env("KIMODO_BACKEND");context->threads_env=get_env("KIMODO_THREADS");context->env_saved=true;}
     if(context->kimodo) {std::cerr<<"Reloading Kimodo for another model, --device or --threads.\n";context->kimodo.reset();}
-    set_env("KIMODO_THREADS",threads?std::to_string(threads):context->threads_env.value_or(""));
+    context->kimodo_threads=threads;
     context->kimodo_strict=device!="auto";
-    if(device=="cpu") {set_env("KIMODO_BACKEND","cpu");context->kimodo_gpu=false;std::cerr<<"Generating on the CPU (--device cpu).\n";}
+    if(device=="cpu") {context->kimodo_gpu=false;std::cerr<<"Generating on the CPU (--device cpu).\n";}
     else if(device=="gpu") {
 #ifdef MOTION_VULKAN
         std::string reason=vulkan_unavailable();
         if(!reason.empty())throw std::runtime_error("--device gpu: Vulkan is unavailable ("+reason+")");
-        set_env("KIMODO_BACKEND","vulkan");context->kimodo_gpu=true;
+        context->kimodo_gpu=true;
 #else
         throw std::runtime_error("--device gpu: this build has no GPU support; use --device auto or cpu");
 #endif
-    } else if(context->gpu_failed) {set_env("KIMODO_BACKEND","cpu");context->kimodo_gpu=false;std::cerr<<"Generating on the CPU (the GPU failed earlier in this run).\n";}
-    else {set_env("KIMODO_BACKEND",context->backend_env.value_or(""));context->kimodo_gpu=kimodo_on_gpu();}
+    } else if(context->gpu_failed) {context->kimodo_gpu=false;std::cerr<<"Generating on the CPU (the GPU failed earlier in this run).\n";}
+    else context->kimodo_gpu=kimodo_on_gpu();
     // Models are verified once, after the device is settled (a refused --device gpu skips it).
     if(!context->checked_versions.contains(version)) {check_models(models,version=="v1.2"?"kimodo-v1.2":"kimodo");context->checked_versions.insert(version);}
     context->kimodo_version=version;
     load_kimodo(models,context);
-    context->kimodo_device=device;context->kimodo_threads=threads;
+    context->kimodo_device=device;
 }
 // One unconditioned prompt keeps the original sampler; sequences and constraints use
 // the patched conditioned one, which matches upstream _multiprompt.
@@ -535,7 +556,7 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
                 if(action.contains("transition"))throw std::runtime_error("ARDY does not take transition");
             } else if(action.contains("history")||action.contains("historyFrames"))throw std::runtime_error("history requires backend ardy");
             keys.insert({"prompt","prompts","duration","seed","steps","transition","startPose","endPose","endAt","keyframes","effectors","path","placement","correct","fitPoses","footsteps","attempts",
-                "variants","variantsGif","tide","guidance","constraintGuidance","device","threads","correctionFrames","inPlace","model","backend","history","historyFrames"});
+                "variants","variantsGif","tide","guidance","constraintGuidance","device","threads","correctionFrames","inPlace","model","rig","densePath","correction","poseMap","backend","history","historyFrames"});
             if(action.contains("backend")) {auto b=action["backend"].get<std::string>();if(b!="kimodo"&&b!="ardy")throw std::runtime_error("backend is kimodo or ardy");argv.insert(argv.end(),{"--backend",b});}
             if(action.contains("history"))argv.insert(argv.end(),{"--history",path(action["history"]).string()});
             if(action.contains("historyFrames")) {if(!action["historyFrames"].is_number_integer())throw std::runtime_error("historyFrames must be integer");auto h=action["historyFrames"].get<int>();if(h<4||h>240||h%4)throw std::runtime_error("historyFrames must be 4..240, multiple of four");argv.insert(argv.end(),{"--history-frames",std::to_string(h)});}
@@ -546,6 +567,10 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
                 argv.insert(argv.end(),{"--placement",value});
             }
             if(action.contains("correct")&&!action["correct"].get<bool>())argv.push_back("--no-correction");
+            if(action.contains("correction")) {auto value=action["correction"].get<std::string>();if(value!="tide"&&value!="kimodo"&&value!="none")throw std::runtime_error("correction is tide, kimodo or none");argv.insert(argv.end(),{"--correction",value});}
+            if(action.contains("rig")) {auto value=action["rig"].get<std::string>();if(value!="soma30"&&value!="soma77")throw std::runtime_error("rig is soma30 or soma77");argv.insert(argv.end(),{"--rig",value});}
+            if(action.contains("densePath")&&action["densePath"].get<bool>())argv.push_back("--dense-path");
+            if(action.contains("poseMap")) {auto m=path(action["poseMap"]);(void)load_mapping(m);argv.insert(argv.end(),{"--pose-map",m.string()});}
             auto numeric=[](const nlohmann::json& value,const char* label) {
                 if(!value.is_number())throw std::runtime_error(std::string(label)+" must be numeric");
                 return value.dump();
@@ -777,7 +802,8 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     if(command=="generate"||command=="connect"||command=="pose-sequence"||command=="models"||command=="batch")models=model_directory();
     double duration=3;uint64_t seed=0;unsigned steps=50,transition=5;int frames=0;
     BricksRequest bricks_request;std::string tokens_text;fs::path contacts_out;float contact_threshold=0.5f;
-    bool accept=false,joined=false,skeleton=false,to_soma=false,correct=true;Vec3 offset{};
+    bool accept=false,joined=false,skeleton=false,to_soma=false,correct=true,dense_path=false;Vec3 offset{};
+    std::string correction,rig="soma30";fs::path pose_map_file;
     Placement placement=Placement::automatic;std::string placement_name="auto";
     unsigned variants=1,threads=0;int correction_frames=10;bool variants_gif=false,in_place=false;
     Guidance guidance;std::string device="auto",backend="kimodo",model_version="v1.1";fs::path history_file;unsigned history_frames=240;
@@ -819,6 +845,10 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         else if(a=="--footsteps")wanted_footsteps=static_cast<int>(integer(value(),0,64,"footsteps"));
         else if(a=="--attempts")attempts=static_cast<unsigned>(integer(value(),1,64,"attempts"));
         else if(a=="--no-correction")correct=false;
+        else if(a=="--correction") {correction=value();if(correction!="tide"&&correction!="kimodo"&&correction!="none")throw std::runtime_error("--correction is tide, kimodo or none");}
+        else if(a=="--rig") {rig=value();if(rig!="soma30"&&rig!="soma77")throw std::runtime_error("--rig is soma30 or soma77");}
+        else if(a=="--dense-path")dense_path=true;
+        else if(a=="--pose-map")pose_map_file=utf8path(value());
         else if(a=="--correction-frames")correction_frames=static_cast<int>(integer(value(),0,60,"correction frames"));
         else if(a=="--in-place")in_place=true;
         else if(a=="--variants")variants=static_cast<unsigned>(integer(value(),1,64,"variants"));
@@ -856,6 +886,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     }
     std::set<std::string> allowed;
     if(command=="generate")allowed={"--models","-o","--output","--duration","--seed","--steps","--then","--transition","--start-pose","--end-pose","--end-at","--keyframe","--effector","--path","--placement","--fit-poses","--footsteps","--attempts","--no-correction",
+        "--correction","--rig","--dense-path","--pose-map",
         "--correction-frames","--in-place","--variants","--variants-gif","--tide","--guidance","--constraint-guidance","--device","--threads","--model","--backend","--history","--history-frames"};
     else if(command=="connect")allowed={"--models","-o","--output","--tokens","--target-poses","--contacts-out","--contact-threshold","--joined","--offset","--from-clip","--to-clip","--threads"};
     else if(command=="mirror")allowed={"-o","--output","--clip"};
@@ -898,6 +929,8 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         if(command=="preview") {
             PreviewOptions options;options.tide=tide;options.capture=capture;options.gif=gif;options.frames=frames;
             auto clip=load_glb(path,clip_name,false);
+            // SOMA-77 previews as its exact SOMA-30 subset on bodies; --skeleton draws all 77.
+            if(is_soma77(clip)&&!skeleton)clip=soma77_to_30(clip);
             bool canonical=true;try{require_soma(clip);}catch(const std::exception&){canonical=false;}
             if(canonical)options.facing=kimodo_heading(clip,clip.frame(0));
             if(!character_file.empty()) {
@@ -925,7 +958,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         auto clip=skeleton?load_rig_glb(path):load_glb(path,clip_name,false);
         {
             bool canonical=true;try{require_soma(clip);}catch(const std::exception&){canonical=false;}
-            nlohmann::json info={{"name",clip.name},{"rig",canonical?"soma30":"custom"},{"joints",clip.joints.size()},{"frames",clip.frames()},{"fps",clip.fps},{"duration",clip.duration()}};
+            nlohmann::json info={{"name",clip.name},{"rig",canonical?"soma30":is_soma77(clip)?"soma77":"custom"},{"joints",clip.joints.size()},{"frames",clip.frames()},{"fps",clip.fps},{"duration",clip.duration()}};
             if(!skeleton) {
                 auto travel=root_travel(clip);
                 if(canonical) {
@@ -1010,10 +1043,14 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         auto plan=load_cleanup_plan(contacts_file);
         clip=load_glb(utf8path(pos[0]),clip_name,false);
         std::optional<RetargetMapping> mapping;if(!map_file.empty())mapping=load_mapping(map_file);
+        // A SOMA-77 clip is cleaned as its SOMA-30 subset; its own finger rotations are kept.
+        std::optional<Clip> full;
+        if(!mapping&&is_soma77(clip)) {full=clip;clip=soma77_to_30(clip);}
         auto source_recipe=source_metadata(utf8path(pos[0]));
         auto protected_frames=protected_recipe_frames(source_recipe,clip.frames());
         plan.protected_frames.insert(plan.protected_frames.end(),protected_frames.begin(),protected_frames.end());
         auto reports=cleanup_contacts(clip,plan,mapping?&*mapping:nullptr);
+        if(full)clip=soma30_to_77(clip,&*full);
         mirror_recipe={{"tool","tide-motion"},{"version",MOTION_VERSION},{"command","cleanup"},{"source",pos[0]},{"clip",clip_name},
             {"fps",clip.fps},{"frames",clip.frames()},{"solver","tide-two-bone-v1"},{"fadeFrames",plan.fade_frames},{"maxCorrectionMetres",plan.max_correction},{"maxJointCorrectionDegrees",plan.max_joint_correction},
             {"maxJointStepIncreaseDegrees",plan.max_joint_step_increase},{"maxAnkleStepIncreaseMetres",plan.max_ankle_step_increase},{"safeguards","tide-contact-bounds-v1"},{"protectedFrames",plan.protected_frames},
@@ -1030,10 +1067,12 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         }
     } else if(command=="mirror") {
         if(pos.size()!=1)throw std::runtime_error("mirror takes one SOMA-30 .glb clip");
-        clip=load_glb(utf8path(pos[0]),clip_name,true);
+        auto raw=load_glb(utf8path(pos[0]),clip_name,false);
+        const bool full=is_soma77(raw);
+        if(full)clip=mirror_soma77(raw);
+        else {clip=load_glb(utf8path(pos[0]),clip_name,true);mirror_soma(clip);}
         auto protected_frames=protected_recipe_frames(source_metadata(utf8path(pos[0])),clip.frames());
-        mirror_soma(clip);
-        mirror_recipe={{"tool","tide-motion"},{"version",MOTION_VERSION},{"command",command},{"source",pos[0]},{"clip",clip_name},{"rig","soma30"},{"fps",clip.fps},{"frames",clip.frames()},
+        mirror_recipe={{"tool","tide-motion"},{"version",MOTION_VERSION},{"command",command},{"source",pos[0]},{"clip",clip_name},{"rig",full?"soma77":"soma30"},{"fps",clip.fps},{"frames",clip.frames()},
             {"protectedFrames",protected_frames},{"plane","the first frame's sagittal plane (through its root, up and its facing)"}};
     } else if(command=="retarget") {
         if(pos.size()!=1||map_file.empty()||(!to_soma&&target_file.empty())||(to_soma&&!target_file.empty()))
@@ -1057,6 +1096,14 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
             if(device=="gpu")throw std::runtime_error("ARDY currently uses native ONNX CPU; use --device cpu or auto");
             if(std::find(flags.begin(),flags.end(),"--transition")!=flags.end())throw std::runtime_error("ARDY continues learned history; --transition applies to Kimodo");
         } else if(!history_file.empty()||std::find(flags.begin(),flags.end(),"--history-frames")!=flags.end())throw std::runtime_error("--history and --history-frames require --backend ardy");
+        if(!correction.empty()&&!correct)throw std::runtime_error("Use --correction none or --no-correction, not both");
+        if(correction.empty())correction=correct?"tide":"none";
+        correct=correction=="tide";
+        if(correction=="kimodo"&&backend!="kimodo")throw std::runtime_error("--correction kimodo uses Kimodo's own foot contacts; it needs --backend kimodo");
+        if(correction!="tide"&&std::find(flags.begin(),flags.end(),"--correction-frames")!=flags.end())throw std::runtime_error("--correction-frames goes with --correction tide");
+        if(dense_path&&backend!="kimodo")throw std::runtime_error("--dense-path follows Kimodo's root representation; it needs --backend kimodo");
+        if(dense_path&&path_specs.empty())throw std::runtime_error("--dense-path needs --path waypoints");
+        std::optional<RetargetMapping> pose_map;if(!pose_map_file.empty())pose_map=load_mapping(pose_map_file);
         if(pos.size()!=1||pos[0].empty())throw std::runtime_error("generate takes one quoted prompt");
         if(segments.size()>16)throw std::runtime_error("generate takes at most 16 prompts");
         for(const auto& s:segments)if(backend=="kimodo"&&s.second>10)throw std::runtime_error("Kimodo duration is out of range (0.2..10)");
@@ -1075,11 +1122,23 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
             return static_cast<size_t>(resolved);
         };
         MotionConditions conditions;
-        std::map<std::string,Clip> pose_files;
+        std::map<std::string,Clip> pose_files;std::set<std::string> mapped_sources;
         for(const auto& spec:pose_specs) {
             auto ref=pose_ref(spec.ref);
             auto& source=pose_files[ref.file];
-            if(source.joints.empty()) {source=load_glb(utf8path(ref.file),"",true);require_soma(source);}
+            if(source.joints.empty()) {
+                // SOMA-30 and SOMA-77 files are used directly; another mapped humanoid is
+                // retargeted to SOMA first (as retarget --to-soma) when --pose-map is given.
+                try {source=load_glb(utf8path(ref.file),"",true);}
+                catch(const std::exception& e) {
+                    if(!pose_map)throw std::runtime_error(ref.file+": "+e.what()+" (give --pose-map BONES.json to retarget a mapped humanoid pose source)");
+                    Clip target;target.joints=soma();for(const auto& joint:target.joints)target.poses.push_back(joint.rest);
+                    auto mapped=retarget(load_glb(utf8path(ref.file),"",false),target,*pose_map,true);
+                    if(mapped.discarded_translations)std::cerr<<"Note: "<<ref.file<<" has non-root translation animation that retargeting does not copy.\n";
+                    source=std::move(mapped.clip);mapped_sources.insert(ref.file);
+                }
+                require_soma(source);
+            }
             long wanted=ref.frame?*ref.frame:(spec.kind=="start-pose"?-1:0);
             long index=wanted<0?static_cast<long>(source.frames())+wanted:wanted;
             if(index<0||index>=static_cast<long>(source.frames()))throw std::runtime_error(ref.file+" has no frame "+std::to_string(wanted)+" ("+std::to_string(source.frames())+" frames)");
@@ -1088,6 +1147,13 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
             conditions.poses.push_back(std::move(pose));
         }
         for(auto [point,frame]:path_specs) {point.frame=resolve(frame,"path frame");conditions.path.push_back(point);}
+        const auto waypoints=conditions.path;
+        if(dense_path) {
+            // Frame 0 of the dense path is where the output starts: a start pose's hips, else the origin.
+            Vec3 start{};for(const auto& pose:conditions.poses)if(pose.frame==0)start=pose.pose[0].p;
+            for(const auto& point:waypoints)if(point.frame==0)start={point.x,0,point.z};
+            densify_path(conditions,start);
+        }
         if(std::find(flags.begin(),flags.end(),"--end-at")!=flags.end()&&
            std::none_of(conditions.poses.begin(),conditions.poses.end(),[](const auto& p){return p.kind=="end-pose";}))
             throw std::runtime_error("--end-at requires --end-pose");
@@ -1138,7 +1204,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         clip=Clip{};generate_recipe=nlohmann::json::object();
         if(variants>1)std::cerr<<"Generating variant "<<v+1<<"/"<<variants<<" (seed "<<used_seed<<")...\n";
         else std::cerr<<"Generating motion...\n";
-        auto effective=conditions;bool floating=false;
+        auto effective=conditions;bool floating=false;std::vector<float> contacts;
         if(backend=="ardy") {
             std::vector<ArdyPrompt> prompts;for(const auto& p:parts)prompts.push_back({p.prompt,p.frames});
             clip=context->ardy->generate(prompts,ArdyOptions{steps,threads,history_frames,used_seed,guidance.text,guidance.constraint},conditions,imported?&*imported:nullptr);
@@ -1172,6 +1238,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         }
         auto result=generate_motion(models,context,parts,transition,steps,used_seed,guidance,floating?&placed_native:condition?&native:nullptr);
         if(result.joints!=30||result.local_rotations_xyzw.size()!=static_cast<size_t>(result.frames)*30*4||result.root_positions.size()!=static_cast<size_t>(result.frames)*3)throw std::runtime_error("Kimodo returned an unexpected SOMA output layout");
+        contacts=std::move(result.foot_contacts);
         clip.joints=soma();clip.name=outputs[output_index].stem().string();
         // Constraints were expressed relative to the frame-0 origin; return to their world.
         Vec3 origin=condition?condition->origin:Vec3{};
@@ -1193,7 +1260,14 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
                 generate_recipe["inferredPoseLocations"].push_back({{"frame",effective.poses[i].frame},{"x",effective.poses[i].pose[0].p.x},{"z",effective.poses[i].pose[0].p.z}});
         }
         generate_recipe["fitPoses"]=fit_poses;
-        generate_recipe["placement"]=placement_name;generate_recipe["corrected"]=correct&&!conditions.poses.empty();
+        generate_recipe["placement"]=placement_name;generate_recipe["corrected"]=correction=="kimodo"||(correct&&!conditions.poses.empty());
+        generate_recipe["correction"]=correction;generate_recipe["rig"]=rig;
+        if(!contacts.empty()) {
+            // Kimodo's own foot contacts (decoded, thresholded at 0.5), as [start, end) frames.
+            nlohmann::json intervals;const char* names[4]={"leftFoot","leftToe","rightFoot","rightToe"};
+            for(size_t k=0;k<4;++k) {intervals[names[k]]=nlohmann::json::array();for(auto [first,end]:contact_intervals(contacts,k))intervals[names[k]].push_back({first,end});}
+            generate_recipe["footContacts"]=intervals;
+        }
         generate_recipe["correctionFrames"]=correction_frames;generate_recipe["inPlace"]=in_place;
         generate_recipe["guidance"]=guidance.text;generate_recipe["constraintGuidance"]=guidance.constraint;
         if(backend=="kimodo") {
@@ -1214,17 +1288,39 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
                 {"modelError",{{"rootMetres",round(e.root,1e-4f)},{"positionMeanMetres",round(e.position_mean,1e-4f)},{"positionMaxMetres",round(e.position_max,1e-4f)},{"rotationMeanDegrees",round(e.rotation_mean,0.01f)},{"rotationMaxDegrees",round(e.rotation_max,0.01f)},{"rotationMaxJoint",e.rotation_max_joint}}}};
             if(pose.effectors)item["effectors"]=effector_list(pose.effectors);
             generate_recipe["constraints"].push_back(item);
-            std::cerr<<pose.kind<<(pose.effectors?" "+effector_list(pose.effectors):std::string())<<" at frame "<<pose.frame<<(pose.anchored?"":" (free on the ground)")<<": root "<<round(e.root*100,0.1f)<<" cm; "<<(pose.effectors?"effector":"joint")<<" positions mean "<<round(e.position_mean*100,0.1f)<<" / max "<<round(e.position_max*100,0.1f)<<" cm; rotations mean "<<round(e.rotation_mean,0.1f)<<" / max "<<round(e.rotation_max,0.1f)<<" degrees"<<(correct&&!pose.effectors?"; corrected to exact":"")<<"\n";
+            std::cerr<<pose.kind<<(pose.effectors?" "+effector_list(pose.effectors):std::string())<<" at frame "<<pose.frame<<(pose.anchored?"":" (free on the ground)")<<": root "<<round(e.root*100,0.1f)<<" cm; "<<(pose.effectors?"effector":"joint")<<" positions mean "<<round(e.position_mean*100,0.1f)<<" / max "<<round(e.position_max*100,0.1f)<<" cm; rotations mean "<<round(e.rotation_mean,0.1f)<<" / max "<<round(e.rotation_max,0.1f)<<" degrees"<<(correct&&!pose.effectors?"; corrected to exact":correction=="kimodo"?"; Kimodo correction follows":"")<<"\n";
         }
-        if(correct) {
-            correct_poses(clip,conditions,correction_frames);
+        if(correction=="kimodo") {
+            auto report=correct_kimodo(clip,conditions,contacts);
+            generate_recipe["kimodoCorrection"]={{"source","nv-tlabs/kimodo e1c219c99b4b94ba48be1fb6a1cbc64ecee4c954 MotionCorrection"},{"rootMarginMetres",0.04},{"contactThreshold",0.5},
+                {"contactFrames",{{"leftFoot",report.contact_frames[0]},{"leftToe",report.contact_frames[1]},{"rightFoot",report.contact_frames[2]},{"rightToe",report.contact_frames[3]}}},
+                {"effectorIkFrames",report.effector_frames},{"ankleIkFrames",report.ankle_frames},{"toeIkFrames",report.toe_frames},{"milliseconds",report.milliseconds}};
+            std::cerr<<"Kimodo correction: "<<report.ankle_frames<<" ankle and "<<report.toe_frames<<" toe contact frames, "<<report.effector_frames<<" effector frames ("<<round(static_cast<float>(report.milliseconds),0.1f)<<" ms)\n";
+        }
+        if(correct||correction=="kimodo") {
+            if(correct)correct_poses(clip,conditions,correction_frames);
             size_t index=0;
             for(const auto& pose:conditions.poses) {
                 auto e=constraint_error(clip,pose);
                 generate_recipe["constraints"][index++]["error"]={{"rootMetres",round(e.root,1e-4f)},{"positionMaxMetres",round(e.position_max,1e-4f)},{"rotationMaxDegrees",round(e.rotation_max,0.01f)}};
             }
         }
-        for(const auto& point:conditions.path) {
+        if(dense_path) {
+            // Measured as the representation defines it: the output's smooth root against
+            // every dense sample, and the hips for reference.
+            auto smooth=smooth_root_of(clip);double sm=0,sx=0,hm=0,hx=0;
+            for(const auto& point:conditions.path) {
+                double d=std::hypot(smooth[point.frame][0]-point.x,smooth[point.frame][1]-point.z),h=path_error(clip,point);
+                sm+=d;sx=std::max(sx,d);hm+=h;hx=std::max(hx,h);
+            }
+            const double count=static_cast<double>(conditions.path.size());
+            generate_recipe["densePath"]={{"firstFrame",conditions.path.front().frame},{"lastFrame",conditions.path.back().frame},{"frames",conditions.path.size()},{"smoothed",waypoints.size()+(waypoints.front().frame==0?0:1)>=3},
+                {"smoothRootErrorMeanMetres",round(static_cast<float>(sm/count),1e-4f)},{"smoothRootErrorMaxMetres",round(static_cast<float>(sx),1e-4f)},
+                {"hipsErrorMeanMetres",round(static_cast<float>(hm/count),1e-4f)},{"hipsErrorMaxMetres",round(static_cast<float>(hx),1e-4f)}};
+            std::cerr<<"dense path frames "<<conditions.path.front().frame<<".."<<conditions.path.back().frame<<": smooth root mean "<<round(static_cast<float>(sm/count*100),0.1f)<<" / max "<<round(static_cast<float>(sx*100),0.1f)<<" cm from the path\n";
+        }
+        if(!pose_map_file.empty()) {std::ifstream input(pose_map_file);nlohmann::json m;input>>m;generate_recipe["poseMap"]=m;generate_recipe["mappedPoseSources"]=mapped_sources;}
+        for(const auto& point:dense_path?waypoints:conditions.path) {
             float e=path_error(clip,point);
             nlohmann::json item={{"kind","path"},{"frame",point.frame},{"x",point.x},{"z",point.z},{"error",{{"hipsGroundMetres",round(e,1e-4f)}}}};
             if(point.has_heading)item["yaw"]=point.heading;
@@ -1241,7 +1337,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
             generate_recipe["selection"]={{"firstSeed",seed},{"attemptLimit",attempts},{"attempted",searched}};
             if(wanted_footsteps>=0)generate_recipe["selection"]["requestedFootsteps"]=wanted_footsteps;
         }
-        auto recipe=recipe_for(clip,used_seed);
+        auto recipe=recipe_for(clip,used_seed);recipe["rig"]=rig;
         double requested=0;for(const auto& segment:segments)requested+=segment.second;
         recipe["requestedDuration"]=requested;
         for(const auto& item:generate_recipe.items())recipe[item.key()]=item.value();
@@ -1249,7 +1345,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
             if(pose_score<best_score){best_score=pose_score;best_clip=std::move(clip);best_recipe=std::move(recipe);}
             continue;
         }
-        finish(clip,outputs[output_index],recipe);
+        finish(rig=="soma77"?soma30_to_77(clip):clip,outputs[output_index],recipe);
         if(variants>1) {made.push_back(clip);labels.push_back("seed "+std::to_string(used_seed));}
         if(selecting)return 0;
         }
@@ -1258,7 +1354,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
             best_recipe["selection"]["rankBy"]="worstPoseMeanRotationDegrees";
             best_recipe["selection"]["scoreDegrees"]=best_score;
             std::cerr<<"Selected seed "<<best_recipe["seed"]<<" with worst pose mean rotation "<<best_score<<" degrees from "<<attempts<<" attempts\n";
-            finish(*best_clip,output,best_recipe);return 0;
+            finish(rig=="soma77"?soma30_to_77(*best_clip):*best_clip,output,best_recipe);return 0;
         }
         if(selecting)throw std::runtime_error("No candidate matched --footsteps after "+std::to_string(attempts)+" attempts; no output saved. Counts: "+searched.dump());
         if(variants>1) {

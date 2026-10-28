@@ -1,0 +1,309 @@
+diff --git a/include/kimodo/kimodo.hpp b/include/kimodo/kimodo.hpp
+index 037e6ba..a9cd3ac 100644
+--- a/include/kimodo/kimodo.hpp
++++ b/include/kimodo/kimodo.hpp
+@@ -20,6 +20,20 @@ struct motion_data {
+     unsigned joints = 0;
+     std::vector<float> local_rotations_xyzw;
+     std::vector<float> root_positions;
++    // Tide Motion patch: the model's own unnormalized foot-contact channels,
++    // [frames, 4] in skeleton foot order (SOMA: LeftFoot, LeftToeBase, RightFoot,
++    // RightToeBase), as upstream motion_rep.inverse returns before thresholding.
++    std::vector<float> foot_contacts;
++};
++
++// Tide Motion patch: the load-time choices kimodo_runtime_options carries.
++// automatic keeps the pinned environment behaviour (KIMODO_BACKEND=cpu forces the
++// CPU, otherwise the first Vulkan device); cpu never touches Vulkan; vulkan fails
++// rather than falling back. threads 0 keeps KIMODO_THREADS or the hardware count.
++struct runtime_options {
++    enum class device_kind { automatic, cpu, vulkan };
++    device_kind device = device_kind::automatic;
++    unsigned threads = 0;
+ };
+ 
+ struct prompt_segment {
+@@ -43,6 +57,8 @@ class KIMODO_API model {
+ public:
+     static std::expected<std::unique_ptr<model>, std::string> load(
+         std::string_view motion_gguf, std::string_view text_bundle = {});
++    static std::expected<std::unique_ptr<model>, std::string> load(
++        std::string_view motion_gguf, std::string_view text_bundle, const runtime_options &options);
+     std::expected<motion_data, std::string> generate_embedding(
+         const std::array<float, embedding_width> &embedding,
+         unsigned frames, unsigned steps, std::uint64_t seed,
+diff --git a/src/capi.cpp b/src/capi.cpp
+index 73ec040..eae7de0 100644
+--- a/src/capi.cpp
++++ b/src/capi.cpp
+@@ -28,7 +28,19 @@ kimodo_model *kimodo_model_load(const char *motion, const char *text, const char
+         if (!motion || !*motion) { set_error(nullptr, err, err_len, "motion_gguf is required"); return nullptr; }
+         if (options && options->size != sizeof(*options)) { set_error(nullptr, err, err_len, "invalid kimodo_runtime_options"); return nullptr; }
+         if (adapter && *adapter) { set_error(nullptr, err, err_len, "separate text adapters are unsupported; convert a merged native text bundle"); return nullptr; }
+-        auto loaded = kimodo::model::load(motion, text ? text : "");
++        // Tide Motion patch: honour the runtime options instead of ignoring them.
++        kimodo::runtime_options runtime;
++        if (options) {
++            if (options->backend_dir && *options->backend_dir) { set_error(nullptr, err, err_len, "backend_dir is unsupported: backends are linked statically"); return nullptr; }
++            switch (options->device) {
++            case KIMODO_DEVICE_AUTO: runtime.device = kimodo::runtime_options::device_kind::automatic; break;
++            case KIMODO_DEVICE_CPU: runtime.device = kimodo::runtime_options::device_kind::cpu; break;
++            case KIMODO_DEVICE_VULKAN: runtime.device = kimodo::runtime_options::device_kind::vulkan; break;
++            default: set_error(nullptr, err, err_len, "invalid kimodo_runtime_options device"); return nullptr;
++            }
++            runtime.threads = options->threads;
++        }
++        auto loaded = kimodo::model::load(motion, text ? text : "", runtime);
+         if (!loaded) { set_error(nullptr, err, err_len, loaded.error()); return nullptr; }
+         return new kimodo_model{std::move(*loaded), {}};
+     } catch (const std::exception &e) { set_error(nullptr, err, err_len, e.what()); return nullptr; }
+diff --git a/src/ggml_weights.cpp b/src/ggml_weights.cpp
+index 1b5594d..7a76274 100644
+--- a/src/ggml_weights.cpp
++++ b/src/ggml_weights.cpp
+@@ -40,12 +40,13 @@ void configure_vulkan_f32_parity() noexcept {
+ // default, but makes a full diffusion sample use only a small fraction of a
+ // typical workstation.  Honour an explicit cap for predictable deployment
+ // and otherwise use the machine's advertised concurrency.
+-int cpu_thread_count() noexcept {
++int cpu_thread_count(unsigned requested_threads) noexcept {
+     constexpr unsigned fallback = 4;
+     unsigned threads = std::thread::hardware_concurrency();
+     if (threads == 0) threads = fallback;
+ 
+-    if (const char *value = std::getenv("KIMODO_THREADS")) {
++    if (requested_threads) threads = requested_threads;
++    else if (const char *value = std::getenv("KIMODO_THREADS")) {
+         char *end = nullptr;
+         errno = 0;
+         const long requested = std::strtol(value, &end, 10);
+@@ -59,7 +60,7 @@ int cpu_thread_count() noexcept {
+ 
+ } // namespace
+ 
+-std::expected<std::unique_ptr<ggml_motion_weights>, std::string> ggml_motion_weights::load(std::string_view path) {
++std::expected<std::unique_ptr<ggml_motion_weights>, std::string> ggml_motion_weights::load(std::string_view path, const runtime_options &options) {
+     const auto load_started = std::chrono::steady_clock::now();
+     auto checked = read_gguf_header(path);
+     if (!checked) return std::unexpected(checked.error());
+@@ -77,19 +78,26 @@ std::expected<std::unique_ptr<ggml_motion_weights>, std::string> ggml_motion_wei
+     // Retain a deterministic CPU escape hatch for parity triage.  It is not
+     // a performance mode; a captured fixture can establish whether a drift
+     // belongs to the GGML graph or specifically to Vulkan.
+-    const bool force_cpu = [] {
++    // Explicit runtime options (Tide Motion patch) replace the environment choice.
++    const bool force_cpu = options.device == runtime_options::device_kind::cpu ||
++        (options.device == runtime_options::device_kind::automatic && [] {
+         const char *value = std::getenv("KIMODO_BACKEND");
+         return value && std::string_view(value) == "cpu";
+-    }();
++    }());
+     if (!force_cpu) {
+         configure_vulkan_f32_parity();
+         if (ggml_backend_vk_get_device_count() > 0) result->backend_ = ggml_backend_vk_init(0);
++        if (!result->backend_ && options.device == runtime_options::device_kind::vulkan)
++            return std::unexpected("Vulkan was requested but no Vulkan device initialized");
+     }
++#else
++    if (options.device == runtime_options::device_kind::vulkan)
++        return std::unexpected("Vulkan was requested but this build has no Vulkan backend");
+ #endif
+     if (!result->backend_) {
+         result->backend_ = ggml_backend_cpu_init();
+         if (!result->backend_) return std::unexpected("GGML CPU backend initialization failed");
+-        ggml_backend_cpu_set_n_threads(result->backend_, cpu_thread_count());
++        ggml_backend_cpu_set_n_threads(result->backend_, cpu_thread_count(options.threads));
+     }
+     result->buffer_ = ggml_backend_alloc_ctx_tensors(result->context_, result->backend_);
+     if (!result->buffer_) return std::unexpected("GGML motion weight allocation failed");
+diff --git a/src/ggml_weights.hpp b/src/ggml_weights.hpp
+index 464d8af..9395e41 100644
+--- a/src/ggml_weights.hpp
++++ b/src/ggml_weights.hpp
+@@ -8,6 +8,8 @@
+ #include <unordered_map>
+ #include <vector>
+ 
++#include <kimodo/kimodo.hpp>
++
+ struct ggml_context;
+ struct gguf_context;
+ struct ggml_backend;
+@@ -24,7 +26,7 @@ struct motion_graph_cache;
+ // the checked parser has accepted their Kimodo metadata and tensor directory.
+ class ggml_motion_weights {
+ public:
+-    static std::expected<std::unique_ptr<ggml_motion_weights>, std::string> load(std::string_view path);
++    static std::expected<std::unique_ptr<ggml_motion_weights>, std::string> load(std::string_view path, const runtime_options &options = {});
+     ~ggml_motion_weights();
+     ggml_motion_weights(const ggml_motion_weights &) = delete;
+     ggml_motion_weights &operator=(const ggml_motion_weights &) = delete;
+diff --git a/src/llm_text_encoder.cpp b/src/llm_text_encoder.cpp
+index 05096a1..9d2c756 100644
+--- a/src/llm_text_encoder.cpp
++++ b/src/llm_text_encoder.cpp
+@@ -37,7 +37,9 @@ namespace kimodo::detail {
+ namespace {
+ constexpr int64_t hidden = 4096, heads = 32, kv_heads = 8, head_dim = 128;
+ 
+-bool use_vulkan() {
++bool use_vulkan(const runtime_options &options) {
++    if (options.device != runtime_options::device_kind::automatic)
++        return options.device == runtime_options::device_kind::vulkan;
+     const char *choice = std::getenv("KIMODO_BACKEND");
+     return !choice || std::string_view(choice) != "cpu";
+ }
+@@ -69,9 +71,10 @@ bool packed_lora_enabled() noexcept {
+     return !value || std::string_view(value) != "0";
+ }
+ 
+-int cpu_thread_count() noexcept {
++int cpu_thread_count(unsigned requested_threads) noexcept {
+     unsigned threads = std::max(1U, std::thread::hardware_concurrency());
+-    if (const char *value = std::getenv("KIMODO_THREADS")) {
++    if (requested_threads) threads = requested_threads;
++    else if (const char *value = std::getenv("KIMODO_THREADS")) {
+         char *end = nullptr;
+         errno = 0;
+         const long requested = std::strtol(value, &end, 10);
+@@ -441,7 +444,7 @@ struct llm_text_encoder::impl {
+ 
+ llm_text_encoder::~llm_text_encoder() = default;
+ 
+-std::expected<std::unique_ptr<llm_text_encoder>, std::string> llm_text_encoder::load(std::string_view source) try {
++std::expected<std::unique_ptr<llm_text_encoder>, std::string> llm_text_encoder::load(std::string_view source, const runtime_options &options) try {
+     const auto path = std::filesystem::path(source);
+     const bool component_bundle = std::filesystem::is_directory(path);
+     const bool monolithic = std::filesystem::is_regular_file(path) && path.extension() == ".gguf";
+@@ -466,12 +469,17 @@ std::expected<std::unique_ptr<llm_text_encoder>, std::string> llm_text_encoder::
+     auto result = std::unique_ptr<llm_text_encoder>(new llm_text_encoder);
+     result->impl_ = std::make_unique<impl>();
+ #if defined(KIMODO_HAVE_GGML_VULKAN)
+-    if (use_vulkan() && ggml_backend_vk_get_device_count()) result->impl_->backend = ggml_backend_vk_init(0);
++    if (use_vulkan(options) && ggml_backend_vk_get_device_count()) result->impl_->backend = ggml_backend_vk_init(0);
++    if (!result->impl_->backend && options.device == runtime_options::device_kind::vulkan)
++        return std::unexpected("Vulkan was requested but no Vulkan device initialized");
++#else
++    if (options.device == runtime_options::device_kind::vulkan)
++        return std::unexpected("Vulkan was requested but this build has no Vulkan backend");
+ #endif
+     if (!result->impl_->backend) {
+         result->impl_->backend = ggml_backend_cpu_init();
+         if (!result->impl_->backend) return std::unexpected("cannot initialize text backend");
+-        ggml_backend_cpu_set_n_threads(result->impl_->backend, cpu_thread_count());
++        ggml_backend_cpu_set_n_threads(result->impl_->backend, cpu_thread_count(options.threads));
+     }
+     auto tokenizer = llm_tokenizer::load(tokenizer_path.string());
+     if (!tokenizer) return std::unexpected(tokenizer.error());
+diff --git a/src/llm_text_encoder.hpp b/src/llm_text_encoder.hpp
+index 7867331..789d153 100644
+--- a/src/llm_text_encoder.hpp
++++ b/src/llm_text_encoder.hpp
+@@ -6,6 +6,8 @@
+ #include <string>
+ #include <string_view>
+ 
++#include <kimodo/kimodo.hpp>
++
+ namespace kimodo::detail {
+ 
+ class llm_text_encoder {
+@@ -15,7 +17,7 @@ public:
+     // default. KIMODO_TEXT_LAYER_CHUNK=32 keeps the complete encoder resident
+     // while executing bounded GGML graphs. KIMODO_TEXT_RESIDENT_LIMIT_MIB can
+     // impose a VRAM-safe cap.
+-    static std::expected<std::unique_ptr<llm_text_encoder>, std::string> load(std::string_view source);
++    static std::expected<std::unique_ptr<llm_text_encoder>, std::string> load(std::string_view source, const runtime_options &options = {});
+     std::expected<std::array<float, 4096>, std::string> encode(std::string_view utf8_prompt) const;
+     ~llm_text_encoder();
+     llm_text_encoder(const llm_text_encoder &) = delete;
+diff --git a/src/model.cpp b/src/model.cpp
+index 8353f25..3185798 100644
+--- a/src/model.cpp
++++ b/src/model.cpp
+@@ -17,10 +17,28 @@
+ #include <random>
+ 
+ namespace kimodo {
++#ifdef KIMODO_HAVE_GGML
++namespace {
++// The last four body features are the foot contacts; undo the body normalization.
++std::vector<float> foot_contacts(std::span<const float> normalized, size_t frames, const detail::skeleton_spec &skeleton,
++                                 std::span<const float> body_mean, std::span<const float> body_std) {
++    const size_t motion_dim = skeleton.motion_dim(), body_dim = skeleton.body_dim();
++    std::vector<float> out(frames * 4);
++    if (normalized.size() != frames * motion_dim || body_mean.size() != body_dim || body_std.size() != body_dim) return {};
++    for (size_t f = 0; f < frames; ++f)
++        for (size_t k = 0; k < 4; ++k) {
++            const size_t d = body_dim - 4 + k;
++            out[f * 4 + k] = normalized[f * motion_dim + 5 + d] * std::sqrt(body_std[d] * body_std[d] + 1.e-5F) + body_mean[d];
++        }
++    return out;
++}
++}
++#endif
+ struct model::impl {
+     detail::gguf_file motion;
+     std::string motion_path;
+     const detail::skeleton_spec *skeleton = nullptr;
++    runtime_options options;
+ #ifdef KIMODO_HAVE_GGML
+     mutable std::unique_ptr<detail::ggml_motion_weights> weights;
+     std::unique_ptr<detail::llm_text_encoder> text;
+@@ -31,6 +49,10 @@ model::model(std::unique_ptr<impl> state) : impl_(std::move(state)) {}
+ model::~model() = default;
+ 
+ std::expected<std::unique_ptr<model>, std::string> model::load(std::string_view motion_path, std::string_view text_path) {
++    return load(motion_path, text_path, runtime_options{});
++}
++
++std::expected<std::unique_ptr<model>, std::string> model::load(std::string_view motion_path, std::string_view text_path, const runtime_options &options) {
+     auto file = detail::read_gguf_header(motion_path);
+     if (!file) return std::unexpected(file.error());
+     if (auto valid = detail::validate_motion_gguf(*file); !valid) return std::unexpected(valid.error());
+@@ -38,9 +60,10 @@ std::expected<std::unique_ptr<model>, std::string> model::load(std::string_view
+     state->motion = std::move(*file);
+     state->motion_path = std::string(motion_path);
+     state->skeleton = detail::find_skeleton(state->motion.strings.at("kimodo.skeleton"));
++    state->options = options;
+ #ifdef KIMODO_HAVE_GGML
+     if (!text_path.empty()) {
+-        auto text = detail::llm_text_encoder::load(text_path);
++        auto text = detail::llm_text_encoder::load(text_path, options);
+         if (!text) return std::unexpected(text.error());
+         state->text = std::move(*text);
+     }
+@@ -79,7 +102,7 @@ std::expected<motion_data, std::string> model::generate_embedding(
+     // session; no separate unchecked tensor loader exists in the runtime.
+     if (!impl_->weights) {
+         const auto weights_started = std::chrono::steady_clock::now();
+-        auto loaded = detail::ggml_motion_weights::load(impl_->motion_path);
++        auto loaded = detail::ggml_motion_weights::load(impl_->motion_path, impl_->options);
+         if (!loaded) return std::unexpected(loaded.error());
+         impl_->weights = std::move(*loaded);
+         if (detail::profile_enabled())
+@@ -107,6 +130,7 @@ std::expected<motion_data, std::string> model::generate_embedding(
+     result.frames=frames; result.joints=static_cast<unsigned>(impl_->skeleton->joints());
+     result.local_rotations_xyzw=std::move(decoded->local_xyzw);
+     result.root_positions=std::move(decoded->root_positions);
++    result.foot_contacts=foot_contacts(*sampled,frames,*impl_->skeleton,*body_mean,*body_std);
+     if (detail::profile_enabled())
+         std::fprintf(stderr, "profile motion.generate sampling_ms=%.3f decode_ms=%.3f total_ms=%.3f\n",
+                      sampling_ms, detail::profile_elapsed_ms(decode_started),
+@@ -160,7 +184,7 @@ std::expected<motion_data, std::string> model::generate_text_conditioned(
+     // backend applies its process-wide Vulkan parity flags. This preserves
+     // cooperative-matrix text kernels in persistent sequence workers.
+     if (!impl_->weights) {
+-        auto loaded = detail::ggml_motion_weights::load(impl_->motion_path);
++        auto loaded = detail::ggml_motion_weights::load(impl_->motion_path, impl_->options);
+         if (!loaded) return std::unexpected(loaded.error());
+         impl_->weights = std::move(*loaded);
+     }
+@@ -193,6 +217,7 @@ std::expected<motion_data, std::string> model::generate_text_conditioned(
+     if (!decoded) return std::unexpected(decoded.error());
+     motion_data result; result.frames=frames; result.joints=static_cast<unsigned>(impl_->skeleton->joints());
+     result.local_rotations_xyzw=std::move(decoded->local_xyzw); result.root_positions=std::move(decoded->root_positions);
++    result.foot_contacts=foot_contacts(normalized,frames,*impl_->skeleton,*bm,*bs);
+     return result;
+ #else
+     (void) segments; (void) transition_frames; (void) steps; (void) seed; (void) text_cfg; (void) constraint_cfg; (void) condition;

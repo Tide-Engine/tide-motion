@@ -85,6 +85,7 @@ bool place_constraints(MotionConditions& conditions,Placement placement) {
     Clip rig;rig.joints=soma();
     for(const auto& point:conditions.path) {
         if(!path_frames.insert(point.frame).second)throw std::runtime_error("Two path points share output frame "+std::to_string(point.frame));
+        if(point.interpolated)continue;
         for(auto& pose:conditions.poses)if(pose.frame==point.frame) {
             const float turn=point.has_heading?point.heading*std::numbers::pi_v<float>/180-kimodo_heading(rig,pose.pose):0;
             pose.pose[0].q=normalized(yaw(turn)*pose.pose[0].q);
@@ -126,7 +127,14 @@ KimodoCondition build_condition(const MotionConditions& conditions,size_t frames
         if(point.has_heading)out.first_heading=point.heading*std::numbers::pi_v<float>/180;
     }
     for(const auto& pose:conditions.poses) {
-        auto row=encode_kimodo(rig,pose.pose);row[0]-=out.origin.x;row[2]-=out.origin.z;
+        auto row=encode_kimodo(rig,pose.pose);
+        // On a dense path upstream passes the path sample as the pose's smooth root, so
+        // its root-relative positions are measured from that sample, not the hips.
+        for(const auto& point:conditions.path)if(point.interpolated&&point.frame==pose.frame) {
+            const float dx=row[0]-point.x,dz=row[2]-point.z;row[0]=point.x;row[2]=point.z;
+            for(size_t j=0;j<J;++j) {row[positions+3*j]+=dx;row[positions+3*j+2]+=dz;}
+        }
+        row[0]-=out.origin.x;row[2]-=out.origin.z;
         float* observed=out.observed.data()+pose.frame*kimodo_features;float* mask=out.mask.data()+pose.frame*kimodo_features;
         auto keep=[&](size_t first,size_t count) {for(size_t d=first;d<first+count;++d){observed[d]=row[d];mask[d]=1;}};
         // Every set constrains the root height and heading, and an anchored one its ground
@@ -213,4 +221,121 @@ void correct_poses(Clip& result,const MotionConditions& conditions,int window) {
         }
     }
 }
+namespace {
+// Solves M x = r in place for a symmetric positive definite pentadiagonal M given by
+// its diagonal d and first/second superdiagonals e/f (LDL^T of bandwidth two).
+void solve_pentadiagonal(std::vector<double> d,const std::vector<double>& e,const std::vector<double>& f,std::vector<double>& r) {
+    const size_t n=d.size();
+    std::vector<double> l1(n,0),l2(n,0); // l1[i] = L(i+1,i), l2[i] = L(i+2,i)
+    for(size_t i=0;i<n;++i) {
+        if(i>=2)d[i]-=l2[i-2]*l2[i-2]*d[i-2];
+        if(i>=1)d[i]-=l1[i-1]*l1[i-1]*d[i-1];
+        if(!(d[i]>0))throw std::runtime_error("Root path smoothing system is not positive definite");
+        if(i+1<n) {double v=e[i];if(i>=1)v-=l2[i-1]*d[i-1]*l1[i-1];l1[i]=v/d[i];}
+        if(i+2<n)l2[i]=f[i]/d[i];
+    }
+    for(size_t i=0;i<n;++i) {if(i>=1)r[i]-=l1[i-1]*r[i-1];if(i>=2)r[i]-=l2[i-2]*r[i-2];}
+    for(size_t i=0;i<n;++i)r[i]/=d[i];
+    for(size_t i=n;i-->0;) {if(i+1<n)r[i]-=l1[i]*r[i+1];if(i+2<n)r[i]-=l2[i]*r[i+2];}
 }
+// Upstream TrajectorySmoother with pos_weight 0 and no loop: one margin per sample.
+void admm_smooth(const std::vector<std::array<double,2>>& target,std::vector<std::array<double,2>>& x,double margin) {
+    const size_t n=target.size();
+    // M = A^T A + rho I, A the interior second differences [-1, 2, -1].
+    std::vector<double> d(n,0),e(n-1,0),f(n-2,0);
+    for(size_t i=1;i+1<n;++i) {
+        const size_t c[3]={i-1,i,i+1};const double w[3]={-1,2,-1};
+        for(int a=0;a<3;++a)for(int b=0;b<3;++b) {
+            size_t r=c[a],q=c[b];if(q<r)continue;
+            double v=w[a]*w[b];
+            if(q==r)d[r]+=v;else if(q==r+1)e[r]+=v;else f[r]+=v;
+        }
+    }
+    double diag=0;for(double v:d)diag=std::max(diag,std::abs(v));
+    const double rho=0.25*std::sqrt(diag);
+    for(double& v:d)v+=rho;
+    std::vector<std::array<double,2>> z(n,{0,0}),u(n,{0,0});
+    std::vector<double> rx(n),rz(n);
+    for(int it=0;it<500;++it) {
+        for(size_t i=0;i<n;++i) {
+            double a=x[i][0]+u[i][0]-target[i][0],b=x[i][1]+u[i][1]-target[i][1],len=std::hypot(a,b);
+            if(len>margin) {a*=margin/len;b*=margin/len;}
+            z[i]={a+target[i][0],b+target[i][1]};
+        }
+        for(size_t i=0;i<n;++i)for(int k=0;k<2;++k)u[i][k]+=1.8*(x[i][k]-z[i][k]);
+        for(size_t i=0;i<n;++i) {rx[i]=rho*(z[i][0]-u[i][0]);rz[i]=rho*(z[i][1]-u[i][1]);}
+        solve_pentadiagonal(d,e,f,rx);solve_pentadiagonal(d,e,f,rz);
+        for(size_t i=0;i<n;++i)x[i]={rx[i],rz[i]};
+    }
+}
+}
+std::vector<std::array<double,2>> smooth_root_path(std::span<const std::array<double,2>> x,double margin) {
+    const size_t n=x.size();
+    std::vector<std::array<double,2>> out(x.begin(),x.end());
+    if(n<5)return out;
+    std::array<double,2> mean{0,0};for(const auto& p:x) {mean[0]+=p[0];mean[1]+=p[1];}
+    mean[0]/=static_cast<double>(n);mean[1]/=static_cast<double>(n);
+    out.assign(n,mean);
+    // Multigrid as upstream: coarse to fine, each level starting from the previous one.
+    size_t levels=static_cast<size_t>(std::floor(std::log2(static_cast<double>(n))));
+    levels=std::max<size_t>(levels>4?levels-4:0,1);
+    size_t step=size_t{1}<<levels;
+    while(true) {
+        std::vector<size_t> at;for(size_t i=0;i<n;i+=step)at.push_back(i);
+        std::vector<std::array<double,2>> target,level;
+        for(size_t i:at) {target.push_back(x[i]);level.push_back(out[i]);}
+        admm_smooth(target,level,margin);
+        for(size_t k=0;k<at.size();++k)out[at[k]]=level[k];
+        // Fill the next level by averaging neighbours, extrapolating the last sample when
+        // needed. At step 1 upstream's slice is the whole signal (next step 0), so this
+        // also averages the finished result with its next frame; kept for parity.
+        const size_t next=step/2;
+        std::vector<size_t> inter;for(size_t i=next;i<n;i+=step)inter.push_back(i);
+        size_t count=inter.size();
+        if(count==at.size()) {
+            auto a=out[at[at.size()-1]],b=out[at[at.size()-2]];
+            out[inter.back()]={a[0]+(a[0]-b[0])/2,a[1]+(a[1]-b[1])/2};
+            --count;
+        }
+        std::vector<std::array<double,2>> mid(count);
+        for(size_t k=0;k<count;++k)mid[k]={(out[at[k]][0]+out[at[k+1]][0])/2,(out[at[k]][1]+out[at[k+1]][1])/2};
+        for(size_t k=0;k<count;++k)out[inter[k]]=mid[k];
+        if(step==1)break;
+        step/=2;
+    }
+    return out;
+}
+std::vector<std::array<double,2>> smooth_root_of(const Clip& c) {
+    std::vector<std::array<double,2>> hips;
+    for(size_t f=0;f<c.frames();++f) {auto w=world_pose(c,c.frame(f));hips.push_back({w[c.motion_root].p.x,w[c.motion_root].p.z});}
+    return smooth_root_path(hips);
+}
+void densify_path(MotionConditions& conditions,Vec3 start) {
+    auto points=conditions.path;
+    std::sort(points.begin(),points.end(),[](const auto& a,const auto& b){return a.frame<b.frame;});
+    for(size_t i=1;i<points.size();++i)if(points[i].frame==points[i-1].frame)throw std::runtime_error("Two path points share output frame "+std::to_string(points[i].frame));
+    if(points.empty())throw std::runtime_error("A dense path needs --path waypoints");
+    // Upstream's dense mode locks a keyframe at frame 0, where the motion starts.
+    if(points.front().frame!=0) {PathConstraint first;first.x=start.x;first.z=start.z;points.insert(points.begin(),first);}
+    if(points.size()<2)throw std::runtime_error("A dense path needs a waypoint after frame 0");
+    const size_t first=points.front().frame,last=points.back().frame;
+    std::vector<std::array<double,2>> line;
+    size_t k=0;
+    for(size_t f=first;f<=last;++f) {
+        while(k+2<points.size()&&points[k+1].frame<=f)++k;
+        const auto& a=points[k];const auto& b=points[k+1];
+        const double t=static_cast<double>(f-a.frame)/static_cast<double>(b.frame-a.frame);
+        line.push_back({a.x+(b.x-a.x)*t,a.z+(b.z-a.z)*t});
+    }
+    const bool smoothed=points.size()>=3;
+    if(smoothed)line=smooth_root_path(line);
+    std::vector<PathConstraint> dense;
+    for(size_t f=first;f<=last;++f) {
+        PathConstraint p;p.frame=f;p.x=static_cast<float>(line[f-first][0]);p.z=static_cast<float>(line[f-first][1]);p.interpolated=true;
+        for(const auto& w:points)if(w.frame==f) {p.has_heading=w.has_heading;p.heading=w.heading;}
+        dense.push_back(p);
+    }
+    conditions.path=std::move(dense);
+}
+}
+

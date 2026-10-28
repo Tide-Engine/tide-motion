@@ -7,11 +7,15 @@ include(FetchContent)
 option(MOTION_VULKAN "Build native Kimodo GPU acceleration (requires Vulkan SDK at build time)" OFF)
 option(MOTION_MOMASK_EXPERIMENTAL "Owner-local MoMask experiment (checkpoint commercial scope unresolved)" OFF)
 set(MOTION_ORT_ROOT "" CACHE PATH "Existing ONNX Runtime CPU distribution")
-# The patch exposes the pinned revision's conditioned sampler publicly (pose
-# constraints over one prompt or a sequence); see notes/implementation.md.
+# The patches expose the pinned revision's conditioned sampler publicly (pose
+# constraints over one prompt or a sequence), then its runtime options and foot
+# contacts; see notes/implementation.md.
+set(kimodo_patches "${CMAKE_CURRENT_SOURCE_DIR}/patches/kimodo-conditioning.patch" "${CMAKE_CURRENT_SOURCE_DIR}/patches/kimodo-runtime.patch")
+string(REPLACE ";" "|" kimodo_patch_list "${kimodo_patches}")
 FetchContent_Declare(kimodo GIT_REPOSITORY https://github.com/localai-org/kimodo.cpp.git
   GIT_TAG ed8a931aedb132f768190f6931c365855caba74c GIT_SUBMODULES ggml SOURCE_SUBDIR _unused
-  PATCH_COMMAND "${CMAKE_COMMAND}" "-DPATCH=${CMAKE_CURRENT_SOURCE_DIR}/patches/kimodo-conditioning.patch"
+  LIST_SEPARATOR |
+  PATCH_COMMAND "${CMAKE_COMMAND}" "-DPATCHES=${kimodo_patch_list}"
     -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/apply-patch.cmake")
 FetchContent_MakeAvailable(kimodo)
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
@@ -95,7 +99,7 @@ elseif(APPLE)
 else()
   set_target_properties(motion-ort PROPERTIES IMPORTED_LOCATION "${MOTION_ORT_ROOT}/lib/libonnxruntime.so")
 endif()
-add_library(motion-core STATIC src/motion.cpp src/gltf.cpp src/retarget.cpp src/bricks.cpp src/platform.cpp src/constraints.cpp src/fbx.cpp src/mannequin.cpp src/edit.cpp src/author.cpp src/cleanup.cpp)
+add_library(motion-core STATIC src/motion.cpp src/gltf.cpp src/retarget.cpp src/bricks.cpp src/platform.cpp src/constraints.cpp src/fbx.cpp src/mannequin.cpp src/edit.cpp src/author.cpp src/cleanup.cpp src/soma77.cpp src/correction.cpp)
 target_include_directories(motion-core PUBLIC src PRIVATE "${cgltf_SOURCE_DIR}" "${kimodo_SOURCE_DIR}/src")
 target_link_libraries(motion-core PUBLIC nlohmann_json::nlohmann_json motion-ort PRIVATE motion-ufbx)
 add_executable(tide-motion src/main.cpp src/models.cpp src/upgrade.cpp)
@@ -209,6 +213,10 @@ if(BUILD_TESTING)
   target_link_libraries(retarget-tests PRIVATE motion-core)
   add_custom_command(TARGET retarget-tests POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:motion-ort>" "$<TARGET_FILE_DIR:retarget-tests>")
   add_test(NAME retarget-contracts COMMAND retarget-tests)
+  add_executable(capability-tests tests/capability.cpp)
+  target_link_libraries(capability-tests PRIVATE motion-core motion-kimodo)
+  add_custom_command(TARGET capability-tests POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:motion-ort>" "$<TARGET_FILE_DIR:capability-tests>")
+  add_test(NAME capability-contracts COMMAND capability-tests)
   add_executable(cleanup-tests tests/cleanup.cpp)
   target_link_libraries(cleanup-tests PRIVATE motion-core)
   add_test(NAME cleanup-contracts COMMAND cleanup-tests)
@@ -252,7 +260,7 @@ if(BUILD_TESTING)
   add_executable(soma-sheet EXCLUDE_FROM_ALL tests/model-comparison/sheet.cpp)
   target_link_libraries(soma-sheet PRIVATE motion-core)
   add_custom_command(TARGET soma-sheet POST_BUILD COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:motion-ort>" "$<TARGET_FILE_DIR:soma-sheet>")
-  add_test(NAME cli-contracts COMMAND "${CMAKE_COMMAND}" "-DTOOL=$<TARGET_FILE:tide-motion>" "-DFIXTURE=$<TARGET_FILE:motion-tests>" "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/cli-contracts" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/cli.cmake")
+  add_test(NAME cli-contracts COMMAND "${CMAKE_COMMAND}" "-DTOOL=$<TARGET_FILE:tide-motion>" "-DFIXTURE=$<TARGET_FILE:motion-tests>" "-DCAPABILITY=$<TARGET_FILE:capability-tests>" "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/cli-contracts" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/cli.cmake")
   add_test(NAME retarget-cli COMMAND "${CMAKE_COMMAND}" "-DTOOL=$<TARGET_FILE:tide-motion>" "-DFIXTURE=$<TARGET_FILE:retarget-tests>" "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/retarget-cli" -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/retarget.cmake")
 endif()
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|amd64|x86_64")

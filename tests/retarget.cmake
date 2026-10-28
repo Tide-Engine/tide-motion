@@ -61,3 +61,11 @@ refuses("one of --mannequin and --skeleton" preview "${work}/source.glb" --manne
 refuses("mannequin is SOMA-30" preview "${work}/fbx.glb" --mannequin --capture "${work}/p.png")
 refuses("png or .jpg" preview "${work}/source.glb" --character "${work}/target.fbx" --map "${work}/bones.json" --texture "${work}/bones.json" --capture "${work}/p.png" --tide "${CMAKE_COMMAND}")
 message(STATUS "Retarget inspect, batch, reverse, FBX, preview and output contracts pass")
+
+# Constraint poses on a mapped custom rig are retargeted to SOMA with --pose-map before
+# any model is checked; without it the refusal names the option.
+refuses("give --pose-map" generate "walk" --start-pose "${work}/forward.glb" -o "${work}/mapped-pose.glb" --models "${work}/no-models")
+refuses("Missing or incomplete" generate "walk" --start-pose "${work}/forward.glb" --keyframe 30 "${work}/forward.glb@0" --pose-map "${work}/bones.json" -o "${work}/mapped-pose.glb" --models "${work}/no-models")
+refuses("FBX has no animation" generate "walk" --end-pose "${work}/target.fbx" --pose-map "${work}/bones.json" -o "${work}/mapped-pose.glb" --models "${work}/no-models")
+file(WRITE "${work}/mapped-pose.json" "{\"actions\":[{\"action\":\"generate\",\"prompt\":\"walk\",\"startPose\":\"forward.glb\",\"poseMap\":\"bones.json\",\"output\":\"mapped-pose.glb\"}]}")
+refuses("Missing or incomplete" batch "${work}/mapped-pose.json" --models "${work}/no-models")

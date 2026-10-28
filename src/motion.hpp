@@ -1,6 +1,7 @@
 #pragma once
 #include <array>
 #include <filesystem>
+#include <iosfwd>
 #include <memory>
 #include <map>
 #include <span>
@@ -44,6 +45,16 @@ struct Clip {
 };
 std::vector<Joint> soma();
 void require_soma(const Clip&);
+// SOMA-77 presentation skeleton (upstream somaskel77): the 30 predicted joints plus
+// fingers, toe ends and the head end. Expansion keeps the 30 local rotations and gives
+// the other joints relaxed-hands rotations (or those of `others`, a SOMA-77 clip with
+// as many frames); reduction takes the 30 back exactly. as_soma77 reorders by name.
+std::vector<Joint> soma77();
+Clip as_soma77(const Clip&);
+bool is_soma77(const Clip&);
+Clip soma77_to_30(const Clip&);
+Clip soma30_to_77(const Clip&, const Clip* others=nullptr);
+Clip mirror_soma77(const Clip&);
 std::vector<Transform> world_pose(const Clip&, std::span<const Transform>);
 std::vector<Transform> sample(const Clip&, float);
 Clip load_glb(const fs::path&, const std::string& animation="", bool canonical=true);
@@ -93,7 +104,8 @@ struct PoseConstraint {
     std::string kind; size_t frame=0; std::string file; long source_frame=0;
     std::vector<Transform> pose; unsigned effectors=0; bool anchored=true;
 };
-struct PathConstraint { size_t frame=0; float x=0, z=0; bool has_heading=false; float heading=0; };
+// interpolated: a dense-path sample between waypoints (it neither places nor turns poses).
+struct PathConstraint { size_t frame=0; float x=0, z=0; bool has_heading=false; float heading=0; bool interpolated=false; };
 struct MotionConditions {
     std::vector<PoseConstraint> poses; std::vector<PathConstraint> path;
     bool empty() const { return poses.empty()&&path.empty(); }
@@ -109,11 +121,33 @@ void shift_to_last_pose(Clip& result, const MotionConditions&);
 // Makes full-body poses exact, fading the residual out over up to `frames` frames each
 // side (0 sets only the constrained frame).
 void correct_poses(Clip& result, const MotionConditions&, int frames=10);
+// Native port of upstream Kimodo MotionCorrection (post_process_motion): root height
+// and ground warps, full-body rotation warps, two-bone effector IK and foot/toe contact
+// IK from the model's own contacts ([frames, 4]: LeftFoot, LeftToeBase, RightFoot,
+// RightToeBase). An opt-in alternative to correct_poses; SOMA-30 only.
+struct KimodoCorrectionReport {
+    std::array<size_t,4> contact_frames{}; size_t effector_frames=0, ankle_frames=0, toe_frames=0; double milliseconds=0;
+};
+// trace (developer parity checks) receives upstream binding-layout inputs and the result.
+KimodoCorrectionReport correct_kimodo(Clip&, const MotionConditions&, std::span<const float> contacts, float root_margin=0.04f, float threshold=0.5f, std::ostream* trace=nullptr);
+// Intervals [start, end) where a decoded contact channel exceeds 0.5 (upstream's threshold).
+std::vector<std::pair<size_t,size_t>> contact_intervals(std::span<const float> contacts, size_t channel);
 struct KimodoCondition { std::vector<float> observed, mask; float first_heading=0; Vec3 origin; };
 KimodoCondition build_condition(const MotionConditions&, size_t frames);
 struct ConstraintError { float root=0, position_mean=0, position_max=0, rotation_mean=0, rotation_max=0; std::string rotation_max_joint; };
 ConstraintError constraint_error(const Clip& result, const PoseConstraint&);
 float path_error(const Clip& result, const PathConstraint&);
+// Upstream smooth_root.py smooth_signal on ground x/z (multigrid ADMM within `margin`
+// metres of the input, minimizing acceleration; pos_weight 0, relaxation 1.8, 500
+// iterations per level), including its final half-frame averaging. Fewer than five
+// samples are returned unchanged (upstream's coarsest system would be singular).
+std::vector<std::array<double,2>> smooth_root_path(std::span<const std::array<double,2>>, double margin=0.06);
+// The output's smooth root on the ground as the motion representation defines it.
+std::vector<std::array<double,2>> smooth_root_of(const Clip&);
+// Upstream's dense 2D root path: waypoints (plus frame 0 at `start` when none is
+// there) linearly interpolated to every frame of their span, then smoothed when
+// there are at least three. Waypoints keep their yaw; added samples are interpolated.
+void densify_path(MotionConditions&, Vec3 start);
 struct BricksInputs {
     std::array<float,40> root{};
     std::array<float,32> local_root{};

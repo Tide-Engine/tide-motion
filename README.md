@@ -100,7 +100,9 @@ Save the resulting assets rather than regenerating them during game builds.
 | `--variants-gif` | Also a GIF of every variant playing at once |
 | `--guidance W` | How strongly the prompt steers the motion, 0–10 (default 2; see below) |
 | `--constraint-guidance W` | How strongly poses and paths steer it, 0–10 (default 2) |
-| `--correction-frames N` | Frames each side the pose correction fades over, 0–60 (default 10; 0 sets only the frame) |
+| `--correction tide\|kimodo\|none` | How constraints are made exact afterwards (default `tide`; see Accuracy) |
+| `--correction-frames N` | Frames each side the `tide` correction fades over, 0–60 (default 10; 0 sets only the frame) |
+| `--rig soma30\|soma77` | Output skeleton: the predicted 30 joints (default) or upstream's 77-joint presentation skeleton |
 | `--in-place` | Removes horizontal root travel, keeping height, facing and sway |
 | `--device auto\|gpu\|cpu` | Where Kimodo runs (default auto: the GPU, falling back to the CPU) |
 | `--threads N` | CPU threads, 1–1024 (default: all) |
@@ -180,8 +182,11 @@ segment). The clip lasts the sum of the durations.
 
 ### Poses, keyframes and paths
 
-Constraints come from SOMA-30 clips (generated ones, or your own animation after
-`retarget --to-soma`). `FILE.glb@F` picks frame `F` of a clip; negative counts from
+Constraints come from SOMA clips (SOMA-30 or SOMA-77 GLBs: generated ones, or your
+own animation after `retarget --to-soma`). Add `--pose-map BONES.json` to take poses
+straight from another mapped humanoid's GLB or FBX: they are retargeted to SOMA as
+`retarget --to-soma` would (rotations and root only, with its calibration limits), so
+the constraint is the retargeted SOMA pose, not the character's exact pose. `FILE.glb@F` picks frame `F` of a clip; negative counts from
 its end (`-1` is the last), and `first`/`last` also work.
 
 ```sh
@@ -210,6 +215,8 @@ tide-motion generate "A person walks" --duration 4 \
 | `--effector PARTS FRAME FILE.glb[@F]` | Only the hands/feet in `PARTS` (`left-hand,right-hand,left-foot,right-foot`) |
 | `--end-at X,Z[,YAW]` | Place `--end-pose` at this world ground point, optionally turn it |
 | `--path X,Z[,YAW]@FRAME` | The root over ground point `X,Z`, optionally facing `YAW` degrees (0 faces +Z, 90 faces +X) |
+| `--dense-path` | Constrain the root on every frame along the waypoints, as upstream's dense path |
+| `--pose-map BONES.json` | Retarget pose files on a mapped humanoid rig (GLB or FBX) to SOMA first |
 
 Output frames are 0-based at 30 fps; negative frames count from the end. Constraints
 work with `--then` sequences too; each pose applies at its frame of the whole clip.
@@ -237,8 +244,38 @@ joint) and 3–8 degrees, effectors within about 5 cm and path points within
 3–10 cm. Full-body poses are then made exact: the residual is faded out over up
 to 10 frames either side (`--correction-frames N`; 0 sets only the constrained
 frame, which can pop), ending before any neighbouring constraint, so clips join
-without a pop. `--no-correction` keeps the model's poses unchanged. Effector
-targets and path points are not corrected.
+without a pop. `--no-correction` (or `--correction none`) keeps the model's poses
+unchanged. Effector targets and path points are not corrected by this default.
+
+`--correction kimodo` instead runs a native C++ port of upstream Kimodo's own
+post-processing (MotionCorrection): it warps the root and every joint rotation to
+full-body poses (exact), pulls the root within 4 cm of path points, pins hands and
+feet given by `--effector` with two-bone IK (exact where reachable), then locks feet
+and toes where the model itself predicts ground contact. It matches upstream's C++
+to within float rounding. In measured runs it also made effectors exact, held paths
+within 4 cm and cut mean foot sliding during the model's predicted contacts by about
+40-48% on walks, kicks and paths, but it can pop a foot where a contact starts or
+ends (peaks up to 0.45 m/s) and doubled the small sliding of a standing reach
+(notes/implementation.md has the numbers); it stays opt-in for those reasons. Every Kimodo recipe also records the model's predicted contact frames
+(`footContacts`).
+
+**Dense paths.** By default each `--path` point constrains only its own frame.
+`--dense-path` does what upstream's dense path does: the waypoints (plus frame 0,
+where the output starts) are interpolated to every frame up to the last waypoint and,
+with three or more, smoothed within 6 cm by upstream's root smoother; every frame
+then constrains the root, and poses on the path measure their joints from it. The
+recipe records how far the output's smoothed root stays from the path
+(`densePath`). Upstream's smoother pulls the path in by up to 6 cm, so waypoints are
+followed closely rather than exactly; `--correction kimodo` then holds the hips
+within 4 cm of every path frame.
+
+**SOMA-77.** `--rig soma77` writes upstream's 77-joint presentation skeleton: the 30
+predicted joints unchanged, plus fingers in upstream's constant relaxed pose, toe
+ends and a head end. The motion is identical; the fingers are not animated by the
+model. Every command reads SOMA-77 clips as their exact SOMA-30 subset (connect,
+retarget, constraints and pose-sequence write SOMA-30); `mirror` and `cleanup` keep
+all 77 joints, and `inspect` reports `soma77`. Previews show the SOMA-30 subset on
+the mannequin, or all 77 joints with `--skeleton`.
 
 ## Connect clips
 
@@ -484,7 +521,8 @@ every constraint option:
 ```
 
 Every generate option has a field: `variants`, `variantsGif`, `guidance`,
-`constraintGuidance`, `correctionFrames`, `inPlace`, `device` (`"auto"`,
+`constraintGuidance`, `correction` (`"tide"`, `"kimodo"`, `"none"`), `rig`
+(`"soma30"`, `"soma77"`), `densePath`, `poseMap`, `correctionFrames`, `inPlace`, `device` (`"auto"`,
 `"gpu"`, `"cpu"`), `threads` and `tide`; `connect` takes `threads` too. Variant
 outputs and their sheet are checked for collisions with every other output
 before anything runs. A `mirror` action takes `source`, optional `clip` and

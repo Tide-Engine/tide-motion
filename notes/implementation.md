@@ -226,7 +226,8 @@ at ed8a931aedb132f768190f6931c365855caba74c, including its GGML submodule at
 8c63e70982c95ceb862e3a1073a2c1beef75d60a. The upstream port targets the SOMA RP
 v1.1 checkpoint. Tide also validates opt-in smooth-root v1.2 using the same
 native architecture (see the v1.2 section below).
-Native output is the compact 30-joint rig, not the 77-joint presentation skeleton.
+Native output is the compact 30-joint rig; the 77-joint presentation skeleton is an
+opt-in export since the Kimodo capability work (see that section).
 
 MotionBricks uses Microsoft's native ONNX Runtime CPU distribution 1.31.1. Pose
 encoding, world alignment, 6D rotation decoding, boundary trimming and endpoint
@@ -603,7 +604,9 @@ pose for rotation and root context, so targets come from SOMA clips); upstream
 dense root paths with its smoothing (sparse waypoints only; many --path points
 approximate one); IK for effectors and foot-skate cleanup; tunable CFG (added in 0.5.0); the
 77-joint output; constraints on non-SOMA rigs without retarget --to-soma. Free
-placement is validated empirically, not by upstream.
+placement is validated empirically, not by upstream. (Dense paths, effector IK through
+the MotionCorrection port, SOMA-77 output and --pose-map were added later; see the
+Kimodo capability gaps section.)
 
 ## Character previews and FBX input (0.4.0)
 
@@ -710,7 +713,8 @@ KIMODO_THREADS, which kimodo.cpp reads when its CPU backends initialise
 at load, so a batch action asking for a different device/threads reloads Kimodo
 (the operator's KIMODO_BACKEND/KIMODO_THREADS are remembered and restored for
 auto). kimodo_runtime_options exists in the C API but is not wired to the C++
-model::load in this revision, so the environment is the interface.
+model::load in this revision, so the environment is the interface. (Superseded: the
+runtime patch wires them and the CLI passes options; see the Kimodo capability gaps.)
 
 Variant contact sheet: platform.cpp writes one Tide project with the mannequin
 and one Animation asset per clip, drawn through an orthographic camera
@@ -1967,3 +1971,216 @@ Installed --version/help upgrade and binary identity checks pass; all four model
 file metadata records and user PATH remain unchanged. The owner's separate
 TideMotion-MoMask-Experimental installation is not touched. This documentation
 record does not change executable code or require another inference run.
+## Kimodo capability gaps: SOMA-77, dense paths, MotionCorrection, runtime options, mapped poses (2026-10-28)
+
+Owner goal: use the rest of what NVIDIA Kimodo offers, natively. Upstream read-only at
+nv-tlabs/kimodo e1c219c99b4b94ba48be1fb6a1cbc64ecee4c954 (ignored .research clone);
+kimodo.cpp and GGML pins unchanged. No Python, service, procedural generator or new
+runtime dependency. No model, evaluation motion data or research-only checkpoint used
+or committed (upstream's demo motion.npz files were not opened).
+
+### 1. SOMA-77 presentation skeleton (closed, opt-in)
+
+kimodo.cpp returns only the 30 predicted joints (its README lists 77-joint expansion as
+not implemented). Upstream's expansion (SOMASkeleton30.to_SOMASkeleton77 /
+output_to_SOMASkeleton77) is a slice insert: the 30 local rotations are kept and every
+other joint takes a constant relaxed-hands rest rotation; from_SOMASkeleton77 slices the
+30 back. All 30 SOMA-30 joints have bit-identical neutral positions in the 77 joints.p.
+src/soma77.hpp is generated from the Apache-2.0 repository assets
+(somaskel77/joints.p as parent-local offsets, relaxed_hands_rest_pose.npy as unit XYZW
+quaternions; names/parents from definitions.py). They are skeleton definitions in the
+Apache-2.0 code repository, not model checkpoints or motion data; the existing
+NVIDIA-KIMODO-SOURCE notice covers them. Regenerate with the developer tool
+tools/generate_soma77.py UPSTREAM_CHECKOUT (stdlib zip/pickle with a tensor-only
+unpickler and NumPy; not shipped or built), which also reports left/right asymmetry: offsets 2.4 mm, relaxed
+rotations up to 0.24 in matrix entries (the relaxed pose is not mirror symmetric).
+
+Contract: `generate --rig soma30|soma77` (batch `rig`), default soma30. Expansion is done
+at export after correction/in-place, so the motion equals the SOMA-30 result. Every
+canonical reader (connect, constraints, pose-sequence via load_glb, retarget source,
+cleanup/mirror) recognises a GLB with LeftHandIndex1 and reads its exact SOMA-30 subset
+(names/hierarchy/unit scale/proportions within 1 mm checked; animated bone lengths
+refused). mirror keeps 77 joints (body as mirror_soma, other joints take their
+counterpart's M L M); cleanup cleans the subset and keeps the clip's own non-subset
+rotations. inspect reports `soma77`. preview shows the subset on the mannequin or a
+character (`--map` uses SOMA-30 names) and all 77 with `--skeleton`. connect, retarget,
+pose-sequence and constraint use write SOMA-30. Fingers are not animated by the model;
+ThumbEnd/MiddleEnd are among the 30 predicted joints and do vary.
+
+### 2. Dense root paths with upstream smoothing (closed)
+
+Upstream's demo dense path (viz/constraint_ui.py RootKeyframe2DSet, demo/generation.py):
+lock keyframes at frame 0 (and the end), linearly interpolate the 2D waypoints to every
+frame of their span, then with 3+ keyframes smooth with motion_rep/smooth_root.py
+get_smooth_root_pos (multigrid ADMM, 6 cm margins, pos_weight 0, over-relaxation 1.8, 500
+iterations per level); constrain every frame (root2d), and give full-body/effector
+constraints the dense sample as smooth_root_2d. src/constraints.cpp now has
+smooth_root_path (a banded LDL^T solve replaces scipy splu), smooth_root_of (the
+representation's smooth root of an output) and densify_path. `--dense-path` (batch
+`densePath`) applies it to the --path waypoints, Kimodo only. Frame 0 is added at the
+start pose's hips or the frame-0 path point, else the origin; the dense span ends at
+the last waypoint (later frames stay free: Tide has no previous motion to lock the end
+to). Waypoint yaws are kept (upstream's dense mode drops headings; an extension).
+Interpolated samples neither place nor turn poses; a pose on the path is encoded with the
+sample as its smooth root. Recipes keep the waypoint errors and add densePath
+{first/last frame, frames, smoothed, smooth-root and hips error mean/max}.
+
+Parity: tests/smooth_reference.py transcribes upstream smooth_signal with NumPy (dense
+solve) and drives the native code through `capability-tests --smooth`: line, corner,
+137-frame random walk and 6-frame cases agree to 1.1e-12 m. Upstream behaviour kept on
+purpose: its final step-1 averaging shifts the result by half a frame, and 500
+iterations from a mean initialisation pull a constant-speed line toward its middle by up
+to 6 cm (8 cm with the shift). Paths shorter than five samples are returned unchanged
+(upstream's coarsest system would be singular).
+
+### 3. Native MotionCorrection port (closed as opt-in; measured against Tide's correction)
+
+src/correction.cpp ports TrajectoryCorrector, InverseKinematics and Utility CorrectMotion
+plus the BindingsPython/postprocess.py argument setup (working rig 2 cm above ground,
+thresholded contacts > 0.5, LeftHand/RightHand/LeftFoot/RightFoot pins with upstream
+hint offsets, ankle two-bone and toe one-bone contacts, root margin 0.04). Scalar C++ on
+Tide's types; SIMD, Eigen and pybind11 are not used. Upstream's products are in
+DirectXMath order (a*b applies a first); each was rewritten in Hamilton order. Kept
+upstream quirks: velocity weights never reach V (multVelWeights discards its result), the
+left toe reuses the right toe's minimum height, the opposite-vector fallback quaternion
+is upstream's, one-bone toe intervals touching a constrained frame are dropped (so a
+start pose removes toe locking in an all-contact standing clip). Not ported: the G1
+double-ankle phase (SOMA has single ankles) and per-segment post-processing inside
+multi-prompt sampling (Tide corrects the joined output once, after sampling, so later
+segments are not conditioned on corrected motion).
+
+Contacts come from the model: patches/kimodo-runtime.patch adds motion_data.foot_contacts
+(the last four decoded body features, unnormalised, both samplers). `--correction
+tide|kimodo|none` (batch `correction`); `--no-correction` stays as `none`, default tide is
+byte-identical to before. kimodo needs --backend kimodo and refuses --correction-frames.
+Recipes add `correction`, `kimodoCorrection` (source, margin, threshold, contact frame
+counts, effector/ankle/toe IK frames, milliseconds) and, for every Kimodo generation,
+`footContacts` intervals [start, end) per channel.
+
+Upstream parity: tests/kimodo-correction-parity.cpp is a developer-only driver that runs
+NVIDIA's own MotionCorrection C++ (MSVC, /arch:AVX, Eigen 3.4.0 3147391d at the tag
+upstream fetches, all in ignored .research/parity) on inputs traced by the native port
+(correct_kimodo's optional trace stream). `capability-tests --replay RAW.glb RECIPE.json
+TRACE OUT.glb` rebuilds the inputs from a `--correction none` clip and the kimodo
+output's recipe (same seed, so identical raw motion and contacts). Synthetic case with
+every stage active (correction moved the root 10 cm, rotations up to 81 degrees): root
+identical, rotations max 0.040 / mean 0.0001 degrees. Real clips (12: walks, kicks
+between idle poses, a path walk and a right-hand effector reach, seeds 1-3): root
+difference 0 m, rotation max 0.040..0.079 degrees, mean <= 0.0003 degrees (float
+rounding); the offline replay reproduces the tool's output to 0.055 degrees.
+
+Measured comparison (RTX 4080 SUPER, Vulkan, v1.1, 50 steps, guidance 2, seeds 1-3 each;
+the same raw motion per seed; positions from independent GLB FK in
+tests/capability_metrics.py; skate-from-contacts follows upstream FootSkateFromContacts:
+ankle/toe speed while the model predicts that contact; skate-from-height follows
+FootSkateFromHeight: toe speed while the toe is below 5 cm):
+
+| Case | Correction | Pose error after | Effector / path after | Skate contacts m/s mean (peak) | Skate height m/s | Max joint step deg |
+| --- | --- | --- | --- | ---: | ---: | ---: |
+| walk 3 s | none | - | - | 0.048 (0.434) | 0.477 | 17.5 |
+| walk 3 s | kimodo | - | - | 0.029 (0.298) | 0.602 | 17.5 |
+| kick 2.5 s idle->idle | none | 1.2/2.6 cm mean start/end | - | 0.055 (0.273) | 0.108 | 33.0 |
+| | tide | exact | - | 0.064 (0.273) | 0.119 | 33.0 |
+| | kimodo | exact | - | 0.030 (0.345) | 0.165 | 32.9 |
+| path walk 3 s | none / tide | - | hips 6.8 cm mean, 9.3 max | 0.043 (0.196) | 0.339 | 13.3 |
+| | kimodo | - | hips 3.9 mean, 4.0 max | 0.023 (0.449) | 0.475 | 13.3 |
+| reach 3 s, effector @60 | none | start 1.2 cm | hand 1.5 cm | 0.016 (0.095) | 0.017 | 54.3 |
+| | tide | exact | hand 1.5 cm | 0.018 (0.091) | 0.019 | 54.3 |
+| | kimodo | exact | hand 0.0 cm | 0.032 (0.373) | 0.035 | 54.6 |
+
+Kimodo correction took 0.9-2.0 ms per clip. Reading: it makes effectors exact, holds
+path frames within the 4 cm margin and roughly halves sliding where the model predicts
+contact, but it raises the height-based skate number (more toe samples are forced to the
+floor and slide sideways, as upstream allows), can pop a foot at contact boundaries
+(peaks to 0.45 m/s) and doubled a standing clip's sliding (its root follows the effector
+margin while ankles are pinned with reach falloff). Tide's fade correction does not touch
+contacts and slightly raises kick sliding. Neither is better everywhere, so tide stays
+the default and kimodo is opt-in. Foot contacts in Tide's separate `cleanup` remain
+explicit plans; `footContacts` intervals can inform them.
+
+### 4. kimodo_runtime_options (closed)
+
+The pinned C API validated kimodo_runtime_options' size and then ignored it; the C++
+model::load had no options. patches/kimodo-runtime.patch (second patch, applied after
+kimodo-conditioning.patch; cmake/apply-patch.cmake now restores the pinned tree and
+applies the ordered list, so repeated or changed populates are idempotent) adds
+kimodo::runtime_options {device automatic|cpu|vulkan, threads} and
+model::load(motion, text, options), threaded to the deferred motion-weight load and the
+text encoder. automatic keeps the old environment behaviour; cpu never touches Vulkan;
+vulkan fails rather than falling back; threads 0 keeps KIMODO_THREADS or the hardware
+count. kimodo_model_load maps the C struct and now refuses a non-empty backend_dir
+(backends are static) and unknown devices. tide-motion passes --device/--threads as
+options and no longer sets KIMODO_BACKEND or KIMODO_THREADS; an operator's
+KIMODO_BACKEND=cpu (auto) and KIMODO_THREADS (threads 0) are still honoured.
+KIMODO_TEXT_LAYER_CHUNK and the other tuning variables have no runtime-option field and
+stay environment variables. Evidence: the default GPU output of `generate "A person
+walks forward" --duration 3 --seed 1 --no-correction` is byte-identical between the
+installed 0.5.1 binary (environment variables) and this build; `--device cpu` with 2 and
+8 threads gave identical payloads in 28.4 s vs 19.5 s (1 s, 10 steps, whole command).
+capability-contracts covers the C API refusals and option pass-through.
+
+### 5. Constraint poses from mapped humanoids (closed, with retarget's limits)
+
+`--pose-map BONES.json` (batch `poseMap`): a pose file that is not SOMA-30/77 (any mapped
+GLB or FBX) is retargeted to canonical SOMA exactly as `retarget --to-soma` (rotation
+and root retargeting with the mapping's calibration; non-root translations dropped and
+reported). SOMA files are still used directly. Recipes add the mapping and the list of
+mapped sources. The constraint is the retargeted SOMA pose, so Synty-style calibration
+differences (the leaning spine noted in 0.4.0) carry into it. Real run: Synty
+A_Idle_Standing_Femn.fbx frame 0 with examples/synty-polygon.json as the start of a 2 s
+walk: model error mean 1.87 cm / max 5.97 cm, rotations mean 13.3 / max 48.2 degrees,
+then exact after tide correction. pose-sequence (author.cpp) is unchanged and still needs
+SOMA sources.
+
+### Validation
+
+Windows x64 ClangCL 18 Release with Vulkan (warnings as errors): all ten CTests pass,
+including the new capability-contracts (SOMA-77 rest/roundtrip/reduction/mirror/template,
+dense smoothing/densify/conditioning, correction exactness/margins/contact IK/effector
+reach, C API options) and CLI/retarget contracts for every new option, batch field and
+SOMA-77 command path. Ubuntu 24.04 GCC 13 under WSL, fresh fetch through both patches,
+builds with -Werror and passes all ten CTests. Developer checks (not CTests):
+tests/smooth_reference.py, tests/kimodo-correction-parity.cpp,
+tests/capability_metrics.py.
+
+Real native inference: tests/capability-inference.ps1 (opt-in; holds
+TideMotionGpuValidation; user/self-generated idle; optional mapped character). Run 1: one
+batch of 49 actions (Kimodo loaded once; 74 s) on the RTX 4080 SUPER: the correction
+cases above, sparse vs dense paths, SOMA-77 walk/connect/mirror/kick-from-77/retarget to
+the Synty character, the mapped start pose, CPU thread timings and the baseline. Run 2
+(34 actions, 60 s) repeated the correction cases with `footContacts` for the parity and
+contact metrics. SOMA-77 `walk77` equals the same-seed SOMA-30 walk: hips and every body
+joint 0 m apart, local rotations within float rounding; connect from it wrote a 174-frame
+SOMA-30 sequence, mirror and kick-from-77 wrote 77 joints, retarget wrote the 50-bone
+Synty rig. Dense versus sparse over three S-curve waypoints (4 s, seeds 1-3, no
+correction): hips at the waypoints 10.8 cm mean / 22.1 max sparse, 5.2 / 10.5 dense; dense
+smooth root 2.4-3.1 cm mean / 4.8-6.2 max from every path frame (hips 4.9-5.6 / 9.5-10.9);
+dense + kimodo holds hips within 4.0 cm of every path frame (mean 3.0-3.2). Dense paths
+did not change sliding consistently (height skate 0.350/0.428/0.421 sparse vs
+0.335/0.531/0.479 dense). Bounded TIDE_HIDDEN=1 960x540 captures (frame budget 45) of
+walk77, kick77, walk77-to-idle, dense-1, reach-kimodo-1 and walk77 on the Synty character,
+with Tide from D:/Projects/PurrEngine 28b61e4db (the clean checkout; its privately staged
+build copied into ignored .research/engine), were inspected: plausible poses, feet at the
+floor, no binding errors or inverted limbs. Sparse visual checks only. Synty assets stayed
+in their local pack; nothing generated or third-party is in Git.
+
+Integration: rebased onto origin/dev adf5567 (MoMask, batched connects, upgrade, footfall
+selection, ARDY), keeping their options; all ten CTests pass again, and one mutex-held
+integrated smoke (4 s walk from the idle, dense S-curve, --correction kimodo, --rig
+soma77) produced 120 frames: smooth root 2.9 cm mean / 4.6 max from the path, 119 ankle
+and 103 toe contact frames corrected in 2.9 ms.
+
+### Remaining gaps
+
+- Kimodo correction is per whole output, not upstream's per-segment correction inside
+  multi-prompt sampling; it does not run for ARDY. Its contact-boundary pops and the
+  standing-clip regression are upstream behaviour reproduced faithfully, not fixed.
+- Dense paths end at the last waypoint (no end lock from a previous motion) and are
+  Kimodo only; yaw is an extension upstream's dense mode does not use.
+- SOMA-77 fingers are upstream's constant relaxed pose; Kimodo predicts no fingers. The
+  mannequin has no fingers; previews of SOMA-77 show the 30-joint subset unless
+  --skeleton is used. connect/retarget/pose-sequence output SOMA-30.
+- --pose-map inherits retargeting's limits (calibration, dropped non-root translations,
+  humanoids only) and is not available to pose-sequence; history (ARDY) still needs SOMA.
+- Linux/macOS inference, CPU inference beyond the thread timing, and a v1.2 comparison of
+  the correction were not run; macOS/ARM64 builds are left to CI.
