@@ -6,6 +6,7 @@
 #include "ardy_gpu.hpp"
 #include "dart.hpp"
 #include "dart_gpu.hpp"
+#include "review.hpp"
 #include <kimodo/kimodo.hpp>
 #include <nlohmann/json.hpp>
 #include <algorithm>
@@ -61,6 +62,18 @@ bool kimodo_on_gpu() {
 }
 // Usage of one command; the global text lists every command and option.
 const char* command_help(std::string_view command) {
+    if(command=="review")return R"(tide-motion review MANIFEST.json -o REVIEW.html
+
+Build a local, self-contained advisory review and REVIEW.html.json observations.
+Version-1 manifest: {version:1, cases:[{id,label,file,clip?,map?,context?,settings?}]}.
+Paths are relative to the manifest. Up to 24 cases; explicit map retargets to SOMA.
+No inference, renderer, server, network or new installed dependency is needed.
+Watch before revealing hints; record inaccurate, acceptable, intentional or
+actionable observations and timestamped missed issues. Export feedback as JSON.
+Capsule/ground checks are sampled SOMA proxies, not skin collision or human
+reachability judgments. No findings is not a quality pass. No assets are changed.
+See notes/advisory-review.md for settings, coverage and feedback contracts.
+)";
     if(command=="momask"||command=="inpaint")return R"(tide-motion generate "PROMPT" --backend momask -o OUT.glb [--duration 2] [--seed 0]
 tide-motion inpaint "PROMPT" --source SOMA.glb --begin FRAME --end FRAME -o EDIT.glb
 tide-motion models import-momask BUNDLE_DIRECTORY [--models CACHE]
@@ -427,6 +440,7 @@ void help(std::string_view command={}) {
   tide-motion retarget SOURCE.glb|.fbx --to-soma --map BONES.json -o SOMA.glb [--clip NAME]
   tide-motion batch JOBS.json [--models DIR]
   tide-motion inspect FILE.glb|FILE.fbx [--clip NAME | --skeleton]
+  tide-motion review MANIFEST.json -o REVIEW.html
   tide-motion preview CLIP.glb [--mannequin | --skeleton | --character MODEL.glb|.fbx
       [--map BONES.json] [--texture IMAGE.png]] [--prop MESH --prop-bone BONE]
       [--tide PATH] [--capture IMAGE.png]
@@ -959,6 +973,10 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     auto unknown=[](const std::string& name){return std::runtime_error("Unknown command: "+name+"; tide-motion --help lists the commands");};
     if(args[1]=="help") { if(args.size()>2&&!command_help(args[2]))throw unknown(args[2]);help(args.size()>2?args[2]:"");return 0; }
     if(args[1]=="--version") { std::cout<<"tide-motion "<<MOTION_VERSION<<"\n";return 0; }
+    if(args[1]=="review") {
+        for(size_t i=2;i<args.size();++i)if(args[i]=="--help"||args[i]=="-h"){help("review");return 0;}
+        return review_command(args);
+    }
     if(args[1]=="upgrade") {
         for(size_t i=2;i<args.size();++i)if(args[i]=="--help"||args[i]=="-h") {help("upgrade");return 0;}
         return upgrade(args,MOTION_VERSION);

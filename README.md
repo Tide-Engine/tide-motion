@@ -449,6 +449,15 @@ or a guarantee of a perfect result on every character.
 
 ## Inspect and preview
 
+For agent observations and human calibration, `tide-motion review MANIFEST.json
+-o review.html` creates an offline animated review with hidden hints, frame
+scrubbing, per-observation assessments, timestamped notes and JSON feedback export.
+The accompanying `review.html.json` contains agent-readable measurements. Findings
+are advisory; unusual or intentional motion is never rejected. See
+[review contracts and limitations](notes/advisory-review.md) and
+[example manifest](examples/review.json). No additional application or server is
+required; the viewer displays skeletons and explicit analysis proxies, not skins.
+
 ```sh
 tide-motion inspect sequence.glb
 tide-motion preview sequence.glb --gif sequence.gif

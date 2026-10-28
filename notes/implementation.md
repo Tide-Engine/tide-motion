@@ -1,5 +1,66 @@
 # Native animation authoring
 
+## Native advisory review and human calibration (2026-10-28)
+
+Owner requested an agent-facing observation environment with human judgment,
+situational exceptions and feedback that can be associated with motion locations.
+`review MANIFEST.json -o REVIEW.html` now builds a self-contained offline skeleton
+review and adjacent agent JSON. Contracts, limits and feedback semantics are in
+[advisory-review.md](advisory-review.md). No model/dependency/pin/license changes.
+
+Native observations localize shortest quaternion steps, foot centres below an
+explicit reference plane, horizontal movement of low foot/toe samples, forearm /
+torso capsule overlap and explicit bone-local prop / torso capsule overlap.
+Intervals, subjects, peak frames/values, thresholds, units and approximation methods
+remain distinct from human interpretation. No quality score, severity or pass/fail;
+no observations does not imply successful validation. Custom unmapped rigs get
+rotation observations with canonical body checks explicitly unavailable. SOMA-77
+is reduced for body-only review; fingers are not evaluated. Input clips never change.
+
+The dependency-free page provides front/side playback, scrubbing, speed controls,
+optional capsule display, selected-interval loops and hidden/revealed observations.
+Humans can record accurate/actionable, accurate/acceptable, intentional, inaccurate
+or unsure assessments, plus timestamped missed issues and reasons. Assessments are
+counted separately, without an overall quality score. JSON export/import retains
+measurements and human feedback separately. Source/mapping SHA-256, animation,
+settings and rule version identify the review; mismatched imports are refused.
+Feedback is held in the open page and must be exported before closing. Nearby
+observation associations are suggestions, not a causal diagnosis. JSON script-data
+escaping and text-only labels/notes prevent source/feedback markup execution.
+
+Windows x64 ClangCL 18.1.8 Release CPU build passes all 15 CTests. New native checks
+use independent 90-degree/sign-invariant rotation oracles, split/merged intervals,
+degenerate/separated capsule cases, unavailable custom-rig coverage and malformed
+settings/prop refusals. CLI checks exercise source-relative manifests, observation
+sidecar, overwrite refusal and a late missing source leaving no outputs. Existing
+13 CTests remain passing. Developer-only existing headless Chromium checks pass
+hidden/revealed hints, selection, intentional assessment, notes/nearby association,
+export/import, mismatched identity/invalid timestamp refusal and scrubbing/stepping.
+No browser or Python dependency is added to the installed executable.
+
+`tools/create-review-set.ps1` reproduces a private eight-case review, optionally
+nine with an existing generated clip, using the owner's sword-combat library.
+The uninstalled `review-examples` helper extracts a real guide pose and creates
+explicit diagnostic mutations (root -.15 m, 70-degree wrist pulse) and a deliberately
+misaligned prop proxy; these are labeled test edits, never model outputs. Actual
+native MotionBricks generates two held eight-token transitions from library idle
+to extracted parry and back, yielding 51 frames. The assembled local nine-case set
+includes unmodified-source idle/parry/roll through explicit SOMA retargeting, an
+existing own-prompt Kimodo cut, that fresh guided inference and diagnostic cases.
+Original source files/mappings are hashed, and all licensed/derived assets, poses,
+recipes and review outputs remain ignored under output/. No evaluation motion or
+research-only checkpoint is used or distributed. Script reruns refuse existing
+directories, preserving any human feedback. No additional CI dispatch or PR.
+
+Retargeting reports discarded non-root translations on these purchased FBXs.
+Therefore the review expressly describes canonical proxy motion, not original
+skin accuracy or original exact poses. All analysis is on sampled frames; there is
+no calibrated anatomical reachability/joint-limit test, mesh or continuous collision,
+balance/force certification, aesthetic judgment, automatic repair, feedback-trained
+model or direct Tide pose-editor integration. Screenshots/UI were inspected as
+review-interface checks. No engine renderer or GPU work ran; TIDE_HIDDEN=1 was set
+for native invocations. The engine checkout and owner installation are untouched.
+
 ## Dex2HOI audit and native first-person/equipment review (2026-10-28)
 
 Owner requested further Dex2HOI investigation and fixing encountered Tide limits.

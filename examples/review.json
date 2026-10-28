@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "title": "Local motion review",
+  "cases": [
+    {
+      "id": "candidate",
+      "label": "Case 01",
+      "file": "example-walk.glb",
+      "context": "Replace file with your own existing GLB or FBX. Optional map uses an explicit humanoid mapping.",
+      "settings": {"groundY": 0}
+    }
+  ]
+}
