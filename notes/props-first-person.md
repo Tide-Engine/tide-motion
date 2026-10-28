@@ -5,7 +5,8 @@ audit, not a benchmark of external models. No new weights, evaluation motions,
 SMPL/MANO assets or third-party meshes were downloaded. Candidate performance
 claims belong to their authors and are not Tide measurements.
 
-Follow-up: [pinned Dex2HOI source/input/operator audit](dex2hoi-feasibility.md).
+Follow-up: a pinned Dex2HOI audit and native backend followed; the owner judged
+its results poor and it was removed on 2026-10-28 (see implementation.md).
 Tide now implements first-person bone/root cameras, arms-only mannequin
 presentation, reusable camera/equipment setups and geometry-aware prop framing.
 The baseline limitations below are retained as the audit trail; these four are

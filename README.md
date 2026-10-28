@@ -13,12 +13,6 @@ x64 builds include DirectML motion-network acceleration.
 Omitting `--device` uses `auto`: GPU first, then CPU fallback. Text embedding
 remains on CPU; `--device cpu` forces CPU.
 
-Experimental Dex2HOI jointly generates human and object motion with manually
-supplied native weights: `models import-dex2hoi`, then `dex2hoi generate` with an
-explicit compatible rig, ten-frame history and object geometry. A private native
-CPU run is supported; weights are not bundled or automatically downloaded.
-See [setup, input contracts and remaining rig/quality limits](notes/dex2hoi-native.md).
-
 The main authoring workflows use canonical SOMA-30 human animations. A reusable bone-mapping file
 retargets between SOMA and your humanoid rig, offline and without another model.
 Body animations are self-contained GLB assets without a character mesh; equipment

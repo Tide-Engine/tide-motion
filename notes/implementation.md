@@ -1,5 +1,16 @@
 # Native animation authoring
 
+## Dex2HOI removed (2026-10-28)
+
+After the DART/MoMask removal below, the owner also dropped Dex2HOI ("Dex2HOI
+seemed trash honestly, so we should just remove it"). Removed: the `dex2hoi`
+command, `models import-dex2hoi` and `models check dex2hoi`, its sources
+(runtime, bundle, motion encoding, preview), tests, developer tools
+(tools/dex2hoi), notes (dex2hoi-*.md) and `OPENAI-CLIP.txt`, which only its CLIP
+graph still needed. Nothing else used its helpers. ARDY stays for the owner to
+test, with its text encoder and tools/ardy. Bundles already in a user's cache are
+left alone; entries below describe Dex2HOI as it was.
+
 ## DART and MoMask removed (2026-10-28)
 
 The owner compared every backend on the same moves (walk-up-and-strike among
@@ -14,9 +25,9 @@ tests, examples, developer export tools, notes and licence notices (DART,
 MoMask source, the Python/Unicode tables used only by DART's CLIP tokenizer).
 The motion-core library no longer compiles DirectML code; ARDY keeps its own.
 Kept: Kimodo (v1.1, v1.2), MotionBricks (`connect`, `pose-sequence`), ARDY,
-Dex2HOI (still undecided; `OPENAI-CLIP.txt` stays for its CLIP graph) and every
-tool. Model files already in a user's cache are left alone; the entries below
-describe the removed backends as they were.
+Dex2HOI (then undecided; removed in the entry above) and every tool. Model
+files already in a user's cache are left alone; the entries below describe the
+removed backends as they were.
 
 ## ARM row-rotation contract tolerance (2026-10-28)
 
