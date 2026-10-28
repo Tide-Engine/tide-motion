@@ -1,5 +1,68 @@
 # Native animation authoring
 
+## Explicit held-grip bindings after Dex2HOI owner feedback (2026-10-28)
+
+Owner confirmed incorrect prop position/grip in the raw native trials. Checked the
+actual two-prop prefix against pinned upstream encode helpers, including all429
+raw features, explicit rest bases and fingertip/surface weights: max1.1921e-7.
+Native full-mixture prefix roundtrip object error1.813e-7m. No confirmed placement
+encoding bug was found in this case. Geometry/history conditioning alone provides
+no explicit designated handle/palm constraint; raw outputs remain failed trials.
+Pinned model/dependency revisions and inference arithmetic are unchanged.
+
+Added explicit native equipment `space: "grip"`, `anchor: GRIP_NAME`. The named
+grip's source-body bone/palm transform multiplied by inverse object target forms
+the object frame before normal local keys. Identity keys preserve exact measured
+marker equality; deliberately offset keys remain visible to grip diagnostics and
+optional strict validation. Markers are authored, never inferred. Grip ownership,
+unique/nonempty references, clip bounds, active segment coverage and bones validate.
+Uniform centimetre rig scale does not scale metre socket offsets; mesh-only scale
+keys remain separate. Sampling remains before optional separately requested IK.
+Body/root/finger poses remain untouched. A grip-to-world segment can release an
+object with the existing explicit release event contract.
+
+Equipment character preparation also includes all explicitly declared grip bones,
+including unweighted sockets. Existing bone/object/world plans remain compatible.
+New tests verify independent nonidentity palm/target FK, 0.01-scale rigs, mesh
+scaling, exact body/finger preservation, release, intentional offsets and invalid
+grip names/owners/bones/intervals, plus JSON parsing. No automatic finger posing,
+collision handling, body generation or model-aware grasp claim is introduced.
+
+Added graph-free `dex2hoi extract-body CLIP --input HISTORY -o BODY.glb`, reusing
+strict source/recipe validation and exclusive native GLB publication. It drops
+prop nodes while preserving the full explicit source body and embeds source/input
+hashes. It enables ordinary `equipment bake` without a private helper, Python or
+model sessions. Extraction tests check all70 samples/body/root/fingers, excluded
+prop nodes, overwrite/extension/inference-option refusal. Read-only preview keeps
+its previous contracts.
+
+Preserved original raw clips, then authored a separate two-prop held candidate
+using source palm/handle markers, identity grip keys and no IK. Independent GLB
+measurements over70frames: sword max3.844e-7m, shield2.710e-7m, both <.001mm versus
+raw47.02cm/13.79cm. Body/finger local translations remain exact; rotations differ
+≤2.10e-6degrees at GLB roundtrip precision. Existing raw body seam/action quality
+and finger closure remain unresolved. Held object seam steps59.24cm/44.23cm still
+reflect the preserved body motion. Explicit binding is labelled authored equipment,
+not a learned Dex2HOI success. The raw assets are neither overwritten nor hidden.
+Independent half-frame checks expose8.39cm/6.35cm residual during the bad frame9→10
+body seam; later generated intervals peak at .228mm/.178mm. The independent-root
+GLB30Hz bake gives sampled contact equality, not an exact continuous parenting
+contract. This remaining seam limitation is retained in the report/comparison.
+
+Private actual-input reference checks and authored plans/reports live under
+.research/dex2hoi/grip-investigation. Native first-/third-person captures and70frame
+GIFs use TIDE_HIDDEN=1, explicit bounds, held TideMotionGpuValidation and the same
+clean engine367ae4da2d31913176ae1e2624e1d78a1204f03c/staged checkout-built executable.
+No upstream rest data, motion, mesh or checkpoint payload is added to Git/releases.
+All22 Windows ClangCL18.1.8 Release CTests pass, including grip-space and body
+extraction cases. GCC13.3 C++20 warnings-as-errors checks pass affected equipment,
+CLI and Dex2HOI asset units with the normal version-definition contract. A check
+initially omitted that build definition; its corrected standalone harness passes.
+The complete native extract-body/bake workflow also ran with an intentionally
+invalid model cache. Native advisory review/adjacent JSON retain both variants;
+custom-rig body/ground/collision/aesthetic checks remain unknown and hint counts
+do not select or correct the candidate.
+
 ## Dex2HOI matched weapon tests and combined native preview (2026-10-28)
 
 Owner requested actual tests after manual/private native integration. Three raw

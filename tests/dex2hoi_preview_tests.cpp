@@ -93,6 +93,14 @@ void contracts(const fs::path& root) {
         for(size_t j=0;j<66;++j)check(error(filtered.body.frame(f)[j],generated.body.frame(f)[j])<2e-6f,"nonuniform descendant changed body tracks");
         for(size_t s=0;s<2;++s)check(error(filtered.objects[s].poses[f],generated.objects[s].poses[f])<2e-6f,"nonuniform descendant changed world object tracks");
     }
+    dex2hoi::extract_body(root/"generated.glb",root/"input.json",root/"body-only.glb");
+    auto extracted=load_glb(root/"body-only.glb","",false);
+    check(extracted.joints.size()==66&&extracted.frames()==70,"Body-only extraction retained prop nodes or changed frames");
+    for(size_t f=0;f<70;++f)for(size_t j=0;j<66;++j)
+        check(error(extracted.frame(f)[j],generated.body.frame(f)[j])<2e-6f,"Body-only extraction changed body/root/finger motion");
+    refuses([&]{dex2hoi::extract_body(root/"generated.glb",root/"input.json",root/"body-only.glb");},"Body extraction overwrote existing output");
+    refuses([&]{dex2hoi::extract_body(root/"generated.glb",root/"input.json",root/"body.json");},"Body extraction accepted wrong output extension");
+    refuses([&]{dex2hoi::extract_body_command({"tide-motion","dex2hoi","extract-body",(root/"generated.glb").string(),"--steps","5"});},"Body extraction accepted inference options");
     auto changed=config;changed["objects"][0]["poses"][3]["position"][0]=9;write(root/"wrong-object.json",changed);
     refuses([&]{dex2hoi::load_preview_result(root/"generated.glb",root/"wrong-object.json");},"mismatched object prefix accepted");
     changed=config;changed["bones"][4]=changed["bones"][3];write(root/"duplicate-binding.json",changed);

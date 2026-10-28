@@ -247,6 +247,7 @@ tide-motion dex2hoi generate --input OWN-HISTORY.json --prompt TEXT -o NEW.glb
 tide-motion dex2hoi denoise --bundle BUNDLE --input TENSORS.json -o NEW.json [--threads N]
 tide-motion dex2hoi install PREPARED-BUNDLE --bundle NEW-PRIVATE-DESTINATION
 tide-motion dex2hoi check --bundle BUNDLE
+tide-motion dex2hoi extract-body CLIP.glb --input OWN-HISTORY.json -o BODY.glb
 tide-motion dex2hoi preview CLIP.glb --input OWN-HISTORY.json --character CHARACTER.glb
     [--first-person] [--camera-mode root|bone] [--camera-bone NAME]
     [--camera-offset X,Y,Z] [--camera-rotation X,Y,Z] [--camera-fov N] [--camera-near N]
@@ -333,6 +334,7 @@ int command(const std::vector<std::string>& args) {
     if(args.size()<3||args[2]=="help"||std::find(args.begin()+2,args.end(),"--help")!=args.end()){std::cout<<help();return 0;}
     const auto& action=args[2];
     if(action=="preview")return preview_command(args);
+    if(action=="extract-body")return extract_body_command(args);
     if(action=="install") {
         require(args.size()==6&&args[4]=="--bundle","install needs PREPARED-BUNDLE --bundle NEW-DESTINATION");
         auto bundle=import_bundle(utf8path(args[3]),utf8path(args[5]));

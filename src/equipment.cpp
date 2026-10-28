@@ -108,8 +108,8 @@ EquipmentPlan load_equipment_plan(const fs::path& path) {
             seg.interpolation=s.value("interpolation",std::string("linear"));seg.keys=keys(s.at("keys"));
             if(seg.end<seg.start||seg.keys.front().frame!=seg.start||seg.keys.back().frame!=seg.end)throw std::runtime_error("Equipment keys must span the segment endpoints");
             if((o.segments.empty()?seg.start!=0:seg.start!=o.segments.back().end+1))throw std::runtime_error("Equipment segments must cover the clip without gaps or overlaps");
-            if(seg.space!="world"&&seg.space!="bone"&&seg.space!="object")throw std::runtime_error("Equipment space must be world, bone or object");
-            if((seg.space=="world")!=seg.anchor.empty())throw std::runtime_error("Equipment bone/object space needs anchor; world space must omit it");
+            if(seg.space!="world"&&seg.space!="bone"&&seg.space!="object"&&seg.space!="grip")throw std::runtime_error("Equipment space must be world, bone, object or grip");
+            if((seg.space=="world")!=seg.anchor.empty())throw std::runtime_error("Equipment bone/object/grip space needs anchor; world space must omit it");
             if(seg.interpolation!="linear"&&seg.interpolation!="step")throw std::runtime_error("Equipment interpolation must be linear or step");
             o.segments.push_back(seg);
         }
@@ -178,11 +178,23 @@ EquipmentResult author_equipment(const Clip& source,const EquipmentPlan& p,bool 
         for(const auto& s:o.segments) {
             if(s.start!=next||s.end<s.start||s.end>=source.frames())throw std::runtime_error("Invalid equipment segment coverage");
             next=s.end+1;
-            if(s.space!="world"&&s.space!="bone"&&s.space!="object")throw std::runtime_error("Unknown equipment space");
+            if(s.space!="world"&&s.space!="bone"&&s.space!="object"&&s.space!="grip")throw std::runtime_error("Unknown equipment space");
+            if((s.space=="world")!=s.anchor.empty())throw std::runtime_error("Equipment anchored space needs anchor; world space must omit it");
             if(s.interpolation!="linear"&&s.interpolation!="step")throw std::runtime_error("Unknown equipment interpolation");
             check_keys(s.keys,s.start,s.end);
         }
         out.objects.push_back({o.name,o.mesh,false,std::vector<Transform>(source.frames()),std::vector<Vec3>(source.frames(),{1,1,1})});
+    }
+    std::map<std::string,size_t> grips;
+    for(size_t i=0;i<p.grips.size();++i) {
+        const auto& g=p.grips[i];
+        if(g.name.empty()||!grips.emplace(g.name,i).second)throw std::runtime_error("Equipment grip names must be unique and nonempty");
+        if(g.end>=source.frames()||g.start>g.end||!objects.contains(g.object))throw std::runtime_error("Grip outside clip or unknown object");
+        (void)joint(source,g.bone);
+        for(const auto& t:{g.hand_offset,g.target}) {
+            for(float value:{t.p.x,t.p.y,t.p.z})if(!std::isfinite(value))throw std::runtime_error("Nonfinite equipment grip marker");
+            (void)normalized(t.q);
+        }
     }
     std::vector<std::vector<Transform>> body_world;body_world.reserve(source.frames());
     for(size_t f=0;f<source.frames();++f)body_world.push_back(world_pose(source,source.frame(f)));
@@ -192,12 +204,20 @@ EquipmentResult author_equipment(const Clip& source,const EquipmentPlan& p,bool 
         if(state[index]==1)throw std::runtime_error("Equipment object anchor cycle");
         state[index]=1;
         for(const auto& seg:p.objects[index].segments) {
-            size_t anchor=0;
+            size_t anchor=0;const EquipmentGrip* grip=nullptr;
             if(seg.space=="bone")anchor=joint(source,seg.anchor);
             if(seg.space=="object") {auto found=objects.find(seg.anchor);if(found==objects.end())throw std::runtime_error("Equipment object anchor not found");anchor=found->second;evaluate(anchor);}
+            if(seg.space=="grip") {
+                auto found=grips.find(seg.anchor);if(found==grips.end())throw std::runtime_error("Equipment grip anchor not found");
+                grip=&p.grips[found->second];
+                if(grip->object!=p.objects[index].name)throw std::runtime_error("Equipment grip anchor belongs to another object");
+                if(seg.start<grip->start||seg.end>grip->end)throw std::runtime_error("Equipment grip anchor must cover its segment interval");
+                anchor=joint(source,grip->bone);
+            }
             for(size_t f=seg.start;f<=seg.end;++f) {
                 auto key=at(seg.keys,f,seg.interpolation=="step");Transform base;
                 if(seg.space=="bone")base=body_world[f][anchor];else if(seg.space=="object")base=out.objects[anchor].poses[f];
+                else if(grip)base=body_world[f][anchor]*grip->hand_offset*inverse(grip->target);
                 out.objects[index].poses[f]=base*key.local;out.objects[index].scales[f]=key.mesh_scale;
             }
         }

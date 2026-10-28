@@ -111,6 +111,37 @@ samples, actual prop triangles and explicit grip markers. It offers shared frame
 scrubbing across all three trials and a root-carried perspective. It is a skeleton
 inspection view, not a claim of engine renderer equivalence.
 
+## Follow-up to owner grip feedback
+
+The owner confirmed that prop positions/grips were wrong. An actual-input check
+compares all429 raw prefix features against the pinned upstream encoding helpers:
+maximum1.1921e-7, including object slots and finger/surface proximity weights.
+Native full-mixture encode/decode reconstructs the two input objects within
+1.813e-7m. No position/encoding bug was established for this fixture. The model's
+conditioning has geometry/history but no explicit designated handle/palm contract.
+
+A separately labelled authored candidate binds the existing palm/handle markers
+through native equipment `space: "grip"` anchors. The original raw GLB is retained.
+The native `dex2hoi extract-body` command exposes the original body without prop
+nodes for this workflow; no Python runtime or new inference is involved.
+
+Independent exported-file measurements over all70 frames: maximum designated
+grip gap3.844e-7m for sword and2.710e-7m for shield (both below.001mm), versus raw
+47.02cm/13.79cm. Every body/finger local position is unchanged; rotation difference
+is at most2.10e-6degrees from normal GLB quaternion round trips. No IK or body/finger
+correction was requested. This fixes attachment, not model contact generation.
+
+Body discontinuity still drives a59.24cm sword/44.23cm shield step at frame9→10.
+At half-frame samples, the baked independent world tracks separate from the
+interpolated hand by up to8.39cm/6.35cm across that bad seam. Beyond it, midpoint
+gaps peak at .228mm/.178mm. Marker equality at30Hz keys does not promise exact
+continuous attachment; raw body continuity still needs a learned-motion fix.
+Finger pose/handle closure, mesh collision and attack quality remain unresolved.
+The intended held markers are satisfied; that is not a whole-animation quality
+certificate. Native third-person and arms-only first-person candidate GIFs use
+the same renderer/camera settings as the raw comparison, with private own geometry.
+Advisory reports retain both variants and keep untested properties unknown.
+
 Native advisory `review` HTML and its adjacent agent JSON are retained with all
 three original clips and recipes. Local quaternion measurements are available;
 custom-rig canonical body/ground, skin collision, balance and aesthetic checks

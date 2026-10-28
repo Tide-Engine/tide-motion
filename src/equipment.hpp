@@ -10,6 +10,8 @@ struct EquipmentKey {
 };
 struct EquipmentSegment {
     size_t start=0,end=0;
+    // "grip" names an EquipmentGrip for this object. Its source-body hand/palm
+    // marker and inverse object target form the object frame before local keys.
     std::string space="world",anchor,interpolation="linear";
     std::vector<EquipmentKey> keys;
 };

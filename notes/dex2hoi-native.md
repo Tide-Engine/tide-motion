@@ -154,6 +154,28 @@ nonuniform scale is valid geometry rather than a skeletal scale contract.
 The original GLB/mesh is not rewritten, and learned object trajectories remain
 unchanged. The general all-node rig importer keeps its existing restrictions.
 
+## Explicit held-grip authoring
+
+For a weapon that must remain held, a separate authoring step can bind measured
+hand and handle markers. Extract the learned body first, then use a native
+equipment plan with [named grip space](equipment-authoring.md):
+
+```powershell
+tide-motion dex2hoi extract-body C:/own/raw.glb --input C:/own/history.json -o C:/own/body.glb
+tide-motion equipment bake C:/own/body.glb --plan C:/own/held-grips.json --strict -o C:/own/held.glb
+```
+
+`extract-body` validates the same source/history/recipe contracts as the combined
+preview, preserves every body/finger transform, and writes only the body skeleton
+with embedded source/input hashes. It refuses existing outputs. Neither command
+opens an inference session or model cache. The original coupled output is retained.
+
+Use `space: "grip"`, `anchor: "GRIP-NAME"` and identity local keys on an object's
+held segment. Its grip declares the hand bone, palm offset and object-local handle
+target. The tool resolves these measured frames natively. This replaces object
+placement explicitly; it does not improve raw model predictions, curl fingers,
+remove collision, smooth body jumps or create a convincing attack.
+
 ## Sampling and reproducibility
 
 Default sampling is upstream cosine diffusion, all 500 timesteps, x0 prediction,

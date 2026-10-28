@@ -93,7 +93,7 @@ Each of 1–32 objects contains `name`, optional `mesh`, and 1–256 `segments`:
 }
 ```
 
-`space` is `world` (default), `bone` or `object`. World space omits `anchor`.
+`space` is `world` (default), `bone`, `grip` or `object`. World space omits `anchor`.
 Bone space explicitly names a body bone; object space names another declared
 object. Cyclic object anchors are refused. A mesh-less object is a useful named
 transform, such as a nock or grip guide, and is still exported as an animated node.
@@ -129,6 +129,26 @@ Optional `handOffset` has `position`/`rotation` in the body's named bone frame,
 allowing a palm/socket offset from the wrist. The measured equality is:
 
 `worldHandBone × handOffset = worldObject × gripTarget`.
+
+To keep a declared handle in a declared palm, use an object segment with
+`"space": "grip", "anchor": "NAME-OF-ITS-GRIP"` and identity position/rotation
+keys at the segment endpoints. The native tool derives the object's frame as
+`worldHandBone × handOffset × inverse(gripTarget)`. You do not need to manually
+compose that offset. Both markers can have their own position and orientation;
+measure them on your own hand and prop rather than assuming the object origin
+is the handle. Mesh-only scale keys remain independent.
+
+The named grip must belong to this object and cover the whole segment interval.
+Missing/duplicate grips, wrong objects and out-of-range intervals refuse. Local
+offset keys remain possible as deliberate deviations from the binding; normal
+grip diagnostics and `--strict` measure their actual residuals. A `grip` segment
+can transition to `world` for an explicitly authored release.
+
+This is an explicit offline equipment placement step. It preserves learned body
+and finger motion and does not turn a model's raw object prediction into a learned
+success. It does not close fingers, infer a grasp, remove collision, smooth a
+bad body transition or improve action adherence. Grip anchors, like bone anchors,
+sample the original body before any separately requested arm correction.
 
 | Field | Default | Accepted range / meaning |
 | --- | --- | --- |
@@ -192,7 +212,7 @@ refused. Strings are authored render geometry, not a tension/elastic simulation.
 Each of at most 256 `events` requires `name` and `frame`, with optional `object`
 and arbitrary JSON `data`. The tool adds `timeSeconds = frame / fps`. The exact
 name **`release`** requires an authored object and validates that its event frame
-is the start of a new `world` segment immediately after a `bone`/`object` segment
+is the start of a new `world` segment immediately after a `bone`/`grip`/`object` segment
 for that object. The authored segment transition performs detachment; the event
 validates and records it. Other names are annotations.
 

@@ -87,7 +87,7 @@ void new_output(const fs::path& path) {
         require(!error||error==std::errc::no_such_file_or_directory,"cannot inspect output path: "+candidate.string());
         return fs::exists(status)||fs::is_symlink(status);
     };
-    require(!path.empty()&&!present(path)&&!present(path.string()+".part"),"capture/GIF or partial already exists: "+path.string());
+    require(!path.empty()&&!present(path)&&!present(path.string()+".part"),"output or partial already exists: "+path.string());
 }
 float number(const std::string& text,float low,float high) {
     size_t used=0;float value=std::stof(text,&used);
@@ -167,6 +167,29 @@ EquipmentResult load_preview_result(const fs::path& source,const fs::path& input
     }
     result.body.validate();result.report={{"backend","dex2hoi"},{"previewOnly",true},{"recipeVerified",recipe_verified},{"defaultCameraBone",binding[5]},{"frames",70}};
     return result;
+}
+
+void extract_body(const fs::path& source,const fs::path& input,const fs::path& output) {
+    require(output.extension()==".glb","body output needs .glb");new_output(output);
+    auto result=load_preview_result(source,input);
+    result.objects.clear();result.events=json::array();
+    result.report={{"command","dex2hoi extract-body"},{"bodyTransformsPreserved",true},
+        {"source",fs::absolute(source).generic_string()},{"sourceSha256",sha256_file(source)},
+        {"input",fs::absolute(input).generic_string()},{"inputSha256",sha256_file(input)},
+        {"sourceRecipeVerified",result.report.at("recipeVerified")}};
+    save_equipment_glb(result,output);
+}
+int extract_body_command(const std::vector<std::string>& args) {
+    require(args.size()>=4,"use dex2hoi extract-body CLIP.glb --input HISTORY.json -o BODY.glb");
+    fs::path input,output;
+    for(size_t i=4;i<args.size();++i) {
+        auto option=args[i];require(++i<args.size()&&!args[i].empty(),"missing body extraction option value");
+        if(option=="--input"){require(input.empty(),"duplicate --input");input=utf8path(args[i]);}
+        else if(option=="-o"||option=="--output"){require(output.empty(),"duplicate body output");output=utf8path(args[i]);}
+        else throw std::runtime_error("Dex2HOI body extraction: unknown option: "+option);
+    }
+    require(!input.empty()&&!output.empty(),"body extraction requires --input and -o");
+    extract_body(utf8path(args[3]),input,output);return 0;
 }
 
 PreviewRequest parse_preview_request(const std::vector<std::string>& args) {

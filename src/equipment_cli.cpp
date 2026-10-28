@@ -16,9 +16,10 @@ tide-motion equipment preview BODY.glb --plan EQUIPMENT.json [--correct-grips] [
 
 Native offline equipment authoring; no model/session/cache required. Version-1
 plan: objects with contiguous inclusive segments and absolute-frame keys;
-space world, bone or object; position in metres, rotation in Euler degrees,
+space world, bone, grip or object; position in metres, rotation in Euler degrees,
 meshScale for geometry only. Independent baked object roots retain these tracks.
 Grips name an object-local target and a body bone/palm offset over [start,end].
+Grip space anchors an object to a named grip's palm/handle markers explicitly.
 --correct-grips needs an explicit direct upper-arm/forearm/hand chain per grip.
 Only chain rotations change; translations, root, fingers and protected frames stay.
 Object trajectories are resolved from the original body, then held fixed during IK.
@@ -122,6 +123,7 @@ int equipment_command(const std::vector<std::string>& args) {
     // Include explicit unweighted anchor nodes while sampling the drawn character.
     if(options.body==PreviewBody::character) {
         auto bind=options;for(const auto& o:plan.objects)for(const auto& s:o.segments)if(s.space=="bone")bind.props.push_back({{},s.anchor,{},{}});
+        for(const auto& grip:plan.grips)bind.props.push_back({{},grip.bone,{},{}});
         source_clip=preview_rig(source_clip,bind);
     }
     auto result=author_equipment(source_clip,plan,correct);
