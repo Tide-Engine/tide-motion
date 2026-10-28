@@ -1088,3 +1088,99 @@ recipes and tests. Resolved append-only notes/CLI-test conflicts. Rebuilt the
 integrated CPU executable and all six CTests pass. This does not repeat or claim
 v1.2 model inference/conversion validation; the follow-up only changes mirror
 metadata and native cleanup contract coverage.
+
+## Pose placement and travel diagnostics (2026-10-28)
+
+Investigated the reported backward-stumble recipe. A start and end pose at the
+same world position intentionally asks world/auto placement to return home;
+this is not a duration limit. The free mode masked root height/heading and body
+while omitting root X/Z for later poses. This partial-root full-pose mask differs
+from the complete-root conditions used by the pinned upstream multiprompt path.
+The reproduced large drift occurs with a later floating pose; start-only free
+and world have identical masks/values (now an explicit regression assertion).
+Do not claim the placement switch alone changes a start-only clip.
+
+Free poses now use two native Kimodo passes per seed. The guide samples the
+same prompts, durations, seed, guidance and anchored poses/path, omitting the
+floating poses. Its sampled hips X/Z locate those poses for a second complete-
+root conditioned inference. Original floating semantics remain for error
+measurement and correction (ground position is not snapped). No procedural
+travel, blending generator, Python inference or hosted inference was added.
+Cost: twice the sampling work when floating poses exist. Seeds in free mode
+change behavior intentionally. Model/dependency revisions and licenses are
+unchanged. Recipes include freePlacementPasses and inferredPoseLocations (world
+coordinates before the optional final whole-clip shift). Auto selection of
+world versus free, and world masks, remain unchanged.
+
+`--end-pose idle.glb@0 --end-at X,Z[,YAW]` places the hips at absolute world X/Z,
+keeps height, and optionally turns the entire pose to absolute hip-derived yaw
+in degrees. Body-local rotations stay unchanged. Batch uses endAt: [X,Z] or
+[X,Z,YAW]. Requires an end pose; in-place remains refused with any path.
+A path sharing any pose frame first places/turns that pose before encoding and
+correction, including frame zero's origin/heading. Explicit locations anchor
+that pose even in free mode. Two poses or two path points at one frame remain
+errors; a pose plus one path is now supported. Source files are not rewritten.
+The full-body correction therefore lands the requested body at the new location,
+without a separate connect step. Path-only points still receive no correction.
+
+Variant sheet and GIF labels print horizontal displacement, accumulated path
+length and peak per-frame horizontal root speed (metres, metres, metres/second).
+Poses remain centred for comparison. The same world-space motion-root metric
+is exposed by inspect and output recipes as rootTravel; recipe values describe
+the final output, including correction and optional in-place removal. Custom
+motion-root ancestors and scale contribute through FK. Labels were visually
+inspected at 960x1036: all metrics and seeds are legible without overlap.
+
+Validation: own Windows x64 ClangCL 18 Release Vulkan build, all five CTests
+pass. New contracts cover merged pose/path position/yaw, preserved body-local
+rotations, free-mode explicit anchoring, duplicate refusal, identical start-only
+world/free conditioning, moving/stationary travel, CLI/batch endAt acceptance
+and missing-end-pose refusal. An independent native exported-GLB check compares
+all 30 joints at both ends against the sampled source and explicitly placed/
+turned target (position squared error <1e-10, rotation <0.002 radians); passes.
+Reproducible opt-in runner: tests/placement-inference.ps1, accepting user/self-
+generated Idle, Models, optional Baseline and an engine-built Tide executable.
+It holds TideMotionGpuValidation, runs native inference, checks correction and
+pass counts, verifies exported endpoints, optionally captures a sheet and writes
+travel.csv. No model or generated motion is committed.
+
+Actual RTX 4080 SUPER Vulkan results: same existing self-generated idle, 2 s,
+50 steps, guidance 2, seeds 1/3. Old / new displacement and peak speed:
+
+| Prompt / seed | Old displacement m | New displacement m | Old peak m/s | New peak m/s |
+| --- | ---: | ---: | ---: | ---: |
+| stumble backwards / 1 | 4.403 | 1.038 | 3.932 | 1.114 |
+| walk backwards / 1 | 4.170 | 2.613 | 3.967 | 2.269 |
+| stumble backwards / 3 | 0.592 | 0.789 | 0.817 | 1.440 |
+| walk backwards / 3 | 0.720 | 2.656 | 0.703 | 1.942 |
+
+Explicit [0,-1,90] endpoint: 60 frames, 1.040 m displacement (the idle starts
+slightly off origin), 1.190 m path, 1.803 m/s peak; endpoint verification passes.
+Two further variants at [0,-1] produce 1.040 m displacement with peaks 1.646 and
+1.312 m/s. Bounded three-frame TIDE_HIDDEN=1 contact-sheet capture succeeds,
+using Tide built from D:/Projects/PurrEngine at
+28b61e4db1cb2549fcc9f6bc6d9c6034022f3d9c and its matching staged native platform.
+No engine changes. A guidance-4, no-correction free stumble also succeeds
+(2.574 m, peak 2.674 m/s); an auto/free end-only walk succeeds (2.222 m, peak
+1.557 m/s). These are functional samples, not a population quality guarantee.
+
+Remaining gaps: the exact sword idle in the report was not attached, so its
+16–19 degree mean / 52 degree maximum raw rotation error is not reproduced.
+This work does not retrain the model or claim better raw rotation prediction.
+Existing full-body endpoint correction makes rotations exact; modelError keeps
+the uncorrected residual visible. Contact/velocity continuity can still be poor.
+Textual "two steps" is still not a hard constraint. PROMPTING.md now explicitly
+states that limit and describes authored pose-sequence targets for footfall
+timing without claiming guaranteed intermediate contacts. No automatic step
+count enforcement, IK, collision handling or research-only data is introduced.
+Linux/macOS and broad prompt/seed quality sweeps were not run for this change.
+
+Integration: rebased onto origin/dev 1033a9e, retaining concurrent native contact
+cleanup, pose protection, DART research and optional SOMA v1.2 support. Resolved
+append-only docs/tests and combined CLI field/option sets (model plus endAt).
+The integrated Vulkan executable builds and all six CTests pass; the independent
+exported placed-endpoint verifier also passes again. A requested repeat smoke
+inference correctly refused because another task held TideMotionGpuValidation;
+no conflicting inference started. Native measurements and sheet above came from
+the successful earlier mutex-protected runs; the placement/inference algorithm
+and platform.cpp are unchanged by integration. No v1.2 quality claim is made.

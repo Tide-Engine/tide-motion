@@ -95,6 +95,7 @@ struct MotionConditions {
     std::vector<PoseConstraint> poses; std::vector<PathConstraint> path;
     bool empty() const { return poses.empty()&&path.empty(); }
 };
+// Colocated paths first place/turn poses, overriding their source ground location.
 // world pins every pose to its ground position in its file; free leaves later poses
 // to float (root height, facing and body kept); automatic is world when output frame 0
 // or a path fixes the world, otherwise free. Returns whether the output should then be
@@ -140,6 +141,8 @@ void mirror_soma(Clip&);
 // Removes horizontal root travel (a one-second moving average of the root's ground path),
 // keeping height, facing and sway; frame 0 stays where it was.
 void remove_root_travel(Clip&);
+struct RootTravel { float displacement=0, distance=0, peak_speed=0; };
+RootTravel root_travel(const Clip&);
 // Frames that show a clip at a glance: first, last and its strongest moments, in order.
 std::vector<size_t> key_frames(const Clip&, size_t count);
 // A procedural SOMA-30 preview body (skinned GLB, no third-party content).

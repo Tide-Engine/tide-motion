@@ -97,6 +97,12 @@ void edit_contracts() {
         auto p=test_pose(0.0f,{0.05f*std::sin(0.4f*static_cast<float>(f)),0.9f+0.02f*std::sin(0.5f*static_cast<float>(f)),0.04f*static_cast<float>(f)},0.2f);
         walk.poses.insert(walk.poses.end(),p.begin(),p.end());
     }
+    auto travel=root_travel(walk);
+    check(travel.displacement>3.5f&&travel.distance>=travel.displacement&&travel.peak_speed>1.2f,"Root travel measures actual motion");
+    auto stationary=walk;
+    for(size_t f=0;f<stationary.frames();++f)stationary.frame(f)[0].p=walk.frame(0)[0].p;
+    auto zero=root_travel(stationary);
+    check(zero.displacement==0&&zero.distance==0&&zero.peak_speed==0,"Stationary root has no travel");
     auto still=walk;remove_root_travel(still);
     for(size_t f=0;f<walk.frames();++f) {
         auto a=walk.frame(f)[0],b=still.frame(f)[0];
@@ -166,6 +172,23 @@ void kimodo_contracts() {
     check(count(45)==4&&count(10)==0,"Path masks ground position and heading only");
     check(std::abs(c.observed[0])<1e-6f&&std::abs(c.observed[2])<1e-6f,"Start pose sits at the model origin");
     check(std::abs(c.observed[45*kimodo_features]-1)<1e-5f&&std::abs(c.observed[45*kimodo_features+3])<1e-5f&&std::abs(c.observed[45*kimodo_features+4]-1)<1e-5f,"Path is relative to the origin, yaw 90 faces +X");
+    // Colocated paths relocate and turn poses before encoding and correction.
+    auto located=conditions;
+    located.path.push_back({59,-2,4,true,90});
+    (void)place_constraints(located,Placement::free);
+    check(located.poses[1].anchored,"Explicit path anchors even in free placement");
+    check(located.poses[1].pose[0].p.x==-2&&located.poses[1].pose[0].p.z==4,"Colocated path places pose root");
+    check(std::abs(kimodo_heading(rig,located.poses[1].pose)-1.5707964f)<1e-4f,"Colocated yaw turns the pose");
+    for(size_t j=1;j<30;++j)check(same(located.poses[1].pose[j].q,conditions.poses[1].pose[j].q),"Placement preserves local body rotations");
+    auto lc=build_condition(located,60);
+    check(std::abs(lc.observed[59*kimodo_features]-(-2-c.origin.x))<1e-5f,"Merged pose uses path location");
+    auto duplicate=located;duplicate.path.push_back(located.path.back());
+    bool duplicate_refused=false;try{(void)place_constraints(duplicate,Placement::world);}catch(...){duplicate_refused=true;}
+    check(duplicate_refused,"Duplicate paths still refused");
+    MotionConditions start_only;start_only.poses.push_back(conditions.poses[0]);
+    (void)place_constraints(start_only,Placement::world);auto world_start=build_condition(start_only,60);
+    (void)place_constraints(start_only,Placement::free);auto free_start=build_condition(start_only,60);
+    check(world_start.mask==free_start.mask&&world_start.observed==free_start.observed,"Start-only free/world conditioning is identical");
     // Without a start pose, poses float and the output follows the last one.
     MotionConditions floating;floating.poses.push_back({"end-pose",59,"b.glb",0,test_pose(1.7f,{3,0.9f,1},-1),0});
     check(place_constraints(floating,Placement::automatic)&&!floating.poses[0].anchored,"End pose alone floats");
@@ -194,6 +217,23 @@ void kimodo_contracts() {
     check(angle(out.frame(15)[3].q,before.frame(15)[3].q)>1e-3f,"Correction fades in before the keyframe");
 }
 int main(int argc,char** argv) try {
+    if(argc==7&&std::string(argv[1])=="--verify-placed") {
+        auto source=load_glb(argv[2]),output=load_glb(argv[3]);
+        std::vector<Transform> end(source.frame(0).begin(),source.frame(0).end());
+        const float facing=std::stof(argv[6])*3.14159265358979323846f/180;
+        end[0].q=normalized(yaw(facing-kimodo_heading(source,end))*end[0].q);
+        end[0].p.x=std::stof(argv[4]);end[0].p.z=std::stof(argv[5]);
+        for(size_t f:{size_t{0},output.frames()-1}) {
+            auto want=f?std::span<const Transform>(end):source.frame(source.frames()-1);
+            auto got=output.frame(f);
+            for(size_t j=0;j<30;++j) {
+                const auto d=got[j].p-want[j].p;
+                check(dot(d,d)<1e-10f,"Exported placed endpoint position");
+                check(angle(got[j].q,want[j].q)<0.002f,"Exported placed endpoint rotation");
+            }
+        }
+        std::cout<<"Exported placed endpoints verified\n";return 0;
+    }
     if(argc==4&&std::string(argv[1])=="--verify-sequence") {
         auto plan=load_pose_sequence(argv[2]);auto output=load_glb(argv[3]);
         size_t frame=0;

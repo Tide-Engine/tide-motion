@@ -372,7 +372,11 @@ float2 OnScreen(float x, float y) { return float2(x * Screen.width / VIEW_W, -y 
         const float facing=kimodo_heading(c,c.frame(0))*180/std::numbers::pi_v<float>;
         const std::string front=num(180-facing),side=num(90-facing);
         scene<<"    Cell("<<num(left)<<", "<<num(top)<<", "<<num(cell_w)<<", "<<num(cell_h)<<", "<<num(floor_a)<<", "<<num(floor_b)<<");\n";
-        texts.push_back({labels[i],left+pad*0.5f,top-0.06f*height,0.2f*height,false});
+        const auto metrics=root_travel(c);
+        std::ostringstream travel;travel.imbue(std::locale::classic());
+        travel<<labels[i]<<std::fixed<<std::setprecision(2)<<" | displacement "<<metrics.displacement
+              <<" m | path "<<metrics.distance<<" m | peak "<<metrics.peak_speed<<" m/s";
+        texts.push_back({travel.str(),left+pad*0.5f,top-0.06f*height,0.13f*height,false});
         if(animated) {
             scene<<"    {\n        mut var pose = body.defaultPose;\n        pose.Sample(v"<<i<<", seconds, Playback.Clamp);\n";
             scene<<"        Body(pose, float3("<<num(left+pad*0.5f+0.5f*step)<<", "<<num(floor_a)<<", 0), "<<front<<"deg);\n";

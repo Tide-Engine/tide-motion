@@ -204,3 +204,11 @@ foreach(name IN ITEMS protected-mirror protected-mirror-again protected-mirror-c
     endif()
   endforeach()
 endforeach()
+
+# Endpoint placement is accepted before model loading.
+refuses("requires --end-pose" generate "walk" --end-at "0,-1" -o "${WORK}/end-at.glb" --models "${empty}")
+refuses("Missing or incomplete" generate "walk" --start-pose "${source}" --end-pose "${source}" --end-at "0,-1,90" -o "${WORK}/end-at.glb" --models "${empty}")
+refuses("Missing or incomplete" generate "walk" --start-pose "${source}" --end-pose "${source}" --path "0,-1@-1" -o "${WORK}/end-at.glb" --models "${empty}")
+refuses("Two path points" generate "walk" --end-pose "${source}" --end-at "0,-1" --path "0,-2@-1" -o "${WORK}/end-at.glb" --models "${empty}")
+file(WRITE "${WORK}/end-at.json" "{\"actions\":[{\"action\":\"generate\",\"prompt\":\"walk\",\"endPose\":\"with spaces and 'quotes'/source.glb\",\"endAt\":[0,-1,90],\"output\":\"end-at.glb\"}]}")
+refuses("Missing or incomplete" batch "${WORK}/end-at.json" --models "${empty}")

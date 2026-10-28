@@ -80,6 +80,17 @@ Clip decode_kimodo(std::span<const float> raw) {
     return c;
 }
 bool place_constraints(MotionConditions& conditions,Placement placement) {
+    // A colocated path explicitly places the pose, including its orientation.
+    std::set<size_t> path_frames;
+    Clip rig;rig.joints=soma();
+    for(const auto& point:conditions.path) {
+        if(!path_frames.insert(point.frame).second)throw std::runtime_error("Two path points share output frame "+std::to_string(point.frame));
+        for(auto& pose:conditions.poses)if(pose.frame==point.frame) {
+            const float turn=point.has_heading?point.heading*std::numbers::pi_v<float>/180-kimodo_heading(rig,pose.pose):0;
+            pose.pose[0].q=normalized(yaw(turn)*pose.pose[0].q);
+            pose.pose[0].p.x=point.x;pose.pose[0].p.z=point.z;
+        }
+    }
     bool start=false;
     for(const auto& pose:conditions.poses)start|=pose.frame==0;
     for(const auto& point:conditions.path)start|=point.frame==0;
@@ -87,7 +98,7 @@ bool place_constraints(MotionConditions& conditions,Placement placement) {
     // positions of later poses would be arbitrary; let them float unless a path or
     // the caller fixes the world.
     bool world=placement==Placement::world||(placement==Placement::automatic&&(start||!conditions.path.empty()));
-    for(auto& pose:conditions.poses)pose.anchored=world||pose.frame==0;
+    for(auto& pose:conditions.poses)pose.anchored=world||pose.frame==0||path_frames.contains(pose.frame);
     bool floating=false;for(const auto& pose:conditions.poses)floating|=!pose.anchored;
     return floating&&!start&&conditions.path.empty();
 }
@@ -99,9 +110,10 @@ KimodoCondition build_condition(const MotionConditions& conditions,size_t frames
         if(pose.frame>=frames)throw std::runtime_error(pose.kind+" frame "+std::to_string(pose.frame)+" is outside the "+std::to_string(frames)+"-frame output");
         if(!used.insert(pose.frame).second)throw std::runtime_error("Two pose constraints share output frame "+std::to_string(pose.frame));
     }
+    std::set<size_t> paths;
     for(const auto& point:conditions.path) {
         if(point.frame>=frames)throw std::runtime_error("Path frame "+std::to_string(point.frame)+" is outside the "+std::to_string(frames)+"-frame output");
-        if(!used.insert(point.frame).second)throw std::runtime_error("A path point shares output frame "+std::to_string(point.frame)+" with another constraint");
+        if(!paths.insert(point.frame).second)throw std::runtime_error("Two path points share output frame "+std::to_string(point.frame));
     }
     Clip rig;rig.joints=soma();
     // Kimodo starts generated motion at the origin, facing first_heading. A constraint on

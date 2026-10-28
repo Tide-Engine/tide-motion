@@ -76,6 +76,7 @@ Generates a SOMA-30 clip from text with Kimodo (30 fps).
                               frame, so the output continues from it)
   --end-pose FILE.glb[@F]     End in frame F of a SOMA clip (default: its first
                               frame, so the output leads into it)
+  --end-at X,Z[,YAW]         Place --end-pose on the ground, optionally turn it
   --keyframe FRAME FILE.glb[@F]
                               Reach frame F (default first) at output FRAME
   --effector PARTS FRAME FILE.glb[@F]
@@ -119,7 +120,8 @@ retarget --to-soma).
 Placement: a start pose (or a path point at frame 0) fixes where the output
 begins, in that clip's world. world also pins later poses to their ground
 positions in their files; free keeps their body, height and facing but lets the
-motion choose where on the ground they happen. auto (default) is world when the
+motion choose where on the ground they happen using two learned passes.
+auto (default) is world when the
 first frame or a path fixes the world, otherwise free, and then moves the whole
 output so its last pose lands where it is in its file (so an end pose leads
 straight into that clip). Without a start pose the output begins facing +Z.
@@ -456,7 +458,7 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
         std::vector<std::string> argv{"tide-motion",type};
         unsigned variants=1;bool sheet_gif=false;
         if(type=="generate") {
-            keys.insert({"prompt","prompts","duration","seed","steps","transition","startPose","endPose","keyframes","effectors","path","placement","correct",
+            keys.insert({"prompt","prompts","duration","seed","steps","transition","startPose","endPose","endAt","keyframes","effectors","path","placement","correct",
                 "variants","variantsGif","tide","guidance","constraintGuidance","device","threads","correctionFrames","inPlace","model"});
             if(action.contains("placement")) {
                 auto value=action["placement"].get<std::string>();
@@ -503,6 +505,15 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
                 if(!item.is_object())throw std::runtime_error("Constraint entries must be objects");
                 for(const auto& field:item.items())if(!allowed.contains(field.key()))throw std::runtime_error("Unknown constraint field: "+field.key());
             };
+            if(action.contains("endAt")) {
+                if(!action.contains("endPose"))throw std::runtime_error("endAt requires endPose");
+                const auto& at=action["endAt"];
+                if(!at.is_array()||(at.size()!=2&&at.size()!=3))throw std::runtime_error("endAt is [X,Z] or [X,Z,YAW]");
+                std::string text;
+                for(const auto& v:at) {if(!text.empty())text+=',';text+=numeric(v,"endAt");}
+                long f=0;(void)path_point(text+"@-1",&f);
+                argv.insert(argv.end(),{"--end-at",text});
+            }
             if(action.contains("transition")) {auto text=numeric(action["transition"],"transition");integer(text,1,60,"transition");argv.insert(argv.end(),{"--transition",text});}
             for(auto pair:{std::pair{"startPose","--start-pose"},std::pair{"endPose","--end-pose"}})if(action.contains(pair.first)) {
                 if(action[pair.first].is_object())fields(action[pair.first],{"file","frame"});
@@ -643,6 +654,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         else if(a=="--transition")transition=static_cast<unsigned>(integer(value(),1,60,"transition"));
         else if(a=="--start-pose")pose_specs.push_back({"start-pose",0,value()});
         else if(a=="--end-pose")pose_specs.push_back({"end-pose",-1,value()});
+        else if(a=="--end-at") {long f=0;auto p=path_point(value()+"@-1",&f);path_specs.push_back({p,f});}
         else if(a=="--keyframe") {long f=frame_index(value(),"keyframe frame");pose_specs.push_back({"keyframe",f,value()});}
         else if(a=="--effector") {unsigned bits=parse_effectors(value());long f=frame_index(value(),"effector frame");pose_specs.push_back({"effector",f,value(),bits});}
         else if(a=="--path") {long f=0;auto p=path_point(value(),&f);path_specs.push_back({p,f});}
@@ -688,7 +700,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         else pos.push_back(a);
     }
     std::set<std::string> allowed;
-    if(command=="generate")allowed={"--models","-o","--output","--duration","--seed","--steps","--then","--transition","--start-pose","--end-pose","--keyframe","--effector","--path","--placement","--no-correction",
+    if(command=="generate")allowed={"--models","-o","--output","--duration","--seed","--steps","--then","--transition","--start-pose","--end-pose","--end-at","--keyframe","--effector","--path","--placement","--no-correction",
         "--correction-frames","--in-place","--variants","--variants-gif","--tide","--guidance","--constraint-guidance","--device","--threads","--model"};
     else if(command=="connect")allowed={"--models","-o","--output","--tokens","--joined","--offset","--from-clip","--to-clip","--threads"};
     else if(command=="mirror")allowed={"-o","--output","--clip"};
@@ -748,6 +760,10 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         {
             bool canonical=true;try{require_soma(clip);}catch(const std::exception&){canonical=false;}
             nlohmann::json info={{"name",clip.name},{"rig",canonical?"soma30":"custom"},{"joints",clip.joints.size()},{"frames",clip.frames()},{"fps",clip.fps},{"duration",clip.duration()}};
+            if(!skeleton) {
+                auto travel=root_travel(clip);
+                info["rootTravel"]={{"displacementMetres",travel.displacement},{"pathMetres",travel.distance},{"peakSpeedMetresPerSecond",travel.peak_speed}};
+            }
             if(skeleton) {
                 info["bones"]=nlohmann::json::array();
                 for(const auto& joint:clip.joints)info["bones"].push_back({{"name",joint.name},{"parent",joint.parent},{"translation",{joint.rest.p.x,joint.rest.p.y,joint.rest.p.z}},{"rotation",{joint.rest.q.x,joint.rest.q.y,joint.rest.q.z,joint.rest.q.w}},{"scale",joint.scale}});
@@ -785,7 +801,9 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     };
     auto finish=[](const Clip& made,const fs::path& path,const nlohmann::json& recipe) {
         save_glb(made,path);
-        std::ofstream metadata(path.string()+".json");metadata<<recipe.dump(2)<<"\n";metadata.close();
+        auto measured=recipe;const auto travel=root_travel(made);
+        measured["rootTravel"]={{"displacementMetres",travel.displacement},{"pathMetres",travel.distance},{"peakSpeedMetresPerSecond",travel.peak_speed}};
+        std::ofstream metadata(path.string()+".json");metadata<<measured.dump(2)<<"\n";metadata.close();
         if(!metadata)throw std::runtime_error("Animation saved but could not write its recipe");
         std::cout<<"Saved "<<path.string()<<" ("<<made.frames()<<" frames, "<<made.duration()<<" seconds)\n";
     };
@@ -859,6 +877,9 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
             conditions.poses.push_back(std::move(pose));
         }
         for(auto [point,frame]:path_specs) {point.frame=resolve(frame,"path frame");conditions.path.push_back(point);}
+        if(std::find(flags.begin(),flags.end(),"--end-at")!=flags.end()&&
+           std::none_of(conditions.poses.begin(),conditions.poses.end(),[](const auto& p){return p.kind=="end-pose";}))
+            throw std::runtime_error("--end-at requires --end-pose");
         bool shift=place_constraints(conditions,placement);
         std::optional<KimodoCondition> condition;
         kimodo::motion_condition native;
@@ -884,7 +905,30 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         clip=Clip{};generate_recipe=nlohmann::json::object();
         if(variants>1)std::cerr<<"Generating variant "<<v+1<<"/"<<variants<<" (seed "<<used_seed<<")...\n";
         else std::cerr<<"Generating motion...\n";
-        auto result=generate_motion(models,context,parts,transition,steps,used_seed,guidance,condition?&native:nullptr);
+        // Partial root masks are outside the upstream full-pose conditioning contract.
+        // Choose floating locations with a learned motion pass, then condition complete
+        // root coordinates in a second learned pass. Never derive travel by blending.
+        auto effective=conditions;
+        bool floating=std::any_of(effective.poses.begin(),effective.poses.end(),[](const auto& p){return !p.anchored;});
+        std::optional<KimodoCondition> placed;
+        kimodo::motion_condition placed_native;
+        if(floating) {
+            auto guide=conditions;
+            std::erase_if(guide.poses,[](const auto& p){return !p.anchored;});
+            auto gc=build_condition(guide,total);
+            kimodo::motion_condition gn{gc.observed,gc.mask,gc.first_heading};
+            std::cerr<<"Choosing free pose locations with a learned motion pass...\n";
+            auto travel=generate_motion(models,context,parts,transition,steps,used_seed,guidance,guide.empty()?nullptr:&gn);
+            if(travel.frames!=total||travel.root_positions.size()!=total*3)throw std::runtime_error("Unexpected free placement guide layout");
+            for(auto& p:effective.poses)if(!p.anchored) {
+                p.pose[0].p.x=travel.root_positions[p.frame*3]+gc.origin.x;
+                p.pose[0].p.z=travel.root_positions[p.frame*3+2]+gc.origin.z;
+                p.anchored=true;
+            }
+            placed=build_condition(effective,total);
+            placed_native={placed->observed,placed->mask,placed->first_heading};
+        }
+        auto result=generate_motion(models,context,parts,transition,steps,used_seed,guidance,floating?&placed_native:condition?&native:nullptr);
         if(result.joints!=30||result.local_rotations_xyzw.size()!=static_cast<size_t>(result.frames)*30*4||result.root_positions.size()!=static_cast<size_t>(result.frames)*3)throw std::runtime_error("Kimodo returned an unexpected SOMA output layout");
         clip.joints=soma();clip.name=outputs[v].stem().string();
         // Constraints were expressed relative to the frame-0 origin; return to their world.
@@ -899,6 +943,12 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         generate_recipe["prompts"]=nlohmann::json::array();
         for(size_t i=0;i<parts.size();++i)generate_recipe["prompts"].push_back({{"prompt",parts[i].prompt},{"duration",segments[i].second},{"frames",parts[i].frames}});
         generate_recipe["transition"]=parts.size()>1?transition:0;
+        generate_recipe["freePlacementPasses"]=floating?2:1;
+        if(floating) {
+            generate_recipe["inferredPoseLocations"]=nlohmann::json::array();
+            for(size_t i=0;i<conditions.poses.size();++i)if(!conditions.poses[i].anchored)
+                generate_recipe["inferredPoseLocations"].push_back({{"frame",effective.poses[i].frame},{"x",effective.poses[i].pose[0].p.x},{"z",effective.poses[i].pose[0].p.z}});
+        }
         generate_recipe["placement"]=placement_name;generate_recipe["corrected"]=correct&&!conditions.poses.empty();
         generate_recipe["correctionFrames"]=correction_frames;generate_recipe["inPlace"]=in_place;
         generate_recipe["guidance"]=guidance.text;generate_recipe["constraintGuidance"]=guidance.constraint;

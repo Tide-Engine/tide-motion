@@ -188,3 +188,22 @@ faithful as the bone map.
   15, 100 steps 13. Above 50 only costs time; 25 is fine for drafts at half the
   time; 10 failed every 4-second clip. A seed's result depends on the step
   count, so remake a variant with the same `--steps`.
+
+### Travel, endpoint fit and counted steps
+
+When both pose files occupy the same place, default placement asks the motion to
+return there. Use `--end-at X,Z[,YAW]` to finish in the same body pose elsewhere,
+or `--placement free` to let a learned guide choose its location. Coordinates
+are absolute world metres. Inspect displacement, path length and peak speed on
+the variant sheet; a large peak can reveal an endpoint jump.
+
+The reported model rotation error precedes correction. Full-body correction
+makes the selected pose exact, including sword-idle wrist/spine rotations;
+`--no-correction` retains the measured residual. It does not make the intervening
+motion or velocity exact. A wider correction window spreads that residual.
+
+"Two steps" in text is a preference, not a count constraint: the model may take
+2–4. There is no reliable exact step-count control in this backend. For explicit
+footfall timing use authored SOMA targets with `pose-sequence` and inspect the
+result; intermediate contacts remain a model quality limitation. Do not shorten
+or time-warp a clip and assume that enforces the requested step count.

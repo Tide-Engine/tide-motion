@@ -4,6 +4,20 @@
 #include <stdexcept>
 
 namespace motion {
+RootTravel root_travel(const Clip& c) {
+    c.validate();
+    RootTravel out;
+    const auto start=world_pose(c,c.frame(0))[c.motion_root].p;
+    auto previous=start;
+    for(size_t f=1;f<c.frames();++f) {
+        const auto current=world_pose(c,c.frame(f))[c.motion_root].p;
+        float d=std::hypot(current.x-previous.x,current.z-previous.z);
+        out.distance+=d;out.peak_speed=std::max(out.peak_speed,d*c.fps);previous=current;
+    }
+    out.displacement=std::hypot(previous.x-start.x,previous.z-start.z);
+    return out;
+}
+
 fs::path variant_path(const fs::path& output,uint64_t seed) {
     auto path=output;path.replace_extension(".seed"+std::to_string(seed)+output.extension().string());return path;
 }

@@ -193,6 +193,7 @@ tide-motion generate "A person walks" --duration 4 \
 | `--end-pose FILE.glb[@F]` | The last output frame in frame `F` (default: the clip's first) |
 | `--keyframe FRAME FILE.glb[@F]` | Output `FRAME` in frame `F` (default first); repeatable |
 | `--effector PARTS FRAME FILE.glb[@F]` | Only the hands/feet in `PARTS` (`left-hand,right-hand,left-foot,right-foot`) |
+| `--end-at X,Z[,YAW]` | Place `--end-pose` at this world ground point, optionally turn it |
 | `--path X,Z[,YAW]@FRAME` | The root over ground point `X,Z`, optionally facing `YAW` degrees (0 faces +Z, 90 faces +X) |
 
 Output frames are 0-based at 30 fps; negative frames count from the end. Constraints
@@ -650,3 +651,26 @@ using `tools/prepare_soma_v12.py --input SOURCE --download --output OUT.gguf
 never invoked by the native executable and is not a runtime dependency.
 See `notes/implementation.md` for measured behavior and limits; corrected training
 splits alone do not imply better motion quality.
+
+### Placing an end pose
+
+`generate "A person stumbles backwards" --start-pose idle.glb --end-pose idle.glb@0 --end-at 0,-1 -o stumble.glb`
+keeps the end pose's height and local body rotations, placing its hips at world
+X=0, Z=-1 metres. Add yaw degrees (`--end-at 0,-1,90`) to face +X.
+Coordinates are absolute, not offsets from the start. A `--path` point sharing a
+pose's output frame now places that pose too; duplicate path points are refused.
+Batch generate actions accept `"endAt": [0,-1]` or `[0,-1,90]` with `endPose`.
+Explicit placement overrides `--placement free` for that pose. `--end-at` requires
+`--end-pose` and cannot be combined with `--in-place`.
+
+Free placement uses two native Kimodo inference passes per seed: first choose
+travel with the anchored poses/path and prompt, then constrain the floating
+poses at the sampled locations. This avoids passing partial root masks for
+full poses. It costs roughly twice the sampling work and can still produce poor
+motion. Recipes record inferred world locations before any final whole-clip
+shift, and the pass count. Auto still selects world placement when a start pose or
+path fixes the world; world placement uses the same masks as before.
+
+Variant sheets print horizontal root displacement, accumulated path length and
+peak horizontal root speed for every seed (also in recipes and `inspect`), exposing stationary clips and endpoint
+jumps even though each key pose remains centred for body comparison.
