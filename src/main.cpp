@@ -2,9 +2,7 @@
 #include "author.hpp"
 #include "ardy.hpp"
 #include "upgrade.hpp"
-#ifdef MOTION_MOMASK_EXPERIMENTAL
 #include "momask.hpp"
-#endif
 #include "ardy_gpu.hpp"
 #include <kimodo/kimodo.hpp>
 #include <nlohmann/json.hpp>
@@ -60,11 +58,29 @@ bool kimodo_on_gpu() {
 }
 // Usage of one command; the global text lists every command and option.
 const char* command_help(std::string_view command) {
+    if(command=="momask"||command=="inpaint")return R"(tide-motion generate "PROMPT" --backend momask -o OUT.glb [--duration 2] [--seed 0]
+tide-motion inpaint "PROMPT" --source SOMA.glb --begin FRAME --end FRAME -o EDIT.glb
+tide-motion models import-momask BUNDLE_DIRECTORY [--models CACHE]
+tide-motion models check momask [--models CACHE]
+
+MoMask runs natively on the CPU after you manually supply its prepared ONNX
+bundle in CACHE/momask. It is never downloaded by models install/all.
+ASCII prompts only. Native 20 Hz motion converts to canonical SOMA-30 at 30 Hz.
+Generation duration .2..9.8 seconds rounds down to 4 native samples/token.
+Controls: --steps 2..1000 (18), --guidance 0..10 (4), --residual-guidance 0..10
+(generate 5 / inpaint 2), --temperature (0,10] (1), --topkr [0,1) (.9), --seed.
+Inpaint uses source frames [begin,end), at least 12 frames, in a source no longer
+than 293 frames. Outside poses are kept; endpoints are corrected inside the range.
+--models CACHE follows TIDE_MOTION_MODELS or the OS cache when omitted.
+Other Kimodo/ARDY controls are not accepted. Weight rights remain unresolved;
+manual import does not grant commercial rights. See notes/momask-local.md.
+)";
     if(command=="generate")return R"(tide-motion generate "PROMPT" -o CLIP.glb [options]
 
 Generates a SOMA-30 clip from text (30 fps).
 
-  --backend kimodo|ardy       Optional ARDY native generation; default Kimodo
+  --backend kimodo|ardy|momask Backend (default Kimodo); MoMask weights are manual-only
+                              MoMask controls/limits: tide-motion help momask
   --history FILE.glb          ARDY imported SOMA history (last up to 240 frames)
   --history-frames N          ARDY visible history, 4..240, multiple of four
                               ARDY uses 1..10 steps (default 10), switches --then
@@ -321,11 +337,16 @@ if Windows reports locked files. No model downloads or engine updates occur.
 )";
     if(command=="models")return R"(tide-motion models install [all|kimodo|kimodo-v1.2|bricks] --accept-licenses [--models DIR]
 tide-motion models check [all|kimodo|kimodo-v1.2|bricks] [--models DIR]
+tide-motion models import-momask BUNDLE_DIRECTORY [--models DIR]
+tide-motion models check momask [--models DIR]
 
 Downloads (resumably) and verifies the pinned model files by SHA-256.
 kimodo-v1.2 downloads pinned official safetensors/statistics and converts them
 to verified GGUF natively, then adds the shared text files. No Python is needed.
 all retains v1.1 and MotionBricks.
+MoMask is manual-only: import its supported prepared ONNX bundle into DIR/momask.
+Raw .tar/.pt files are not that bundle. No MoMask weights are downloaded or bundled;
+manual import does not establish commercial rights for the supplied checkpoints.
 
   --accept-licenses           Accept the model licences in licenses/ (install)
   --models DIR                Model directory (default: TIDE_MOTION_MODELS or the
@@ -346,6 +367,9 @@ void help(std::string_view command={}) {
       [--keyframe FRAME FILE.glb[@F]]... [--effector PARTS FRAME FILE.glb[@F]]...
       [--path X,Z[,YAW]@FRAME]... [--correction-frames 10] [--in-place]
       [--device auto|gpu|cpu] [--threads N]
+  tide-motion generate "PROMPT" --backend momask -o CLIP.glb [--duration 2] [--seed 0]
+  tide-motion inpaint "PROMPT" --source SOMA.glb --begin F --end F -o EDIT.glb
+  tide-motion models import-momask BUNDLE_DIRECTORY [--models DIR]
   tide-motion connect FROM.glb TO.glb -o BRIDGE.glb [--tokens N|MIN..MAX] [--joined]
       [--offset X Y Z] [--from-clip NAME] [--to-clip NAME] [--threads N]
   tide-motion pose-sequence POSES.json -o CLIP.glb [--threads N]
@@ -361,7 +385,9 @@ void help(std::string_view command={}) {
   tide-motion help [COMMAND]       one command's options (also COMMAND --help)
   tide-motion --version
 
-Models are downloaded once and SHA-256 verified. Generation and transitions run
+Downloadable models are fetched once and SHA-256 verified. MoMask weights are
+manual-only; use help momask for its model import, controls and limits.
+Generation and transitions run
 locally without Python, PyTorch, Conda or a server. Models use SOMA-30; retarget
 converts mapped humanoids to/from SOMA without loading a model. GLB output
 contains animation and a skeleton, without a skinned character mesh.
@@ -424,6 +450,7 @@ std::vector<size_t> protected_recipe_frames(const nlohmann::json& recipe,size_t 
     std::sort(out.begin(),out.end());out.erase(std::unique(out.begin(),out.end()),out.end());return out;
 }
 struct RunContext {
+    std::unique_ptr<MomaskContext> momask;
     std::unique_ptr<ArdyModel> ardy;unsigned ardy_threads=0;std::string ardy_device;
     std::unique_ptr<kimodo::model> kimodo;
     // strict: an explicit --device, which never falls back. gpu_failed: auto fell back
@@ -531,6 +558,40 @@ PathConstraint path_point(const std::string& text,long* frame) {
     return p;
 }
 int main_impl(const std::vector<std::string>& args,RunContext* context=nullptr);
+// Public CLI uses the shared cache; the native MoMask parser consumes the
+// concrete CACHE/momask directory and owns no automatic download path.
+std::vector<std::string> momask_arguments(const std::vector<std::string>& args) {
+    bool prefix=args.size()>1&&args[1]=="momask";
+    std::string action=prefix?(args.size()>2?args[2]:"--help"):args.at(1);
+    std::vector<std::string> out{args[0],"momask",action};
+    if(action=="--help"||action=="help")return out;
+    for(size_t i=prefix?3:2;i<args.size();++i)if(args[i]=="--help"||args[i]=="-h")return {args[0],"momask","--help"};
+    fs::path root=model_directory();
+    bool backend_seen=false,models_seen=false;
+    for(size_t i=prefix?3:2;i<args.size();++i) {
+        if(args[i]=="--backend") {if(backend_seen||i+1==args.size()||args[i+1]!="momask")throw std::runtime_error("This action requires backend momask");backend_seen=true;++i;}
+        else if(args[i]=="--models") {if(models_seen||i+1==args.size())throw std::runtime_error("Missing or duplicate --models");models_seen=true;root=utf8path(args[++i]);}
+        else if(args[i]=="--help"||args[i]=="-h")return {args[0],"momask","--help"};
+        else out.push_back(args[i]=="--output"?"-o":args[i]);
+    }
+    out.insert(out.end(),{"--models",(root/"momask").string()});return out;
+}
+int run_momask(const std::vector<std::string>& args,RunContext* context,bool preflight=false,bool defer_source=false) {
+    auto routed=momask_arguments(args);
+    if(!preflight&&!context->momask)context->momask=std::make_unique<MomaskContext>();
+    return momask_main(routed,preflight?nullptr:context->momask.get(),preflight,defer_source);
+}
+struct BatchPathLess {
+    bool operator()(const fs::path& a,const fs::path& b) const {
+#ifdef _WIN32
+        int result=CompareStringOrdinal(a.c_str(),-1,b.c_str(),-1,TRUE);
+        if(!result)throw std::runtime_error("Cannot compare batch output paths");
+        return result==CSTR_LESS_THAN;
+#else
+        return a<b;
+#endif
+    }
+};
 int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
     if(fs::file_size(manifest)>1024*1024)throw std::runtime_error("Batch manifest exceeds 1 MiB");
     std::ifstream stream(manifest);nlohmann::json doc;stream>>doc;
@@ -538,10 +599,10 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
         throw std::runtime_error("Batch file must contain an actions array with 1..1000 actions");
     const auto base=fs::absolute(manifest).parent_path();
     std::vector<std::vector<std::string>> commands;
-    std::set<fs::path> outputs;
+    std::set<fs::path,BatchPathLess> outputs;
     auto path=[&](const nlohmann::json& value) {
         auto p=utf8path(value.get<std::string>());if(p.empty())throw std::runtime_error("Empty batch path");
-        return fs::absolute(p.is_absolute()?p:base/p).lexically_normal();
+        return fs::weakly_canonical(fs::absolute(p.is_absolute()?p:base/p));
     };
     for(size_t index=0;index<doc["actions"].size();++index)try {
         const auto& action=doc["actions"][index];
@@ -550,7 +611,22 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
         std::set<std::string> keys{"action","output"};
         std::vector<std::string> argv{"tide-motion",type};
         unsigned variants=1;bool sheet_gif=false;
-        if(type=="generate") {
+        bool momask_action=type=="inpaint"||(type=="generate"&&action.value("backend",std::string("kimodo"))=="momask");
+        bool deferred_source=false;
+        if(momask_action) {
+            if(action.value("backend",std::string("momask"))!="momask")throw std::runtime_error("inpaint backend must be momask");
+            keys.insert({"backend","prompt","duration","seed","steps","guidance","residualGuidance","temperature","topkr","source","begin","end"});
+            argv.insert(argv.end(),{action.at("prompt").get<std::string>(),"--backend","momask"});
+            if(action.contains("source")) {
+                auto source=path(action["source"]);deferred_source=outputs.contains(source);
+                if(!fs::exists(source)&&!deferred_source)throw std::runtime_error("MoMask source does not exist and is not an earlier batch output");
+                argv.insert(argv.end(),{"--source",source.string()});
+            }
+            for(auto pair:{std::pair{"guidance","--guidance"},std::pair{"residualGuidance","--residual-guidance"},std::pair{"temperature","--temperature"},std::pair{"topkr","--topkr"},std::pair{"begin","--begin"},std::pair{"end","--end"}})if(action.contains(pair.first)) {
+                if(!action[pair.first].is_number())throw std::runtime_error(std::string(pair.first)+" must be numeric");
+                argv.insert(argv.end(),{pair.second,action[pair.first].dump()});
+            }
+        } else if(type=="generate") {
             auto selected_backend=action.value("backend",std::string("kimodo"));
             if(selected_backend=="ardy") {
                 if(action.contains("model"))throw std::runtime_error("model selects Kimodo; omit it for backend ardy");
@@ -687,7 +763,7 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
             if(action.contains("clip"))argv.insert(argv.end(),{"--clip",action["clip"].get<std::string>()});
             keys.insert({"source","target","map","toSoma","clip"});
         }
-        else throw std::runtime_error("Action must be generate, connect, pose-sequence, retarget, cleanup or mirror");
+        else throw std::runtime_error("Action must be generate, inpaint, connect, pose-sequence, retarget, cleanup or mirror");
         for(const auto& item:action.items())if(!keys.contains(item.key()))throw std::runtime_error("Unknown action field: "+item.key());
         auto output=path(action.at("output"));
         if(output.extension()!=".glb")throw std::runtime_error("Output must be a .glb path: "+output.string());
@@ -706,7 +782,7 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
         }
         for(const auto& file:written)if(fs::exists(file)||fs::exists(file.string()+".part")||fs::exists(file.string()+".json")||!outputs.insert(file).second)throw std::runtime_error("Output must be a new, distinct path: "+file.string());
         argv.insert(argv.end(),{"-o",output.string()});
-        if(type=="generate"||type=="connect"||type=="pose-sequence")argv.insert(argv.end(),{"--models",models.string()});
+        if(type=="generate"||type=="inpaint"||type=="connect"||type=="pose-sequence")argv.insert(argv.end(),{"--models",models.string()});
         if(action.contains("tokens")&&action["tokens"].is_array()) {
             const auto& range=action["tokens"];
             if(range.size()!=2||!range[0].is_number()||!range[1].is_number())throw std::runtime_error("tokens is an integer or [min, max]");
@@ -737,6 +813,7 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
             for(const auto& value:offset) { if(!value.is_number())throw std::runtime_error("offset must be numeric");auto text=value.dump();number(text,-10000,10000,"offset");argv.push_back(text); }
         }
         for(auto pair:{std::pair{"fromClip","--from-clip"},std::pair{"toClip","--to-clip"}})if(action.contains(pair.first))argv.insert(argv.end(),{pair.second,action[pair.first].get<std::string>()});
+        if(momask_action)run_momask(argv,context,true,deferred_source);
         commands.push_back(std::move(argv));
     } catch(const std::exception& e) {throw std::runtime_error("Batch action "+std::to_string(index+1)+": "+e.what());}
     // Keep the 8 GB text model resident for repeated prompts rather than reloading
@@ -786,10 +863,12 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
     return 0;
 }
 int main_impl(const std::vector<std::string>& args,RunContext* context) {
-#ifdef MOTION_MOMASK_EXPERIMENTAL
-    if(args.size()>1&&args[1]=="momask")return momask_main(args);
-#endif
     RunContext owned;if(!context)context=&owned;
+    if(args.size()>1) {
+        bool selected=false;
+        if(args[1]=="generate")for(size_t i=2;i+1<args.size();++i)if(args[i]=="--backend"&&args[i+1]=="momask")selected=true;
+        if(selected||args[1]=="inpaint"||args[1]=="momask")return run_momask(args,context);
+    }
     if(args.size()<2||args[1]=="--help"||args[1]=="-h") { help();return 0; }
     auto unknown=[](const std::string& name){return std::runtime_error("Unknown command: "+name+"; tide-motion --help lists the commands");};
     if(args[1]=="help") { if(args.size()>2&&!command_help(args[2]))throw unknown(args[2]);help(args.size()>2?args[2]:"");return 0; }
@@ -906,6 +985,11 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         return batch(utf8path(pos[0]),models,context);
     }
     if(command=="models") {
+        if(pos.size()==2&&pos[0]=="import-momask")return momask_main({args[0],"momask","install",pos[1],"--models",(models/"momask").string()});
+        if(pos.size()==2&&pos[1]=="momask") {
+            if(pos[0]=="check")return momask_main({args[0],"momask","check","--models",(models/"momask").string()});
+            if(pos[0]=="install")throw std::runtime_error("MoMask weights are manual-only; use tide-motion models import-momask BUNDLE_DIRECTORY");
+        }
         if(pos.size()==2&&pos[0]=="import-ardy") {
             if(!accept)throw std::runtime_error("Read licenses/NVIDIA-ARDY-MODEL.txt and META-LLAMA-3.txt, then pass --accept-licenses");
             auto source=utf8path(pos[1]);check_ardy_models(source);

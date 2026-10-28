@@ -1,7 +1,7 @@
 {
-  "schema": 1,
-  "jobs": [
-    {"prompt": "A person walks forward.", "duration": 3, "seed": 7, "output": "momask-example-walk.glb"},
-    {"prompt": "A person stands still in a relaxed pose.", "duration": 3, "seed": 2, "output": "momask-example-idle.glb"}
+  "actions": [
+    {"action": "generate", "backend": "momask", "prompt": "A person walks forward.", "duration": 3, "seed": 7, "output": "momask-example-walk.glb"},
+    {"action": "generate", "backend": "momask", "prompt": "A person stands still in a relaxed pose.", "duration": 3, "seed": 2, "output": "momask-example-idle.glb"},
+    {"action": "inpaint", "prompt": "A person waves with the right hand.", "source": "momask-example-idle.glb", "begin": 18, "end": 66, "seed": 3, "output": "momask-example-wave.glb"}
   ]
 }

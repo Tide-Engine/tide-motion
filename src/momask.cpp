@@ -36,7 +36,7 @@ struct PathLess {
 #endif
     }
 };
-// Owner-authorized private bundle. No downloadable/public model installation.
+// Exact supported local bundle. This backend never downloads model weights.
 constexpr const char* bundle_hash="bb7989e45678b35f795ec3bb4ec8442d78e37a3e7b6eebe093dcf7784490c184";
 json read_json(const fs::path& p,size_t limit) {
     if(fs::file_size(p)>limit)throw std::runtime_error("MoMask JSON file exceeds limit");
@@ -46,7 +46,7 @@ std::vector<int64_t> tokenize(std::string text,const json& metadata) {
     if(text.empty()||text.size()>4096)throw std::runtime_error("MoMask prompt must contain 1..4096 ASCII bytes");
     for(char& c:text) {
         auto u=static_cast<unsigned char>(c);
-        if(u>=127||(u<32&&c!='\n'&&c!='\r'&&c!='\t')||c=='&')throw std::runtime_error("Experimental MoMask supports ASCII prompts without HTML entities only");
+        if(u>=127||(u<32&&c!='\n'&&c!='\r'&&c!='\t')||c=='&')throw std::runtime_error("MoMask supports ASCII prompts without HTML entities only");
         if(c>='A'&&c<='Z')c=static_cast<char>(c-'A'+'a');
     }
     if(text.find("<|")!=std::string::npos)throw std::runtime_error("MoMask prompt cannot contain tokenizer special tokens");
@@ -58,7 +58,8 @@ std::vector<int64_t> tokenize(std::string text,const json& metadata) {
     std::vector<int64_t> result{49406};
     for(std::sregex_iterator i(text.begin(),text.end(),pattern),end;i!=end;++i) {
         std::string word=i->str();std::vector<std::string> pieces;
-        for(char c:word)pieces.emplace_back(1,c);pieces.back()+="</w>";
+        for(char c:word)pieces.emplace_back(1,c);
+        pieces.back()+="</w>";
         while(pieces.size()>1) {
             size_t best=ranks.size()+1;std::pair<std::string,std::string> selected;
             for(size_t p=0;p+1<pieces.size();++p) {auto it=ranks.find({pieces[p],pieces[p+1]});if(it!=ranks.end()&&it->second<best){best=it->second;selected=it->first;}}
@@ -80,6 +81,16 @@ struct Job {
     std::string prompt;fs::path output,source;double duration=2,guidance=4,residual_guidance=5,temperature=1,topkr=.9;
     uint32_t seed=0;size_t steps=18,begin=0,end=0;std::optional<Clip> input;
 };
+json verify_bundle(const fs::path& root) {
+    if(!fs::is_regular_file(root/"bundle.json"))throw std::runtime_error("MoMask weights are not installed; use tide-motion models import-momask BUNDLE_DIRECTORY (prepared ONNX bundle)");
+    if(sha256_file(root/"bundle.json")!=bundle_hash)throw std::runtime_error("MoMask bundle manifest does not match the supported prepared ONNX bundle");
+    auto manifest=read_json(root/"bundle.json",65536);
+    for(const auto& [name,pin]:manifest.at("files").items()) {
+        if(fs::path(name).filename()!=fs::path(name))throw std::runtime_error("Invalid MoMask bundle file");
+        auto p=root/name;if(!fs::is_regular_file(p)||fs::file_size(p)!=pin.at("size").get<uint64_t>()||sha256_file(p)!=pin.at("sha256").get<std::string>())throw std::runtime_error("MoMask model checksum mismatch: "+name);
+    }
+    return manifest;
+}
 struct Model {
     Ort::Env env{ORT_LOGGING_LEVEL_WARNING,"tide-momask"};
     Ort::SessionOptions options;
@@ -87,12 +98,7 @@ struct Model {
     std::map<std::string,std::unique_ptr<Ort::Session>> sessions;
     json metadata;h::Statistics stats;std::vector<float> embeddings;
     explicit Model(const fs::path& root) {
-        if(sha256_file(root/"bundle.json")!=bundle_hash)throw std::runtime_error("MoMask bundle manifest is not the pinned private experiment");
-        auto manifest=read_json(root/"bundle.json",65536);
-        for(const auto& [name,pin]:manifest.at("files").items()) {
-            if(fs::path(name).filename()!=fs::path(name))throw std::runtime_error("Invalid MoMask bundle file");
-            auto p=root/name;if(fs::file_size(p)!=pin.at("size").get<uint64_t>()||sha256_file(p)!=pin.at("sha256").get<std::string>())throw std::runtime_error("MoMask model checksum mismatch: "+name);
-        }
+        verify_bundle(root);
         metadata=read_json(root/"metadata.json",8*1024*1024);
         if(metadata.at("vocabulary").size()!=49408||metadata.at("mean").size()!=263||metadata.at("std").size()!=263)throw std::runtime_error("Invalid MoMask metadata");
         for(size_t i=0;i<263;++i){stats.mean[i]=metadata["mean"][i];stats.deviation[i]=metadata["std"][i];}stats.validate();
@@ -100,7 +106,7 @@ struct Model {
         if(!in.read(reinterpret_cast<char*>(embeddings.data()),static_cast<std::streamsize>(embeddings.size()*sizeof(float))))throw std::runtime_error("Cannot read residual embeddings");
         options.SetIntraOpNumThreads(4);options.SetInterOpNumThreads(1);
         for(const auto* name:{"text","masked_step","residual_step","rvq_encoder","rvq_decoder"})sessions[name]=std::make_unique<Ort::Session>(env,(root/(std::string(name)+".onnx")).c_str(),options);
-        std::cerr<<"Loaded MoMask private bundle once (native ORT "<<OrtGetApiBase()->GetVersionString()<<", CPU). Commercial checkpoint scope unresolved.\n";
+        std::cerr<<"Loaded MoMask bundle once (native ORT "<<OrtGetApiBase()->GetVersionString()<<", CPU). Checkpoint commercial scope remains unresolved.\n";
     }
     template<class T> Ort::Value tensor(T* data,size_t count,std::initializer_list<int64_t> shape) {
         return Ort::Value::CreateTensor<T>(memory,data,count,shape.begin(),shape.size());
@@ -114,7 +120,8 @@ struct Model {
         auto result=run(name,std::move(values));auto info=result.GetTensorTypeAndShapeInfo();
         if(info.GetElementType()!=ONNX_TENSOR_ELEMENT_DATA_TYPE_FLOAT||info.GetElementCount()!=expected)throw std::runtime_error("Unexpected MoMask tensor shape/type");
         auto p=result.GetTensorData<float>();std::vector<float> out(p,p+expected);
-        for(float f:out)if(!std::isfinite(f))throw std::runtime_error("Nonfinite MoMask model output");return out;
+        for(float f:out)if(!std::isfinite(f))throw std::runtime_error("Nonfinite MoMask model output");
+        return out;
     }
     std::vector<float> text(const std::string& prompt,std::vector<int64_t>& tokens) {
         tokens=tokenize(prompt,metadata);std::vector<Ort::Value> args;args.push_back(tensor(tokens.data(),77,{1,77}));return floats("text",std::move(args),512);
@@ -180,27 +187,37 @@ struct Model {
 };
 double number(const std::string& s) {size_t used=0;double v=std::stod(s,&used);if(used!=s.size()||!std::isfinite(v))throw std::runtime_error("Invalid MoMask number: "+s);return v;}
 size_t integer(const std::string& s) {double v=number(s);if(v<0||v>4294967295.0||std::floor(v)!=v)throw std::runtime_error("Invalid MoMask integer: "+s);return static_cast<size_t>(v);}
-void preflight(Job& j) {
+void preflight(Job& j,bool defer_source=false) {
     if(j.output.empty()||j.output.extension()!=".glb"||fs::exists(j.output)||fs::exists(j.output.string()+".json")||fs::exists(j.output.string()+".part")||fs::exists(j.output.string()+".json.part"))throw std::runtime_error("MoMask needs new .glb, recipe and partial paths");
     if(j.prompt.empty()||j.prompt.find_first_not_of(" \t\n\r")==std::string::npos||j.prompt.size()>4096||!std::isfinite(j.duration)||j.duration<.2||j.duration>9.8||j.steps<2||j.steps>1000||!std::isfinite(j.guidance)||j.guidance<0||j.guidance>10||!std::isfinite(j.residual_guidance)||j.residual_guidance<0||j.residual_guidance>10||!std::isfinite(j.temperature)||j.temperature<=0||j.temperature>10||!std::isfinite(j.topkr)||j.topkr<0||j.topkr>=1)throw std::runtime_error("Invalid MoMask generation controls");
-    for(unsigned char c:j.prompt)if(c>=127||(c<32&&c!='\n'&&c!='\r'&&c!='\t')||c=='&')throw std::runtime_error("Experimental MoMask requires ASCII prompts without HTML entities");
+    for(unsigned char c:j.prompt)if(c>=127||(c<32&&c!='\n'&&c!='\r'&&c!='\t')||c=='&')throw std::runtime_error("MoMask requires ASCII prompts without HTML entities");
     if(j.prompt.find("<|")!=std::string::npos)throw std::runtime_error("MoMask special tokens refused");
     auto parent=j.output.parent_path();while(!parent.empty()&&!fs::exists(parent))parent=parent.parent_path();
     if(!parent.empty()&&!fs::is_directory(parent))throw std::runtime_error("MoMask output parent is not a directory");
-    if(!j.source.empty()) {j.input=load_glb(j.source);require_soma(*j.input);h::from_soma(*j.input);if(j.begin>=j.end||j.end>j.input->frames()||j.end-j.begin<12)throw std::runtime_error("MoMask edit range [begin,end) must cover at least 12 source frames");}
+    if(!j.source.empty()) {
+        if(j.begin>=j.end||j.end>293||j.end-j.begin<12)throw std::runtime_error("MoMask edit range [begin,end) must cover at least 12 source frames, within 0..293");
+        if(defer_source&&!fs::exists(j.source))return;
+        if(load_rig_glb(j.source).joints.size()!=30)throw std::runtime_error("MoMask inpaint requires a 30-joint SOMA source; extra joints would not be preserved");
+        j.input=load_glb(j.source);require_soma(*j.input);h::from_soma(*j.input);
+        if(j.end>j.input->frames())throw std::runtime_error("MoMask edit range exceeds source clip");
+    }
 }
 }
-int momask_main(const std::vector<std::string>& args) {
+struct MomaskContext::Impl {std::unique_ptr<Model> model;motion::fs::path root;};
+MomaskContext::MomaskContext():impl(std::make_unique<Impl>()) {}
+MomaskContext::~MomaskContext()=default;
+int momask_main(const std::vector<std::string>& args,MomaskContext* context,bool preflight_only,bool defer_source) {
     using namespace motion;
     if(args.size()<3||args[2]=="--help"||args[2]=="help") {
-        std::cout<<"Experimental owner-local MoMask (checkpoint commercial scope unresolved).\n"
-          "  tide-momask generate PROMPT -o OUT.glb [--duration .2..9.8] [--seed N] [--steps 2..1000]\n"
-          "  tide-momask inpaint PROMPT --source SOMA.glb --begin F --end F -o OUT.glb\n"
-          "  tide-momask batch JOBS.json\n"
-          "  tide-momask install PRIVATE_BUNDLE --models DESTINATION\n"
-          "Use --models BUNDLE to override the models folder beside the installed bin directory.\n"
+        std::cout<<"MoMask: native CPU text-to-motion and temporal inpainting. Weights are supplied manually.\n"
+          "  tide-motion models import-momask BUNDLE_DIRECTORY [--models CACHE]\n"
+          "  tide-motion models check momask [--models CACHE]\n"
+          "  tide-motion generate PROMPT --backend momask -o OUT.glb [--duration .2..9.8] [--seed N] [--steps 2..1000]\n"
+          "  tide-motion inpaint PROMPT --source SOMA.glb --begin F --end F -o OUT.glb\n"
+          "Prepared weights go in CACHE/momask; CACHE follows --models, TIDE_MOTION_MODELS or the OS cache.\n"
           "Controls: --guidance 0..10 (4), --residual-guidance 0..10 (generate 5, inpaint 2), --temperature (0,10] (1), --topkr [0,1) (.9).\n"
-          "ASCII prompts only. Native CPU ORT; output SOMA-30 GLB. Edits preserve outside [begin,end) exactly; endpoints are corrected inside the range.\n";return 0;
+          "ASCII prompts only. Output SOMA-30 GLB. Edits preserve outside [begin,end); endpoints are corrected inside the range.\n"
+          "Raw .tar/.pt files are not the prepared ONNX bundle. No automatic MoMask downloads or commercial checkpoint clearance.\n";return 0;
     }
     fs::path root;std::vector<std::string> positional;std::map<std::string,std::string> options;
     for(size_t i=3;i<args.size();++i) {
@@ -209,17 +226,25 @@ int momask_main(const std::vector<std::string>& args) {
     }
     const std::set<std::string> allowed={"--models","-o","--source","--begin","--end","--duration","--seed","--steps","--guidance","--residual-guidance","--temperature","--topkr"};
     for(const auto& [key,value]:options){(void)value;if(!allowed.contains(key))throw std::runtime_error("Unknown MoMask option: "+key);}
-    if(!options.contains("--models"))throw std::runtime_error("MoMask needs an explicit private --models bundle");root=utf8path(options.at("--models"));
+    if(!options.contains("--models"))throw std::runtime_error("MoMask needs a model bundle path");
+    root=utf8path(options.at("--models"));
+    if(args[2]=="check") {
+        if(!positional.empty()||options.size()!=1)throw std::runtime_error("MoMask check accepts --models only");
+        verify_bundle(root);std::cout<<"MoMask weights verified in "<<root.string()<<"\n";return 0;
+    }
     if(args[2]=="install") {
         if(positional.size()!=1||options.size()!=1)throw std::runtime_error("MoMask install requires one private bundle and --models destination");
-        fs::path source=utf8path(positional[0]);if(fs::exists(root))throw std::runtime_error("MoMask install destination already exists");Model verified(source);
-        fs::path stage=root;stage+=".part";if(fs::exists(stage))throw std::runtime_error("MoMask install staging path exists");fs::create_directories(stage);
-        try {auto manifest=read_json(source/"bundle.json",65536);for(const auto& [name,pin]:manifest["files"].items()){(void)pin;fs::copy_file(source/name,stage/name);}fs::copy_file(source/"bundle.json",stage/"bundle.json");fs::rename(stage,root);}catch(...){throw std::runtime_error("MoMask install failed; inspect private staging directory: "+stage.string());}
-        std::cout<<"Installed verified private MoMask bundle. No commercial clearance is asserted.\n";return 0;
+        fs::path source=utf8path(positional[0]);if(fs::exists(root))throw std::runtime_error("MoMask install destination already exists");auto manifest=verify_bundle(source);
+        fs::path stage=root;stage+=".part";
+        if(!stage.parent_path().empty())fs::create_directories(stage.parent_path());
+        if(!fs::create_directory(stage))throw std::runtime_error("MoMask install staging path exists");
+        try {for(const auto& [name,pin]:manifest["files"].items()){(void)pin;fs::copy_file(source/name,stage/name);}fs::copy_file(source/"bundle.json",stage/"bundle.json");verify_bundle(stage);fs::rename(stage,root);}catch(...){throw std::runtime_error("MoMask install failed; inspect staging directory: "+stage.string());}
+        std::cout<<"Imported verified MoMask weights into "<<root.string()<<". Checkpoint commercial scope remains unresolved.\n";return 0;
     }
     std::vector<Job> jobs;
     if(args[2]=="batch") {
-        if(positional.size()!=1||options.size()!=1)throw std::runtime_error("MoMask batch accepts a manifest and --models only");fs::path file=utf8path(positional[0]);auto manifest=read_json(file,1024*1024);
+        if(positional.size()!=1||options.size()!=1)throw std::runtime_error("MoMask batch accepts a manifest and --models only");
+        fs::path file=utf8path(positional[0]);auto manifest=read_json(file,1024*1024);
         if(manifest.at("schema")!=1||!manifest.at("jobs").is_array()||manifest["jobs"].empty()||manifest["jobs"].size()>64)throw std::runtime_error("Invalid MoMask batch schema");
         const std::set<std::string> fields={"prompt","output","source","begin","end","duration","seed","steps","guidance","residualGuidance","temperature","topkr"};
         for(const auto& value:manifest["jobs"]) {
@@ -232,21 +257,29 @@ int momask_main(const std::vector<std::string>& args) {
             j.seed=static_cast<uint32_t>(integer(value.value("seed",json(0)).dump()));j.steps=integer(value.value("steps",json(18)).dump());j.begin=integer(value.value("begin",json(0)).dump());j.end=integer(value.value("end",json(0)).dump());jobs.push_back(std::move(j));
         }
     } else if(args[2]=="generate"||args[2]=="inpaint") {
-        if(positional.size()!=1||!options.contains("-o"))throw std::runtime_error("MoMask requires one prompt and -o output.glb");Job j;j.prompt=positional[0];j.output=utf8path(options.at("-o"));
+        if(positional.size()!=1||!options.contains("-o"))throw std::runtime_error("MoMask requires one prompt and -o output.glb");
+        Job j;j.prompt=positional[0];j.output=utf8path(options.at("-o"));
         if(options.contains("--source"))j.source=utf8path(options.at("--source"));
         if(args[2]=="inpaint"&&j.source.empty())throw std::runtime_error("MoMask inpaint requires --source");
         if(args[2]=="inpaint"&&options.contains("--duration"))throw std::runtime_error("MoMask inpaint duration is fixed by its source timeline");
         if(args[2]=="generate"&&(options.contains("--source")||options.contains("--begin")||options.contains("--end")))throw std::runtime_error("MoMask generate does not accept edit options");
         auto get=[&](const char* key,double fallback){return options.contains(key)?number(options.at(key)):fallback;};
         j.duration=get("--duration",2);j.guidance=get("--guidance",4);j.residual_guidance=get("--residual-guidance",j.source.empty()?5:2);j.temperature=get("--temperature",1);j.topkr=get("--topkr",.9);
-        if(options.contains("--seed"))j.seed=static_cast<uint32_t>(integer(options.at("--seed")));if(options.contains("--steps"))j.steps=integer(options.at("--steps"));
-        if(options.contains("--begin"))j.begin=integer(options.at("--begin"));if(options.contains("--end"))j.end=integer(options.at("--end"));jobs.push_back(std::move(j));
+        if(options.contains("--seed"))j.seed=static_cast<uint32_t>(integer(options.at("--seed")));
+        if(options.contains("--steps"))j.steps=integer(options.at("--steps"));
+        if(options.contains("--begin"))j.begin=integer(options.at("--begin"));
+        if(options.contains("--end"))j.end=integer(options.at("--end"));
+        jobs.push_back(std::move(j));
     }else throw std::runtime_error("Unknown MoMask action");
     std::set<fs::path,PathLess> outputs;
-    for(auto& j:jobs){preflight(j);for(auto p:{j.output,fs::path(j.output.string()+".json"),fs::path(j.output.string()+".part"),fs::path(j.output.string()+".json.part")})if(!outputs.insert(fs::weakly_canonical(fs::absolute(p))).second)throw std::runtime_error("MoMask batch output collision");}
-    Model model(root);
+    for(auto& j:jobs){preflight(j,defer_source);for(auto p:{j.output,fs::path(j.output.string()+".json"),fs::path(j.output.string()+".part"),fs::path(j.output.string()+".json.part")})if(!outputs.insert(fs::weakly_canonical(fs::absolute(p))).second)throw std::runtime_error("MoMask batch output collision");}
+    if(preflight_only)return 0;
+    MomaskContext owned;if(!context)context=&owned;
+    auto canonical=fs::weakly_canonical(fs::absolute(root));
+    if(!context->impl->model||context->impl->root!=canonical){context->impl->model=std::make_unique<Model>(root);context->impl->root=canonical;}
+    auto& model=*context->impl->model;
     for(const auto& job:jobs) {
-        auto start=std::chrono::steady_clock::now();json recipe={{"backend","momask-experimental"},{"checkpointRights","unresolved; owner-authorized local experiment"},{"bundleSha256",bundle_hash},{"upstreamRevision","94a6636c9c463b7a9414c3401a6f1b67e6c51824"},{"checkpointMirrorRevision","75d34d1ab9d705d895ff4897c454fdc35775dfaa"},{"clipRevision","d05afc436d78f1c48dc0dbf8e5980a9d471f35f6"},{"representationVersion",1},{"prompt",job.prompt},{"seed",job.seed},{"steps",job.steps},{"guidance",job.guidance},{"residualGuidance",job.residual_guidance},{"temperature",job.temperature},{"topkr",job.topkr}};
+        auto start=std::chrono::steady_clock::now();json recipe={{"tool","tide-motion"},{"command",job.input?"inpaint":"generate"},{"backend","momask"},{"checkpointRights","unresolved; manually supplied weights"},{"bundleSha256",bundle_hash},{"upstreamRevision","94a6636c9c463b7a9414c3401a6f1b67e6c51824"},{"checkpointMirrorRevision","75d34d1ab9d705d895ff4897c454fdc35775dfaa"},{"clipRevision","d05afc436d78f1c48dc0dbf8e5980a9d471f35f6"},{"representationVersion",1},{"prompt",job.prompt},{"seed",job.seed},{"steps",job.steps},{"guidance",job.guidance},{"residualGuidance",job.residual_guidance},{"temperature",job.temperature},{"topkr",job.topkr}};
         auto rows=model.generate(job,recipe);recipe["sourceFrames20Hz"]=rows.size();if(!job.input)recipe["requestedDuration"]=job.duration;auto clip=h::to_soma(rows);
         if(job.input) {
             if(clip.frames()<job.input->frames())throw std::runtime_error("MoMask encoded window does not cover source timeline");
@@ -267,7 +300,8 @@ int momask_main(const std::vector<std::string>& args) {
             recipe["source"]=fs::absolute(job.source).string();recipe["sourceSha256"]=sha256_file(job.source);recipe["begin"]=job.begin;recipe["end"]=job.end;recipe["endpointCorrectionFrames"]=10;
         }
         require_soma(clip);clip.name=job.output.stem().string();recipe["frames"]=clip.frames();recipe["nativeSeconds"]=std::chrono::duration<double>(std::chrono::steady_clock::now()-start).count();
-        if(!job.output.parent_path().empty())fs::create_directories(job.output.parent_path());save_glb(clip,job.output);std::ofstream out(job.output.string()+".json");out<<recipe.dump(2);if(!out)throw std::runtime_error("Cannot write MoMask recipe");
+        if(!job.output.parent_path().empty())fs::create_directories(job.output.parent_path());
+        save_glb(clip,job.output);std::ofstream out(job.output.string()+".json");out<<recipe.dump(2);if(!out)throw std::runtime_error("Cannot write MoMask recipe");
         std::cout<<"MoMask saved "<<job.output.string()<<" ("<<clip.frames()<<" frames, "<<recipe["nativeSeconds"]<<" s native inference/conversion).\n";
     }
     return 0;

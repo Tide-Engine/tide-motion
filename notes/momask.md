@@ -1,10 +1,11 @@
 # MoMask native investigation and implemented representation study
 
 Reviewed 2026-10-28. The owner subsequently authorized local development/use with
-unresolved checkpoint scope. **A real native owner-local experimental backend is
+unresolved checkpoint scope. **A real native opt-in backend is
 now implemented and tested**; see [momask-local.md](momask-local.md) for current
-installation, commands and real inference validation. It is opt-in and excluded
-from ordinary releases; no commercial clearance is asserted. The following
+installation, commands and real inference validation. It is included in ordinary
+builds with manually supplied weights; no weights or commercial clearance are
+included. The following
 sections retain the earlier source-only investigation and checkpoint-rights
 evidence, before that owner authorization. Existing backend defaults are preserved.
 

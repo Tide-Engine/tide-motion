@@ -13,6 +13,12 @@ x64 builds include DirectML motion-network acceleration.
 Omitting `--device` uses `auto`: GPU first, then CPU fallback. Text embedding
 remains on CPU; `--device cpu` forces CPU.
 
+MoMask is another opt-in native CPU backend: `generate --backend momask` and
+`inpaint` edit selected ranges of canonical SOMA clips. Supply its prepared ONNX
+weights manually; they are neither bundled nor automatically downloaded, and
+their commercial license scope remains unresolved. See [MoMask setup and tested
+limits](notes/momask-local.md). Kimodo remains the default.
+
 The models use canonical SOMA-30 human animations. A reusable bone-mapping file
 retargets between SOMA and your humanoid rig, offline and without another model.
 Outputs are self-contained GLB files containing an animated skeleton, without a
@@ -82,6 +88,21 @@ there too). Other platforms' packages are CPU-only for now.
 `--models DIR` or `TIDE_MOTION_MODELS` selects the model cache. Otherwise it is
 `%LOCALAPPDATA%/TideMotion/models` on Windows, and
 `$XDG_CACHE_HOME/tide-motion/models` or `~/.cache/tide-motion/models` on Unix.
+
+For a separately obtained, supported MoMask **prepared ONNX bundle**:
+
+```sh
+tide-motion models import-momask /path/to/prepared-bundle
+tide-motion models check momask
+tide-motion generate "A person walks forward." --backend momask --duration 3 --seed 7 -o momask-walk.glb
+tide-motion inpaint "A person waves with the right hand." --source momask-walk.glb --begin 18 --end 66 --seed 3 -o momask-wave.glb
+```
+
+Import verifies the pinned manifest and every file before staging under
+`CACHE/momask`. Raw upstream `.tar`/`.pt` checkpoints require developer conversion
+first; installed inference needs no Python. `models install all` does not include
+MoMask. Manual import does not grant checkpoint rights. Edit ranges use the
+source's 30 Hz frames and preserve outside poses; see the linked limits before use.
 
 ## Generate
 

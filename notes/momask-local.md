@@ -1,22 +1,24 @@
-# Native MoMask local experiment
+# Native MoMask with manually supplied weights
 
 The owner explicitly authorized local development/use with unresolved pretrained
 checkpoint license scope after the commercial-rights investigation. The source
 code is MIT licensed upstream; the exact pretrained weights/statistics still have
-no verified separate author-issued grant covering commercial use. This experiment
+no verified separate author-issued grant covering commercial use. This backend
 does not assert commercial clearance. Weights stay private, outside Git/releases.
 The earlier primary-source findings remain in `notes/momask.md`.
 
 ## Use on this Windows machine
 
-Installed separately from existing Tide Motion, without changing its executable,
-models, PATH, GPU settings or defaults:
+MoMask is included in ordinary Tide Motion builds. Import the supported prepared
+ONNX bundle manually, then use the normal executable. No model download is
+performed, and existing backends/defaults remain unchanged:
 
 ```powershell
-$momask = "$env:LOCALAPPDATA\TideMotion-MoMask-Experimental\bin\tide-momask.exe"
-& $momask generate "A person walks forward." --duration 3 --seed 7 -o walk.glb
-& $momask generate "A person stands still in a relaxed pose." --duration 3 --seed 2 -o idle.glb
-& $momask inpaint "A person waves with the right hand." --source idle.glb --begin 18 --end 66 --seed 3 -o wave.glb
+tide-motion models import-momask C:\path\to\prepared-bundle
+tide-motion models check momask
+tide-motion generate "A person walks forward." --backend momask --duration 3 --seed 7 -o walk.glb
+tide-motion generate "A person stands still in a relaxed pose." --backend momask --duration 3 --seed 2 -o idle.glb
+tide-motion inpaint "A person waves with the right hand." --source idle.glb --begin 18 --end 66 --seed 3 -o wave.glb
 ```
 
 `--begin` and `--end` select `[begin,end)` on the original **30 Hz** source clip.
@@ -27,6 +29,8 @@ keys for shortest-sign continuity; the represented outside poses remain unchange
 (measured worst component roundoff 1.20e-7 after matching quaternion hemispheres).
 Source GLBs must already have Tide's canonical SOMA-30 rig. Use existing explicit
 mapped-humanoid retargeting before/after this tool for other humanoids.
+Sources with extra joints (including SOMA-77) are refused, so no outside finger
+tracks are silently discarded by the shared reader's SOMA-30 subset conversion.
 
 Outputs are ordinary skeleton-animation GLBs plus `.glb.json` recipes. Existing
 output/recipe files are refused. Prompts must be ASCII, without HTML entities or
@@ -46,22 +50,28 @@ useful prompt examples are 2–4 s. No Kimodo path/effector/keyframe controls ar
 accepted. Native CPU ORT uses four threads. There is no Python, hosted service,
 GPU runtime, daemon or procedural/blended motion generator in this inference path.
 
-`--models BUNDLE` overrides the installed `models` directory. `install PRIVATE_BUNDLE
---models NEW_DIRECTORY` is a native **local import**, not an Internet model download.
-It verifies the complete pinned bundle and every file before copying to a staging
-directory and renaming. Existing destinations/staging paths are refused; failed
-staging remains available for inspection. Model rights are not changed by import.
+`--models CACHE` or `TIDE_MOTION_MODELS` selects the normal cache; MoMask lives in
+`CACHE/momask`. `models import-momask BUNDLE_DIRECTORY` is a native **local import**,
+not an Internet model download. It verifies the complete pinned manifest and every
+file, copies to staging, verifies the copy and renames it. Existing destinations/
+staging paths are refused; failed staging remains available for inspection.
+`models check momask` hashes the bundle without loading inference sessions.
+Raw upstream `.tar`/`.pt` files are not a prepared bundle. `models install momask`
+explains manual import; `models install all` is unchanged. Model rights are not
+changed by import, and no weights/statistics/vocabulary are shipped.
 
 ## Ordered batches and recipes
 
-`tide-momask batch JOBS.json` accepts schema 1 and 1..64 jobs; see
-`examples/momask-local.json`. Every job has `prompt`, `output`, optional `duration`,
+`tide-motion batch JOBS.json` uses the standard `actions` manifest; see
+`examples/momask-local.json`. Generation actions select `backend: "momask"`;
+editing actions use `action: "inpaint"`. Each has `prompt`, `output`, optional `duration`,
 `seed`, `steps`, `guidance`, `residualGuidance`, `temperature`, `topkr`. Editing jobs
 add `source`, `begin`, `end`. Paths are manifest-relative. All arguments, existing
 sources and output/recipe collisions are checked before loading models. Sources
-must already exist at preflight; a job cannot consume a file generated earlier
-in the same batch. One model context verifies files once and reuses all five ORT
-sessions for every job. A failed job stops and keeps completed outputs.
+may also be outputs of earlier actions in the same batch; their clip validation
+is deferred until produced. One model context verifies files once and reuses all
+five ORT sessions across interleaved actions. A failed job stops and keeps completed
+outputs. This does not add Kimodo's constraint/device/variant controls to MoMask.
 
 Recipes record the actual bundle hash, rights status, prompt, seed, sampler/RNG
 version, effective controls, CLIP token IDs, base/final RVQ token IDs, source
@@ -117,7 +127,8 @@ Windows x64 ClangCL 18.1.8 Release. Eight CTests pass, including native HumanML
 normalization/root/FK/SOMA-encode RIC roundtrips and CLI/batch preflight/refusals.
 The new CLI test's initial CMake semicolon-list fixture was corrected; its rerun
 passes. Worktree-local TEMP/TMP avoid concurrent test collisions. Project code
-builds with warnings as errors. Default release builds keep the experiment off.
+builds with warnings as errors. These initial experiment results precede ordinary
+CLI integration; current integrated checks are recorded below.
 
 Real native ORT 1.31.1 versus PyTorch: all 13 component cases pass (masked/
 residual/RVQ at 4/7/49 tokens plus CLIP at 77 tokens). RVQ indices match exactly;
@@ -135,7 +146,7 @@ component after equivalent quaternion sign matching. Native GLB import/inspect
 accepts all outputs. Two-job batches load each model session only once. An
 installed native generation succeeds with PATH restricted to Windows system
 directories; no Python dependency is present. The existing Tide Motion install
-is not replaced.
+was not replaced during the initial separate-launcher validation.
 
 CPU observation: two 2-second jobs with shared sessions complete in 1.34 seconds
 including process startup, bundle hashing and loading; inference/conversion
@@ -168,17 +179,19 @@ temporal/contact quality. TIDE_HIDDEN=1 was used for validation and previews.
 
 ## Build/reproduce locally
 
-This is an explicit opt-in **local experiment**, excluded from ordinary releases:
+The backend is built normally; selecting it and supplying weights are explicit:
 
 ```powershell
-cmake -S . -B build-local -DMOTION_MOMASK_EXPERIMENTAL=ON
+cmake -S . -B build-local
 cmake --build build-local --config Release
 ctest --test-dir build-local -C Release --output-on-failure
-cmake --install build-local --config Release --component momask-experimental --prefix YOUR_PRIVATE_DIRECTORY
+cmake --install build-local --config Release --component runtime --prefix YOUR_DIRECTORY
 ```
 
-The optional build also accepts `tide-motion momask ...`; the standalone launcher
-is the convenient isolated entry point. No existing backend/default is replaced.
+`MOTION_MOMASK_EXPERIMENTAL=ON` now only adds the legacy standalone launcher;
+ordinary `tide-motion` includes MoMask even when that flag is OFF. The compatibility
+`tide-motion momask ...` namespace remains, but the commands above are preferred.
+No existing backend/default is replaced.
 Developer-only preparation: `tests/momask-download.ps1` verifies private input
 pins; `tests/momask-export.py SOURCE OUTPUT CHECKPOINT_DIRECTORY` exports and
 validates the private bundle. Its locked Python environment is not shipped or
@@ -206,4 +219,27 @@ covered. Rebase changed no model graph/bundle pin or numerical tolerance.
 Final integration includes origin/dev 68dd1c5's native upgrade and batched
 MotionBricks work too. All **ten** integrated CTests pass on that rebuilt tree.
 The separately installed owner launcher is refreshed from this checkout; no
-commercial release/model distribution or ordinary-install replacement is made.
+commercial release/model distribution or ordinary-install replacement was made
+in that earlier step.
+
+## Ordinary CLI/manual-import integration (2026-10-28)
+
+The normal build with the legacy launcher flag OFF passes all ten CTests. Native
+import/check verifies a real 473 MB prepared bundle. A real four-action standard
+batch (walk generation, mirror, idle generation, inpaint consuming that idle)
+loads the five sessions once. All outputs are valid 59-frame SOMA GLBs. The walk
+animation payload is identical to the previous native experiment. Independent
+reference sampling/tokenization still matches; exported outside/edit endpoint
+components differ by at most 1.1920929e-7 after quaternion hemisphere matching.
+No model graph, sampler, numerical tolerance or asset pin changed. Default builds
+carry only source/native binaries and notices, never the separately supplied assets.
+
+After rebasing onto bb25953, the full Vulkan/ARDY DirectML build passes all eleven
+CTests. The ordinary runtime ZIP passes install/self-upgrade checks and includes
+asset-pin documents, without any assets. The owner's normal Tide Motion install
+is updated, preserving the four existing model files and PATH; the prepared
+MoMask bundle was imported separately. Running the installed standard example
+with Windows-only PATH produces three 89-frame SOMA clips with one model load.
+Independent token/reference and all outside/edit endpoint checks pass, maximum
+component error 6.5192581e-8 after quaternion sign matching. Extra-joint sources
+are explicitly refused; no new finger preservation/generation claim is made.
