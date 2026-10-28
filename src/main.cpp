@@ -1,5 +1,6 @@
 #include "motion.hpp"
 #include "author.hpp"
+#include "ardy.hpp"
 #include <kimodo/kimodo.hpp>
 #include <nlohmann/json.hpp>
 #include <algorithm>
@@ -64,7 +65,14 @@ bool kimodo_on_gpu() {
 const char* command_help(std::string_view command) {
     if(command=="generate")return R"(tide-motion generate "PROMPT" -o CLIP.glb [options]
 
-Generates a SOMA-30 clip from text with Kimodo (30 fps).
+Generates a SOMA-30 clip from text (30 fps).
+
+  --backend kimodo|ardy       Optional ARDY native ONNX CPU generation; default Kimodo
+  --history FILE.glb          ARDY imported SOMA history (last up to 240 frames)
+  --history-frames N          ARDY visible history, 4..240, multiple of four
+                              ARDY uses 1..10 steps (default 10), switches --then
+                              prompts on 60-frame chunk boundaries, without blending.
+                              Converted models live in MODELS/ardy; see tools/ardy/.
 
       --model v1.1|v1.2      Smooth-root SOMA-RP checkpoint (default v1.1)
   -o, --output FILE.glb       New output (a FILE.glb.json recipe is written beside it)
@@ -355,6 +363,7 @@ std::vector<size_t> protected_recipe_frames(const nlohmann::json& recipe,size_t 
     std::sort(out.begin(),out.end());out.erase(std::unique(out.begin(),out.end()),out.end());return out;
 }
 struct RunContext {
+    std::unique_ptr<ArdyModel> ardy;unsigned ardy_threads=0;
     std::unique_ptr<kimodo::model> kimodo;
     // strict: an explicit --device, which never falls back. gpu_failed: auto fell back
     // in this run, so later auto actions stay on the CPU.
@@ -466,8 +475,17 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
         std::vector<std::string> argv{"tide-motion",type};
         unsigned variants=1;bool sheet_gif=false;
         if(type=="generate") {
+            auto selected_backend=action.value("backend",std::string("kimodo"));
+            if(selected_backend=="ardy") {
+                if(action.contains("steps")&&(!action["steps"].is_number_integer()||action["steps"].get<int>()<1||action["steps"].get<int>()>10))throw std::runtime_error("ARDY steps must be 1..10");
+                if(action.value("device",std::string("auto"))=="gpu")throw std::runtime_error("ARDY currently uses native ONNX CPU");
+                if(action.contains("transition"))throw std::runtime_error("ARDY does not take transition");
+            } else if(action.contains("history")||action.contains("historyFrames"))throw std::runtime_error("history requires backend ardy");
             keys.insert({"prompt","prompts","duration","seed","steps","transition","startPose","endPose","endAt","keyframes","effectors","path","placement","correct",
-                "variants","variantsGif","tide","guidance","constraintGuidance","device","threads","correctionFrames","inPlace","model"});
+                "variants","variantsGif","tide","guidance","constraintGuidance","device","threads","correctionFrames","inPlace","model","backend","history","historyFrames"});
+            if(action.contains("backend")) {auto b=action["backend"].get<std::string>();if(b!="kimodo"&&b!="ardy")throw std::runtime_error("backend is kimodo or ardy");argv.insert(argv.end(),{"--backend",b});}
+            if(action.contains("history"))argv.insert(argv.end(),{"--history",path(action["history"]).string()});
+            if(action.contains("historyFrames")) {if(!action["historyFrames"].is_number_integer())throw std::runtime_error("historyFrames must be integer");auto h=action["historyFrames"].get<int>();if(h<4||h>240||h%4)throw std::runtime_error("historyFrames must be 4..240, multiple of four");argv.insert(argv.end(),{"--history-frames",std::to_string(h)});}
             if(action.contains("placement")) {
                 auto value=action["placement"].get<std::string>();
                 if(value!="auto"&&value!="world"&&value!="free")throw std::runtime_error("placement is auto, world or free");
@@ -498,7 +516,7 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
                     for(const auto& field:item.items())if(field.key()!="prompt"&&field.key()!="duration")throw std::runtime_error("Unknown prompts field: "+field.key());
                     if(i)argv.push_back("--then");
                     argv.push_back(item.at("prompt").get<std::string>());
-                    if(item.contains("duration")) {auto text=numeric(item["duration"],"duration");number(text,0.2,10,"duration");argv.insert(argv.end(),{"--duration",text});}
+                    if(item.contains("duration")) {auto text=numeric(item["duration"],"duration");number(text,0.2,600,"duration");argv.insert(argv.end(),{"--duration",text});}
                 }
             } else argv.push_back(action.at("prompt").get<std::string>());
             // Pose files may be outputs of earlier actions, so only their paths are checked here.
@@ -595,7 +613,7 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
         for(const char* key:{"duration","seed","steps","tokens","threads"})if(action.contains(key)) {
             if(!action[key].is_number())throw std::runtime_error(std::string(key)+" must be numeric");
             auto text=action[key].dump();
-            if(std::string(key)=="duration")number(text,0.2,10,key);
+            if(std::string(key)=="duration")number(text,0.2,600,key);
             else if(std::string(key)=="tokens")integer(text,6,16,key);
             else if(std::string(key)=="steps")integer(text,1,1000,key);
             else if(std::string(key)=="threads")integer(text,1,1024,key);
@@ -643,7 +661,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     bool accept=false,joined=false,skeleton=false,to_soma=false,correct=true;Vec3 offset{};
     Placement placement=Placement::automatic;std::string placement_name="auto";
     unsigned variants=1,threads=0;int correction_frames=10;bool variants_gif=false,in_place=false;
-    Guidance guidance;std::string device="auto",model_version="v1.1";
+    Guidance guidance;std::string device="auto",backend="kimodo",model_version="v1.1";fs::path history_file;unsigned history_frames=240;
     std::vector<std::string> pos;
     std::vector<std::string> flags;
     // Prompt durations; index 0 is the positional prompt, later ones come from --then.
@@ -656,8 +674,11 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         const auto& a=args[i];
         if(a.starts_with('-'))flags.push_back(a);
         if(a=="--models")models=utf8path(value());
+        else if(a=="--backend") {backend=value();if(backend!="kimodo"&&backend!="ardy")throw std::runtime_error("--backend is kimodo or ardy");}
+        else if(a=="--history")history_file=utf8path(value());
+        else if(a=="--history-frames") {history_frames=static_cast<unsigned>(integer(value(),4,240,"history frames"));if(history_frames%4)throw std::runtime_error("history frames must be a multiple of four");}
         else if(a=="-o"||a=="--output")output=utf8path(value());
-        else if(a=="--duration") {duration=number(value(),0.2,10,"duration");segments.back().second=duration;}
+        else if(a=="--duration") {duration=number(value(),0.2,600,"duration");segments.back().second=duration;}
         else if(a=="--then")segments.push_back({value(),3.0});
         else if(a=="--transition")transition=static_cast<unsigned>(integer(value(),1,60,"transition"));
         else if(a=="--start-pose")pose_specs.push_back({"start-pose",0,value()});
@@ -709,7 +730,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     }
     std::set<std::string> allowed;
     if(command=="generate")allowed={"--models","-o","--output","--duration","--seed","--steps","--then","--transition","--start-pose","--end-pose","--end-at","--keyframe","--effector","--path","--placement","--no-correction",
-        "--correction-frames","--in-place","--variants","--variants-gif","--tide","--guidance","--constraint-guidance","--device","--threads","--model"};
+        "--correction-frames","--in-place","--variants","--variants-gif","--tide","--guidance","--constraint-guidance","--device","--threads","--model","--backend","--history","--history-frames"};
     else if(command=="connect")allowed={"--models","-o","--output","--tokens","--joined","--offset","--from-clip","--to-clip","--threads"};
     else if(command=="mirror")allowed={"-o","--output","--clip"};
     else if(command=="retarget")allowed={"-o","--output","--target","--map","--to-soma","--clip"};
@@ -725,9 +746,20 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         return batch(utf8path(pos[0]),models,context);
     }
     if(command=="models") {
-        if(pos.empty()||pos.size()>2||(pos[0]!="install"&&pos[0]!="check"))throw std::runtime_error("Use models install or models check [all|kimodo|kimodo-v1.2|bricks]");
+        if(pos.size()==2&&pos[0]=="import-ardy") {
+            if(!accept)throw std::runtime_error("Read licenses/NVIDIA-ARDY-MODEL.txt and META-LLAMA-3.txt, then pass --accept-licenses");
+            auto source=utf8path(pos[1]);check_ardy_models(source);
+            if(!fs::exists(source/"LICENSE")||!fs::exists(source/"NOTICE"))throw std::runtime_error("ARDY conversion must retain LICENSE and NOTICE");
+            auto destination=models/"ardy";
+            if(fs::exists(destination))throw std::runtime_error("ARDY model destination already exists");
+            fs::create_directories(destination);
+            for(const char* name:{"denoiser.onnx","encoder.onnx","decoder.onnx","manifest.json","LICENSE","NOTICE"})fs::copy_file(source/name,destination/name);
+            check_ardy_models(destination);std::cout<<"ARDY models imported into "<<destination.string()<<"\n";return 0;
+        }
+        if(pos.empty()||pos.size()>2||(pos[0]!="install"&&pos[0]!="check"))throw std::runtime_error("Use models install/check [all|kimodo|kimodo-v1.2|text|bricks|ardy], or models import-ardy DIR --accept-licenses");
         std::string selection=pos.size()==2?pos[1]:"all";
-        if(pos[0]=="check")check_models(models,selection);
+        if(pos[0]=="check"&&selection=="ardy")check_ardy_models(models/"ardy");
+        else if(pos[0]=="check")check_models(models,selection);
         else {
             if(!accept)throw std::runtime_error("Read licenses/NVIDIA-KIMODO-MODEL.txt, NVIDIA-OPEN-MODEL.txt and META-LLAMA-3.txt, then pass --accept-licenses to download models");
             setup_models(models,selection);
@@ -861,8 +893,15 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         std::ifstream mapping_stream(map_file);nlohmann::json mapping_json;mapping_stream>>mapping_json;
         retarget_recipe={{"tool","tide-motion"},{"version",MOTION_VERSION},{"command",command},{"source",pos[0]},{"target",target_file.string()},{"toSoma",to_soma},{"clip",clip_name},{"mapping",mapping_json},{"rootScale",result.scale},{"headingDegrees",result.heading_degrees},{"discardedNonRootTranslations",result.discarded_translations},{"protectedFrames",protected_frames},{"fps",clip.fps},{"frames",clip.frames()}};
     } else if(command=="generate") {
+        if(backend=="ardy") {
+            if(std::find(flags.begin(),flags.end(),"--steps")==flags.end())steps=10;
+            if(steps>10)throw std::runtime_error("ARDY steps must be 1..10");
+            if(device=="gpu")throw std::runtime_error("ARDY currently uses native ONNX CPU; use --device cpu or auto");
+            if(std::find(flags.begin(),flags.end(),"--transition")!=flags.end())throw std::runtime_error("ARDY continues learned history; --transition applies to Kimodo");
+        } else if(!history_file.empty()||std::find(flags.begin(),flags.end(),"--history-frames")!=flags.end())throw std::runtime_error("--history and --history-frames require --backend ardy");
         if(pos.size()!=1||pos[0].empty())throw std::runtime_error("generate takes one quoted prompt");
         if(segments.size()>16)throw std::runtime_error("generate takes at most 16 prompts");
+        for(const auto& s:segments)if(backend=="kimodo"&&s.second>10)throw std::runtime_error("Kimodo duration is out of range (0.2..10)");
         segments[0].first=pos[0];
         std::vector<kimodo::prompt_segment> parts;size_t total=0;
         for(size_t i=0;i<segments.size();++i) {
@@ -870,6 +909,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
             if(i&&transition>=count)throw std::runtime_error("--transition must be shorter than every following prompt ("+std::to_string(count)+" frames)");
             parts.push_back({segments[i].first,count});total+=count;
         }
+        if(total>18000)throw std::runtime_error("Generation exceeds 18000 frames");
         // Resolve and load every constraint before any model is loaded.
         auto resolve=[&](long frame,const char* label) {
             long resolved=frame<0?static_cast<long>(total)+frame:frame;
@@ -910,19 +950,39 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         if(variants>1) {sheet.png=variants_path(output,".png");if(variants_gif)sheet.gif=variants_path(output,".gif");}
         for(const auto& file:outputs)refuse_existing(file);
         for(const auto& file:{sheet.png,sheet.gif})if(!file.empty()&&fs::exists(file))throw std::runtime_error("Contact sheet already exists: "+file.string());
-        ensure_kimodo(models,context,device,threads,model_version);
-        if(condition&&context->kimodo->motion_dim()!=kimodo_features)throw std::runtime_error("Constraints need the SOMA-30 Kimodo model");
+        std::optional<Clip> imported;
+        if(backend=="ardy") {
+            if(!history_file.empty()) {
+                imported=load_glb(history_file,"",true);require_soma(*imported);
+                size_t count=std::min(size_t(history_frames),imported->frames()/4*4);
+                if(count<4)throw std::runtime_error("ARDY history needs at least four frames");
+                imported->poses.erase(imported->poses.begin(),imported->poses.end()-static_cast<ptrdiff_t>(count*30));
+            }
+            if(!context->ardy||context->ardy_threads!=threads){context->ardy=std::make_unique<ArdyModel>(models/"ardy",threads);context->ardy_threads=threads;}
+        } else {
+            ensure_kimodo(models,context,device,threads,model_version);
+            if(condition&&context->kimodo->motion_dim()!=kimodo_features)throw std::runtime_error("Constraints need the SOMA-30 Kimodo model");
+        }
         std::vector<Clip> made;std::vector<std::string> labels;
         for(unsigned v=0;v<variants;++v) {
         const uint64_t used_seed=seed+v;
         clip=Clip{};generate_recipe=nlohmann::json::object();
         if(variants>1)std::cerr<<"Generating variant "<<v+1<<"/"<<variants<<" (seed "<<used_seed<<")...\n";
         else std::cerr<<"Generating motion...\n";
+        auto effective=conditions;bool floating=false;
+        if(backend=="ardy") {
+            std::vector<ArdyPrompt> prompts;for(const auto& p:parts)prompts.push_back({p.prompt,p.frames});
+            clip=context->ardy->generate(prompts,ArdyOptions{steps,threads,history_frames,used_seed,guidance.text,guidance.constraint},conditions,imported?&*imported:nullptr);
+            clip.name=outputs[v].stem().string();
+            generate_recipe["backend"]="ardy";generate_recipe["checkpointRevision"]="e6c6804fb6b55636ad927145d74959fd46882ccd";
+            generate_recipe["history"]=history_file.string();generate_recipe["historyFrames"]=history_frames;
+            generate_recipe["modelManifestSha256"]="aac3b966ed1368c4ec126c969f0763d59126b047a1053a2394c20983acb917d2";
+            generate_recipe["sampler"]="DDIM";generate_recipe["chunkFrames"]=60;
+        } else {
         // Partial root masks are outside the upstream full-pose conditioning contract.
         // Choose floating locations with a learned motion pass, then condition complete
         // root coordinates in a second learned pass. Never derive travel by blending.
-        auto effective=conditions;
-        bool floating=std::any_of(effective.poses.begin(),effective.poses.end(),[](const auto& p){return !p.anchored;});
+        floating=std::any_of(effective.poses.begin(),effective.poses.end(),[](const auto& p){return !p.anchored;});
         std::optional<KimodoCondition> placed;
         kimodo::motion_condition placed_native;
         if(floating) {
@@ -952,10 +1012,11 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
             if(j==0)t.p=Vec3{result.root_positions[f*3],result.root_positions[f*3+1],result.root_positions[f*3+2]}+origin;
             clip.poses.push_back(t);
         }
+        }
         if(shift)shift_to_last_pose(clip,conditions);
         generate_recipe["prompts"]=nlohmann::json::array();
         for(size_t i=0;i<parts.size();++i)generate_recipe["prompts"].push_back({{"prompt",parts[i].prompt},{"duration",segments[i].second},{"frames",parts[i].frames}});
-        generate_recipe["transition"]=parts.size()>1?transition:0;
+        generate_recipe["transition"]=backend=="kimodo"&&parts.size()>1?transition:0;
         generate_recipe["freePlacementPasses"]=floating?2:1;
         if(floating) {
             generate_recipe["inferredPoseLocations"]=nlohmann::json::array();
@@ -965,10 +1026,12 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         generate_recipe["placement"]=placement_name;generate_recipe["corrected"]=correct&&!conditions.poses.empty();
         generate_recipe["correctionFrames"]=correction_frames;generate_recipe["inPlace"]=in_place;
         generate_recipe["guidance"]=guidance.text;generate_recipe["constraintGuidance"]=guidance.constraint;
+        if(backend=="kimodo") {
         generate_recipe["model"]="nvidia/Kimodo-SOMA-RP-"+model_version;
         generate_recipe["modelGgufSha256"]=model_version=="v1.2"?"9c24c5ee9b6b3683947ab2796727ffb2fbd69b2ebc7683214809013687d87a19":"3bf1229f4c1eff1d28f5196a854113da2df9a11a5e21c60694630903bf948ee4";
         if(model_version=="v1.2")generate_recipe["checkpointRevision"]="0e3c89024d896064b6851201373f7834784a386b";
-        generate_recipe["device"]=context->kimodo_gpu?"gpu":"cpu";generate_recipe["threads"]=threads;
+        }
+        generate_recipe["device"]=backend=="kimodo"&&context->kimodo_gpu?"gpu":"cpu";generate_recipe["threads"]=backend=="ardy"&&!threads?8:threads;
         if(variants>1)generate_recipe["variants"]={{"count",variants},{"firstSeed",seed},{"sheet",sheet.png.filename().string()}};
         generate_recipe["constraints"]=nlohmann::json::array();
         auto round=[](float value,float unit){return std::round(value/unit)*unit;};

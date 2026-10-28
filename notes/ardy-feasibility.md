@@ -1,7 +1,8 @@
 # ARDY native feasibility spike — 2026-10-28
 
-Decision: **go for a separately budgeted native parity prototype; no-go for a
-released backend today**. Commercial SOMA weights exist and their architecture
+Historical spike, superseded by [the implemented native backend](ardy-native.md).
+The original budget and speed/value gates were not owner requirements and are
+withdrawn. Commercial SOMA weights exist and their architecture
 looks implementable with native tensor operations. This spike validates container
 loading and one real learned projection, not generation, complete operator coverage,
 quality, speed, or portability. No CLI backend, model installer entry, runtime
@@ -263,40 +264,4 @@ Cold loading/text latency, peak memory, prompt accuracy, contact slide and seam
 quality remain unmeasured. Fewer diffusion steps alone do not prove faster total
 authoring, especially with repeated tokenizer and two-stage work.
 
-Proceed in these independently reviewable milestones; stop at any failed gate:
-
-1. **Freeze inputs/licenses and reference fixtures.** Resolve the bundled/card
-   license mismatch; pin all config/stat/text revisions and hashes. Author a few
-   synthetic SOMA poses and constraints, and get reference outputs without any
-   evaluation data. Stop if licensing requires prohibited artifacts or runtime
-   services. Agree a finite prototype budget before full graph work.
-2. **Native networks and parity.** Load every required tensor; implement complete
-   denoiser, tokenizer decoder and imported-history encoder. Proposed FP32 gate:
-   fixed-input network max absolute error <=1e-3 with mean error also reported,
-   tests for masking/rounding extremes, and exact shapes across 0/4/240 history
-   frames plus selected future masks. Any relaxed FP16 tolerance needs measured
-   decoded-pose evidence, not silent threshold changes. Stop if unsupported ops
-   require Python at runtime or a substantially larger default dependency stack.
-3. **Native bounded sampler and GLB.** Run at least 3 chunks, then a 60-second
-   continuation with prompt changes, owner-authored keyframes/path and imported
-   history. Compare fixed-noise reference tensors (do not assume cross-framework
-   seed equality). Proposed decoded parity gate: <=1 mm root/joint positions and
-   <=0.1 degree rotations on reference fixtures, finite unit quaternions, exactly
-   requested output frames, stable seams/global origin and no dropped constraints.
-   Validate canonical GLB roundtrip and bounded captures with an engine executable
-   built from the engine checkout under test, TIDE_HIDDEN=1. Stop on growing drift
-   or a need to conceal bad output with blending/procedural substitution.
-4. **Authoring comparison and packaging.** Under the shared GPU mutex measure cold
-   and warm wall time, prompt encoding, peak RAM/VRAM and output quality on identical
-   prompts/seeds-as-variants/durations against current Tide; include multi-prompt
-   long-form and endpoint tests. Proposed value gate: at least 2× warm long-form
-   throughput or a clear repeated-continuation capability the current tools cannot
-   provide, with no regression in accepted prompt/constraint/contact quality on
-   the agreed authored set. Report distributions rather than one best clip.
-   Verify Windows native runtime with no Python/CUDA toolkit install if shipped
-   as default; test Linux/macOS separately or label platform limits explicitly.
-   Stop if runtime size/setup or reliability outweighs the authoring benefit.
-
-Only after all gates pass should a user-facing backend/model installer/recipes
-be proposed. This spike authorizes no claim of ARDY support and changes none of
-Kimodo v1.2, contact cleanup, or MotionBricks authoring.
+Implementation and validation are now recorded in [ardy-native.md](ardy-native.md). The former prototype-budget and speed-multiplier gates are withdrawn; measured tradeoffs, not a predetermined speed threshold, determine how the optional backend is described.

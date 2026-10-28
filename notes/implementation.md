@@ -1,5 +1,55 @@
 # Native animation authoring
 
+## Native ARDY backend (2026-10-28, supersedes the initial spike limit)
+
+The owner authorized complete implementation and developer-only reference/export
+tooling. The earlier separate-budget and 2x-value gates were not owner requirements
+and are withdrawn. See [ardy-native.md](ardy-native.md) for current setup, pinned
+artifacts, actual bundled commercial grant, contracts, reproducible tests and limits.
+
+`generate --backend ardy` and matching batch fields run complete denoiser/tokenizer
+encoder/decoder graphs through existing native ORT 1.31.1 CPU, with the pinned
+native local LLM2Vec GGUF encoder. C++ owns DDIM, history/masks, origin/requantization,
+prompt switching and canonical SOMA GLB export. Imported history and 60-frame
+autoregressive chunks are supported. Exact requested output counts include partial
+last chunks. The standalone delivered binary never invokes Python. Conversion
+scripts and fully pinned developer requirements stay outside runtime packaging.
+
+Pinned source e706e27acc88070918308a10922b8f7174d0825e; commercial SOMA KimodoRep
+checkpoint e6c6804fb6b55636ad927145d74959fd46882ccd. Every original checkpoint file
+and converted graph is hash checked. Native code pins the conversion manifest
+aac3b966ed1368c4ec126c969f0763d59126b047a1053a2394c20983acb917d2. The bundled
+October 2025 license grants commercial use, derivative creation and distribution;
+no concrete missing right for conversion/native use was found. It and required
+Notice attribution are retained and checked on import. The model-card link to a
+different commercial agreement is recorded, not used as a technical stop.
+
+Windows x64 ClangCL 18.1.8 Release with warnings as errors passes six CTests.
+Actual native ORT network fixtures cover history 0/4/240 plus constraints: max
+denoiser absolute error 2.08e-5; decoder 1.54e-3 (mean 1.09e-5); FSQ encoder fixtures
+exact. Four-chunk fixed-noise host/path test: 183 frames, max root difference
+0.056 mm vs upstream. Imported-history fixed-input encoder/host: 121 frames,
+0.26 mm root difference. Native FK/smoother feature error 1.79e-5; including those
+operations and FSQ boundary sensitivity, observed output difference is 2.2 mm /
+1.84 degrees. Tests distinguish fixed-input parity from that end-to-end rounding
+effect. No full FP32 text-encoder parity or bitwise platform determinism is claimed.
+
+Own-prompt native generation exported a 183-frame walk. A bounded 91-frame hidden
+mannequin capture passed and was inspected in front/profile using Tide CLI and
+tide_platform rebuilt from D:/Projects/PurrEngine at
+28b61e4db1cb2549fcc9f6bc6d9c6034022f3d9c, privately staged, with the GPU mutex held.
+Runtime Windows CPU archive was 8,156,843 bytes before the final documentation
+update; isolated install/reinstall/path traversal/checksum/PATH-minimal tests pass.
+Native model import/check of the converted external bundle passes. No engine,
+Kimodo model algorithm, contact cleanup or MotionBricks authoring changes are made.
+
+Limits: CPU-only ARDY validation on Windows; no ARDY GPU or other-platform claim.
+Prompts switch at 60-frame boundaries; future constraints are windowed; imported
+history need not produce an exact pose/velocity seam. Contacts, scene awareness and
+constraint satisfaction are not guaranteed. Separate backend text instances can
+increase batch memory. All weights, fixtures and generated clips remain external
+or in ignored scratch; no research-only checkpoint or evaluation motion data is used.
+
 ## ARDY feasibility spike (2026-10-28)
 
 Baseline reviewed: v0.5.0 / dd4dc0b. The focused assessment and reproducible native
@@ -23,8 +73,7 @@ missing-argument refusals pass. Full SHA-256 and reproduction are in the assessm
 This is native checkpoint/operator feasibility evidence only, not model inference
 or PyTorch parity. The probe is outside the CLI/build/install/release targets.
 
-Decision: conditional go for a separately budgeted parity prototype; no-go for a
-user-facing backend now. Complete denoiser/tokenizer/text parity, imported-history
+Historical initial-spike decision (superseded by the native backend above): complete denoiser/tokenizer/text parity, imported-history
 encoding, DDIM/state-loop execution, canonical rig/GLB validation, long-sequence
 quality, memory and CPU/GPU performance remain open. No ARDY generation, preview
 or GPU timing is claimed; no GPU mutex was needed for this CPU-only probe. Future

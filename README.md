@@ -4,6 +4,12 @@ Native, offline animation authoring using Kimodo for text-to-motion and
 MotionBricks for transitions between clips. It is a separate tool and repository;
 Tide is an optional preview renderer. No Tide CLI or engine changes are required.
 
+An optional native CPU ARDY backend supports autoregressive long-form generation,
+changing prompts and imported SOMA history: `generate --backend ardy`. It uses
+separately converted commercial weights and the same local text encoder. See
+[ARDY setup, validation and limits](notes/ardy-native.md); conversion tooling is
+developer-only, and installed inference requires no Python or service.
+
 The models use canonical SOMA-30 human animations. A reusable bone-mapping file
 retargets between SOMA and your humanoid rig, offline and without another model.
 Outputs are self-contained GLB files containing an animated skeleton, without a

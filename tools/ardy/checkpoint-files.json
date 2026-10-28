@@ -1,0 +1,66 @@
+{
+  "stats/motion/local_root/mean.npy": {
+    "sha256": "4c36e8e33d6d51e6c8206ac796a52b7b3a4da7f0dc49ebdbb4f130178e3e9d31",
+    "bytes": 160
+  },
+  "stats/motion/body/std.npy": {
+    "sha256": "965bbad497726ef4e6c46b519827e2cbcb29f974214b25718d20a725b82279ed",
+    "bytes": 3040
+  },
+  "tokenizer.safetensors": {
+    "sha256": "c156290ca9da2f821d7e1570aad89f153b943e4bdabb4451eef92ba3fb385398",
+    "bytes": 142218576
+  },
+  "config.yaml": {
+    "sha256": "9f0d0f23e52c4a625a1a4b4992fa36fddec3ed3d62c4c559f19979e268f47dc2",
+    "bytes": 1592
+  },
+  "stats/motion/std.npy": {
+    "sha256": "d4447b311ab7ab2c0cc74cbba76cf657a0945d35d5eb4b0ade826d663eb34d4e",
+    "bytes": 3112
+  },
+  "stats/motion/mean.npy": {
+    "sha256": "5e2fe8aa521cfefa37bddb5745806e78584e0a6ecb56d133b0cdef90af4169ca",
+    "bytes": 3112
+  },
+  "LICENSE": {
+    "sha256": "11ccdcb47db87ac30b63765b5e5154403026c4fbb52c19919d99d912ec454e19",
+    "bytes": 10229
+  },
+  "stats/post_quantization/std.npy": {
+    "sha256": "0d9c87a79f9937bca5e201560e6efbdbe10de6908ad9ae308d829ef12c0b1b67",
+    "bytes": 640
+  },
+  "stats/motion/global_root/std.npy": {
+    "sha256": "fb15aeed7143f5f0754611f0acf5fa5f55d1f6492a49c23e490fc62f7bf11fb0",
+    "bytes": 168
+  },
+  "stats/pre_quantization/std.npy": {
+    "sha256": "090f7a3f4ea12282eed0c0c7b3683aa769b021cee5e74154d8e1646f54c6703a",
+    "bytes": 640
+  },
+  "stats/post_quantization/mean.npy": {
+    "sha256": "ed54b0bf41f28e2e788f5bb5bda4a966da55629f03938eeac2ebdd2d84642d46",
+    "bytes": 640
+  },
+  "stats/motion/local_root/std.npy": {
+    "sha256": "5f57b41f51ced7832cffa81702f6e04d8694e16475c184baec6c8be0e98c8dba",
+    "bytes": 160
+  },
+  "stats/pre_quantization/mean.npy": {
+    "sha256": "dfada3f0bdbc3e03118bb979e0e7ebb0ee4f64b82f0aa84bac0e8cdb080e1e67",
+    "bytes": 640
+  },
+  "denoiser.safetensors": {
+    "sha256": "532ead2c40f27733556c099e8d77e8f227e4047b5a88d556b995d0b9c012dec7",
+    "bytes": 627156264
+  },
+  "stats/motion/global_root/mean.npy": {
+    "sha256": "6c110980f9a0386e57a8c186f8eac7f55dc05bade92f44c4b391450ada598da1",
+    "bytes": 168
+  },
+  "stats/motion/body/mean.npy": {
+    "sha256": "d42f35f8bb7ef52fdec66ae29c5cf590bd038f4f1aabd2d560d1d0f78663ed6f",
+    "bytes": 3040
+  }
+}

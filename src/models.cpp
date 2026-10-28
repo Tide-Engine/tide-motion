@@ -42,9 +42,9 @@ constexpr ModelFile v12_sources[]={
 };
 void prepare_v12(const fs::path& root);
 void selection_valid(const std::string& selection) {
-    if(selection!="all"&&selection!="kimodo"&&selection!="bricks"&&selection!="kimodo-v1.2")throw std::runtime_error("Model selection must be all, kimodo, kimodo-v1.2 or bricks");
+    if(selection!="all"&&selection!="kimodo"&&selection!="bricks"&&selection!="kimodo-v1.2"&&selection!="text")throw std::runtime_error("Model selection must be all, kimodo, kimodo-v1.2, text or bricks");
 }
-bool selected(const ModelFile& f,const std::string& s) { return (s=="all"&&std::string(f.group)!="kimodo-v1.2")||s==f.group||((s=="kimodo"||s=="kimodo-v1.2")&&std::string(f.group)=="kimodo-text"); }
+bool selected(const ModelFile& f,const std::string& s) { return (s=="all"&&std::string(f.group)!="kimodo-v1.2")||s==f.group||((s=="kimodo"||s=="kimodo-v1.2"||s=="text")&&std::string(f.group)=="kimodo-text"); }
 void verify(const fs::path& path,const ModelFile& f) {
     if(!fs::exists(path)||fs::file_size(path)!=f.bytes)throw std::runtime_error("Missing or incomplete model '"+path.string()+"'; run tide-motion models install "+std::string(std::string(f.group)=="kimodo-text"?"kimodo":f.group));
     if(sha256_file(path)!=f.hash)throw std::runtime_error("Model checksum mismatch: "+path.string()+"; remove this file and reinstall models");
