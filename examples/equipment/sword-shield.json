@@ -1,0 +1,147 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "name": "sword",
+      "mesh": "meshes/sword.glb",
+      "segments": [
+        {
+          "start": 0,
+          "end": 4,
+          "space": "bone",
+          "interpolation": "linear",
+          "keys": [
+            {
+              "frame": 0,
+              "position": [
+                0,
+                0,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0
+              ],
+              "meshScale": [
+                1,
+                1,
+                1
+              ]
+            },
+            {
+              "frame": 4,
+              "position": [
+                0,
+                0,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0
+              ],
+              "meshScale": [
+                1,
+                1,
+                1
+              ]
+            }
+          ],
+          "anchor": "RightHand"
+        }
+      ]
+    },
+    {
+      "name": "shield",
+      "mesh": "meshes/shield.glb",
+      "segments": [
+        {
+          "start": 0,
+          "end": 4,
+          "space": "bone",
+          "interpolation": "linear",
+          "keys": [
+            {
+              "frame": 0,
+              "position": [
+                0,
+                0,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0
+              ],
+              "meshScale": [
+                1,
+                1,
+                1
+              ]
+            },
+            {
+              "frame": 4,
+              "position": [
+                0,
+                0,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0
+              ],
+              "meshScale": [
+                1,
+                1,
+                1
+              ]
+            }
+          ],
+          "anchor": "LeftHand"
+        }
+      ]
+    }
+  ],
+  "grips": [
+    {
+      "name": "sword-primary",
+      "object": "sword",
+      "bone": "RightHand",
+      "start": 0,
+      "end": 4,
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "name": "shield-primary",
+      "object": "shield",
+      "bone": "LeftHand",
+      "start": 0,
+      "end": 4,
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ]
+    }
+  ],
+  "protectedFrames": [
+    0,
+    4
+  ]
+}

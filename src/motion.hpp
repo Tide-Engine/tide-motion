@@ -247,6 +247,7 @@ struct PreviewCamera {
     Vec3 offset{0,0.08f,0.12f}, rotation{};
     float fov=75, near_plane=0.01f;
 };
+struct EquipmentResult;
 struct PreviewOptions {
     std::string tide="tide"; fs::path capture, gif; int frames=0;
     PreviewBody body=PreviewBody::mannequin; fs::path character, texture;
@@ -255,6 +256,7 @@ struct PreviewOptions {
     // then offset (metres) and turned (Euler degrees, as Tide's quaternion.Euler) in it.
     std::vector<PreviewProp> props;
     PreviewCamera camera;
+    const EquipmentResult* equipment=nullptr; // transient authored world tracks, never serialized
 };
 // Setup paths are relative to the JSON file; serialized paths are absolute.
 PreviewOptions load_preview_setup(const fs::path&);

@@ -1,4 +1,5 @@
 #include "motion.hpp"
+#include "equipment.hpp"
 #include "author.hpp"
 #include "ardy.hpp"
 #include "upgrade.hpp"
@@ -74,6 +75,7 @@ Capsule/ground checks are sampled SOMA proxies, not skin collision or human
 reachability judgments. No findings is not a quality pass. No assets are changed.
 See notes/advisory-review.md for settings, coverage and feedback contracts.
 )";
+    if(command=="equipment")return equipment_help();
     if(command=="momask"||command=="inpaint")return R"(tide-motion generate "PROMPT" --backend momask -o OUT.glb [--duration 2] [--seed 0]
 tide-motion inpaint "PROMPT" --source SOMA.glb --begin FRAME --end FRAME -o EDIT.glb
 tide-motion models import-momask BUNDLE_DIRECTORY [--models CACHE]
@@ -324,7 +326,7 @@ metres); examples/synty-polygon.json maps Synty POLYGON characters.
 )";
     if(command=="batch")return R"(tide-motion batch JOBS.json [--models DIR]
 
-Runs ordered generate, inpaint, connect, pose-sequence, dart, retarget, cleanup and mirror actions, loading each model
+Runs ordered generate, inpaint, connect, pose-sequence, dart, retarget, equipment, cleanup and mirror actions, loading each model
 once.
 The whole manifest and every output path are checked before anything runs.
 Paths are relative to the manifest. README.md lists every action field.
@@ -434,6 +436,7 @@ void help(std::string_view command={}) {
       [--offset X Y Z] [--from-clip NAME] [--to-clip NAME] [--threads N]
   tide-motion pose-sequence POSES.json -o CLIP.glb [--threads N]
   tide-motion dart PLAN.json -o CLIP.glb [--threads N]
+  tide-motion equipment inspect|bake|preview CLIP.glb --plan EQUIPMENT.json
   tide-motion cleanup CLIP.glb --contacts PLAN.json -o CLEAN.glb [--map BONES.json]
   tide-motion mirror CLIP.glb -o MIRRORED.glb [--clip NAME]
   tide-motion retarget SOURCE.glb --target CHARACTER.glb|.fbx --map BONES.json -o CLIP.glb
@@ -832,6 +835,18 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
             auto poses=path(action.at("recipe"));(void)load_pose_sequence(poses);
             argv.push_back(poses.string());keys.insert({"recipe","threads","contactsOut","contactThreshold"});
         }
+        else if(type=="equipment") {
+            keys.insert({"source","plan","correctGrips","strict","clip","bodyOutput"});
+            argv.push_back("bake");argv.push_back(path(action.at("source")).string());
+            auto equipment=path(action.at("plan"));(void)load_equipment_plan(equipment);
+            argv.insert(argv.end(),{"--plan",equipment.string()});
+            if(action.contains("bodyOutput"))argv.insert(argv.end(),{"--body-output",path(action["bodyOutput"]).string()});
+            for(const char* flag:{"correctGrips","strict"})if(action.contains(flag)) {
+                if(!action[flag].is_boolean())throw std::runtime_error(std::string(flag)+" must be boolean");
+                if(action[flag].get<bool>())argv.push_back(std::string(flag)=="strict"?"--strict":"--correct-grips");
+            }
+            if(action.contains("clip"))argv.insert(argv.end(),{"--clip",action["clip"].get<std::string>()});
+        }
         else if(type=="cleanup") {
             keys.insert({"source","clip","contacts","map"});argv.push_back(path(action.at("source")).string());
             auto plan=path(action.at("contacts"));load_cleanup_plan(plan);
@@ -855,7 +870,7 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
             if(action.contains("clip"))argv.insert(argv.end(),{"--clip",action["clip"].get<std::string>()});
             keys.insert({"source","target","map","toSoma","clip"});
         }
-        else throw std::runtime_error("Action must be generate, inpaint, connect, pose-sequence, dart, retarget, cleanup or mirror");
+        else throw std::runtime_error("Action must be generate, inpaint, connect, pose-sequence, dart, retarget, equipment, cleanup or mirror");
         for(const auto& item:action.items())if(!keys.contains(item.key()))throw std::runtime_error("Unknown action field: "+item.key());
         auto output=path(action.at("output"));
         if(output.extension()!=".glb")throw std::runtime_error("Output must be a .glb path: "+output.string());
@@ -871,6 +886,9 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
             auto plan=path(action["contactsOut"]);
             if(plan.extension()!=".json")throw std::runtime_error("contactsOut must be a .json path");
             written.push_back(plan);argv.insert(argv.end(),{"--contacts-out",plan.string()});
+        }
+        if(type=="equipment"&&action.contains("bodyOutput")) {
+            auto body=path(action["bodyOutput"]);if(body.extension()!=".glb")throw std::runtime_error("Equipment bodyOutput must be .glb");written.push_back(body);
         }
         for(const auto& file:written)if(fs::exists(file)||fs::exists(file.string()+".part")||fs::exists(file.string()+".json")||!outputs.insert(file).second)throw std::runtime_error("Output must be a new, distinct path: "+file.string());
         argv.insert(argv.end(),{"-o",output.string()});
@@ -963,6 +981,7 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
     return 0;
 }
 int main_impl(const std::vector<std::string>& args,RunContext* context) {
+    if(args.size()>1&&args[1]=="equipment")return equipment_command(args);
     RunContext owned;if(!context)context=&owned;
     if(args.size()>1) {
         bool selected=false;

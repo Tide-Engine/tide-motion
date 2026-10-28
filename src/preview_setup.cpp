@@ -1,4 +1,5 @@
 #include "motion.hpp"
+#include "equipment.hpp"
 #include <nlohmann/json.hpp>
 #include <algorithm>
 #include <cmath>
@@ -115,12 +116,22 @@ PreviewExtent preview_extent(const Clip& c,const PreviewOptions& o) {
     c.validate();validate_preview_setup(o);
     auto rig=preview_rig(c,o);PreviewExtent e;bool first=true;std::vector<float> lows;
     std::vector<std::pair<size_t,float>> spheres;
+    std::vector<std::pair<size_t,float>> equipment_spheres;
     for(const auto& p:o.props) {
         auto b=mesh_bounds(p.mesh);float radius=0;
         for(float x:{b.low.x,b.high.x})for(float y:{b.low.y,b.high.y})for(float z:{b.low.z,b.high.z})
             radius=std::max(radius,std::sqrt(x*x+y*y+z*z));
         // A sphere around the socket covers any Euler orientation of mesh + offset.
         radius+=std::sqrt(dot(p.offset,p.offset));spheres.emplace_back(bone(rig,p.bone),radius);
+    }
+    if(o.equipment)for(size_t i=0;i<o.equipment->objects.size();++i) {
+        const auto& object=o.equipment->objects[i];if(object.mesh.empty()&&!object.builtin_rod)continue;
+        float radius=0.866026f;
+        if(!object.builtin_rod) {
+            auto b=mesh_bounds(object.mesh);radius=0;
+            for(float x:{b.low.x,b.high.x})for(float y:{b.low.y,b.high.y})for(float z:{b.low.z,b.high.z})radius=std::max(radius,std::sqrt(x*x+y*y+z*z));
+        }
+        equipment_spheres.emplace_back(i,radius);
     }
     for(size_t f=0;f<rig.frames();++f) {
         auto pose=world_pose(rig,rig.frame(f));const auto centre=pose[rig.motion_root].p;
@@ -131,6 +142,12 @@ PreviewExtent preview_extent(const Clip& c,const PreviewOptions& o) {
             e.reach=std::max(e.reach,std::hypot(p.p.x-centre.x,p.p.z-centre.z));
         }
         lows.push_back(low);
+        for(auto [index,bound]:equipment_spheres) {
+            const auto& object=o.equipment->objects[index];auto pos=object.poses.at(f).p,scale=object.scales.at(f);
+            float radius=bound*std::max({scale.x,scale.y,scale.z});
+            e.low=std::min(e.low,pos.y-radius);e.high=std::max(e.high,pos.y+radius);
+            e.reach=std::max(e.reach,std::hypot(pos.x-centre.x,pos.z-centre.z)+radius);
+        }
         for(auto [j,r]:spheres) {
             const auto p=pose[j].p;e.low=std::min(e.low,p.y-r);e.high=std::max(e.high,p.y+r);
             e.reach=std::max(e.reach,std::hypot(p.x-centre.x,p.z-centre.z)+r);

@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "props": [],
+  "camera": {
+    "enabled": true,
+    "bone": "Head",
+    "mode": "root",
+    "offset": [
+      0,
+      0.08,
+      0.12
+    ],
+    "rotation": [
+      15,
+      0,
+      0
+    ],
+    "fov": 75,
+    "near": 0.01
+  }
+}

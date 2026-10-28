@@ -554,6 +554,32 @@ replaces prop/camera flags; edit the setup to change them. Unknown fields and
 invalid ranges are refused. The setup records review settings, not inferred
 contact constraints, body motion, or model provenance.
 
+For timed grips, independent prop tracks and bow release authoring, use the native
+`equipment` commands on an existing body clip:
+
+```sh
+tide-motion equipment inspect BODY.glb --plan EQUIPMENT.json --correct-grips
+tide-motion equipment bake BODY.glb --plan EQUIPMENT.json --correct-grips --strict \
+  --body-output corrected-body.glb -o equipped.glb
+tide-motion equipment preview BODY.glb --plan EQUIPMENT.json --correct-grips \
+  --setup examples/equipment/camera-first-person.json --capture equipment.png --frames 31
+```
+
+The plan defines inclusive grip intervals, explicit arm chains, object-local palm
+targets, authored bone/object/world segments, articulated parts and string nock
+keys. Release events must coincide with an attachment-to-world transition; arrow
+flight uses authored keys. Optional offline IK changes arm rotations with bounded
+correction and rollback, reports every contact frame, and preserves body root,
+translations, fingers, outside poses and protected frames. `--strict` refuses
+unsatisfied sampled grips. It does not certify collisions or finger grasping.
+
+The combined GLB embeds equipment meshes, independent object animation and event
+metadata; `--body-output` keeps a reusable body-only clip. Generation continues to
+use the selected learned backend. [The equipment guide](notes/equipment-authoring.md)
+documents the versioned schema, limits, export/preview workflow and templates for
+sword/shield, two-hand grips and bow release. Batch accepts `action: "equipment"`
+with `source`, `plan`, `output`, optional `bodyOutput`, `correctGrips` and `strict`.
+
 Captures use Tide's ordinary bounded capture mode. `--gif OUT.gif` records the
 clip exactly once, from its first frame to its last, at 30 fps and 960 by 540
 (headless, so it works with `TIDE_HIDDEN`); it needs Tide 0.5.0-nightly.45 or

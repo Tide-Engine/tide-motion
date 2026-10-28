@@ -1,0 +1,490 @@
+{
+  "version": 1,
+  "objects": [
+    {
+      "name": "bow",
+      "mesh": "meshes/bow-riser.glb",
+      "segments": [
+        {
+          "start": 0,
+          "end": 4,
+          "space": "bone",
+          "interpolation": "linear",
+          "keys": [
+            {
+              "frame": 0,
+              "position": [
+                0,
+                0,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0
+              ],
+              "meshScale": [
+                1,
+                1,
+                1
+              ]
+            },
+            {
+              "frame": 4,
+              "position": [
+                0,
+                0,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0
+              ],
+              "meshScale": [
+                1,
+                1,
+                1
+              ]
+            }
+          ],
+          "anchor": "LeftHand"
+        }
+      ]
+    },
+    {
+      "name": "upper-limb",
+      "mesh": "meshes/bow-upper-limb.glb",
+      "segments": [
+        {
+          "start": 0,
+          "end": 4,
+          "space": "object",
+          "interpolation": "linear",
+          "keys": [
+            {
+              "frame": 0,
+              "position": [
+                0,
+                0.15,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0
+              ],
+              "meshScale": [
+                1,
+                1,
+                1
+              ]
+            },
+            {
+              "frame": 2,
+              "position": [
+                0,
+                0.15,
+                0
+              ],
+              "rotation": [
+                -12,
+                0,
+                0
+              ],
+              "meshScale": [
+                1,
+                1,
+                1
+              ]
+            },
+            {
+              "frame": 3,
+              "position": [
+                0,
+                0.15,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0
+              ],
+              "meshScale": [
+                1,
+                1,
+                1
+              ]
+            },
+            {
+              "frame": 4,
+              "position": [
+                0,
+                0.15,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0
+              ],
+              "meshScale": [
+                1,
+                1,
+                1
+              ]
+            }
+          ],
+          "anchor": "bow"
+        }
+      ]
+    },
+    {
+      "name": "lower-limb",
+      "mesh": "meshes/bow-lower-limb.glb",
+      "segments": [
+        {
+          "start": 0,
+          "end": 4,
+          "space": "object",
+          "interpolation": "linear",
+          "keys": [
+            {
+              "frame": 0,
+              "position": [
+                0,
+                -0.15,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0
+              ],
+              "meshScale": [
+                1,
+                1,
+                1
+              ]
+            },
+            {
+              "frame": 2,
+              "position": [
+                0,
+                -0.15,
+                0
+              ],
+              "rotation": [
+                12,
+                0,
+                0
+              ],
+              "meshScale": [
+                1,
+                1,
+                1
+              ]
+            },
+            {
+              "frame": 3,
+              "position": [
+                0,
+                -0.15,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0
+              ],
+              "meshScale": [
+                1,
+                1,
+                1
+              ]
+            },
+            {
+              "frame": 4,
+              "position": [
+                0,
+                -0.15,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0
+              ],
+              "meshScale": [
+                1,
+                1,
+                1
+              ]
+            }
+          ],
+          "anchor": "bow"
+        }
+      ]
+    },
+    {
+      "name": "nock",
+      "segments": [
+        {
+          "start": 0,
+          "end": 4,
+          "space": "object",
+          "interpolation": "linear",
+          "keys": [
+            {
+              "frame": 0,
+              "position": [
+                0,
+                0,
+                -0.1
+              ],
+              "rotation": [
+                0,
+                0,
+                0
+              ],
+              "meshScale": [
+                1,
+                1,
+                1
+              ]
+            },
+            {
+              "frame": 2,
+              "position": [
+                0,
+                0,
+                -0.3
+              ],
+              "rotation": [
+                0,
+                0,
+                0
+              ],
+              "meshScale": [
+                1,
+                1,
+                1
+              ]
+            },
+            {
+              "frame": 3,
+              "position": [
+                0,
+                0,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0
+              ],
+              "meshScale": [
+                1,
+                1,
+                1
+              ]
+            },
+            {
+              "frame": 4,
+              "position": [
+                0,
+                0,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0
+              ],
+              "meshScale": [
+                1,
+                1,
+                1
+              ]
+            }
+          ],
+          "anchor": "bow"
+        }
+      ]
+    },
+    {
+      "name": "arrow",
+      "mesh": "meshes/arrow.glb",
+      "segments": [
+        {
+          "start": 0,
+          "end": 2,
+          "space": "object",
+          "interpolation": "linear",
+          "keys": [
+            {
+              "frame": 0,
+              "position": [
+                0,
+                0,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0
+              ],
+              "meshScale": [
+                1,
+                1,
+                1
+              ]
+            },
+            {
+              "frame": 2,
+              "position": [
+                0,
+                0,
+                0
+              ],
+              "rotation": [
+                0,
+                0,
+                0
+              ],
+              "meshScale": [
+                1,
+                1,
+                1
+              ]
+            }
+          ],
+          "anchor": "nock"
+        },
+        {
+          "start": 3,
+          "end": 4,
+          "space": "world",
+          "interpolation": "linear",
+          "keys": [
+            {
+              "frame": 3,
+              "position": [
+                -0.28,
+                0.2,
+                -0.3
+              ],
+              "rotation": [
+                0,
+                0,
+                0
+              ],
+              "meshScale": [
+                1,
+                1,
+                1
+              ]
+            },
+            {
+              "frame": 4,
+              "position": [
+                -0.28,
+                0.2,
+                1.5
+              ],
+              "rotation": [
+                0,
+                0,
+                0
+              ],
+              "meshScale": [
+                1,
+                1,
+                1
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "grips": [
+    {
+      "name": "bow-primary",
+      "object": "bow",
+      "bone": "LeftHand",
+      "start": 0,
+      "end": 4,
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "rotation": [
+        0,
+        0,
+        0
+      ]
+    }
+  ],
+  "strings": [
+    {
+      "name": "bow-string",
+      "object": "bow",
+      "topAnchor": "upper-limb",
+      "top": [
+        0,
+        0.45,
+        0
+      ],
+      "bottomAnchor": "lower-limb",
+      "bottom": [
+        0,
+        -0.45,
+        0
+      ],
+      "nockAnchor": "nock",
+      "nock": [
+        {
+          "frame": 0,
+          "position": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "frame": 4,
+          "position": [
+            0,
+            0,
+            0
+          ]
+        }
+      ],
+      "thickness": 0.004
+    }
+  ],
+  "events": [
+    {
+      "name": "drawn",
+      "frame": 2,
+      "object": "bow",
+      "data": {
+        "phase": "fully-drawn"
+      }
+    },
+    {
+      "name": "release",
+      "frame": 3,
+      "object": "arrow",
+      "data": {
+        "flight": "author-keyed world track"
+      }
+    }
+  ],
+  "protectedFrames": [
+    0,
+    4
+  ]
+}

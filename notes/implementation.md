@@ -1,5 +1,98 @@
 # Native animation authoring
 
+## Native equipment grips, object export and bow release (2026-10-28)
+
+Owner explicitly requested implementing the remaining tool authoring work and
+allowed parallel model investigation. Native `equipment inspect|bake|preview`
+now operates on existing body GLB/FBX clips with a strict version-1 JSON plan.
+See [equipment-authoring.md](equipment-authoring.md) and examples/equipment for
+commands, complete schema and five-frame sword/shield, two-hand and bow templates.
+
+Object segments cover every source frame without gaps/overlaps. They name world,
+explicit body bone or another object as their anchor, with authored position,
+Euler rotation and mesh-only scale keys. Object hierarchy is evaluated in metres
+with scale stripped from anchor frames; each resulting object becomes an independent
+world-space GLB root track. Object trajectories are sampled from the original body
+before optional arm correction, avoiding recursive hand/object chasing. Segment
+seam translation/rotation steps are reported. Key/segment bounds, cycles, names,
+finite values and source frame coverage are checked before sampling.
+
+Grips measure every authored contact frame, including an optional palm offset,
+position/orientation residuals and object-relative drift. Explicit direct three-bone
+arm chains can receive analytic offline IK via `--correct-grips`. Body root and
+all translations, fingers, outside intervals and protected frames are preserved.
+Source recipe protected frames are carried in automatically. Excessive correction,
+rotation or boundary-step growth, unreachable targets and protected-frame residuals
+reject/restore the whole affected interval. Interacting/overlapping chains refuse.
+Final metrics use the actual accepted body; no failed attempt is reported as fixed.
+`--strict` refuses unsatisfied sampled grips before writing outputs or previewing.
+
+Bow limbs are ordinary authored object parts. Two string rods follow independent
+top/bottom/nock object frames, so articulated limb tips and a hand/nock target can
+share exact endpoints. Nock keys author draw/recoil. A `release` event must name an
+object at an attached-to-world segment transition; subsequent arrow flight is an
+explicit world track, not projectile simulation. Events retain frame/time/payload
+in GLB extras and the recipe. Ordinary channels interpolate LINEAR between baked
+samples; this is a sampled authoring/contact contract, not subframe physics.
+
+`bake` embeds rigid equipment GLB meshes with static scene hierarchy, attributes,
+core materials, embedded PNG/JPEG textures and source asset attribution. Supported
+material extensions are explicit. Unsupported animation/skins/morphs/cameras or
+external resources refuse. Untextured rigid FBX converts through existing pinned
+ufbx in Y-up metres, with appearance losses stated in meshConversions; textured
+FBX refuses in favor of self-contained GLB. The body skeleton animation is included;
+the character mesh is not. Optional `--body-output` writes a reusable corrected
+body-only clip/recipe. Native batch `action: equipment` supports this final authoring
+stage, with output-path collision checks including optional bodyOutput.
+
+Exports and JSON files use exclusive partial creation and no-replace same-directory
+hard-link publication. This fails safely on filesystems without hard-link support;
+multiple output files are not a single filesystem transaction. Recipes record the
+effective plan, source/mesh/map/character hashes as applicable, selected source clip,
+tool version, protected frames, decisions and errors. No inference backend/model,
+dependency revision, engine source or owner installation is changed.
+
+Windows x64 ClangCL 18.1.8 Release passes all sixteen CTests. New contracts cover
+independent FK for two moving hand targets, centimetre rigs, palm offsets with
+preserved hand orientation, rollback/bounds/protected/outside/root preservation,
+cycles and invalid release timing, string endpoints and independent arrow flight.
+Final GLB tests parse actual embedded bytes with cgltf: body/object/scale tracks,
+quaternion continuity, repeated textures/material remapping, PNG bytes, attribution,
+nested static transforms, rod winding, FBX metre conversion and overwrite/failure
+cleanup. CLI covers strict no-output refusal, body-only reuse, recipes, batch paths
+and execution without model-cache environment discovery.
+
+Seven/eight-frame own camera fixtures and own box prop geometry exercise real
+authoring previews with `--frames 9/15`, first-person capture and eight-frame GIF.
+The corrected synthetic draw interval passes strict validation: max marker position
+error 1.2287812e-7 m. Initial unreachable fixture was correctly rejected; its authored
+nock target was moved into reach. These numbers validate IK/track plumbing, not
+model weapon quality or finger contact. Standalone exported GLB also decodes with
+the current engine and plays through its ordinary SkinnedMesh animation path.
+The initial standalone test camera framed the wrong X side: Tide reflects glTF X
+on import; correcting that camera verifies the original independent-root export.
+An unnecessary trial rigid-binding workaround was removed. Captures were inspected.
+All renderer runs held TideMotionGpuValidation, TIDE_HIDDEN=1 and explicit bounds,
+using the same rebuilt/staged engine checkout 367ae4da2d31913176ae1e2624e1d78a1204f03c.
+
+Parallel [Dex2HOI release audit](dex2hoi-release-audit.md) recovered the precise
+public generation checkpoint/statistics listing and executed a bounded native
+18D host-decoder probe on 256 synthetic cases. Maximum translation error 6.91e-7 m,
+rotation-matrix error 9.16e-7 vs independent double reference. No learned network,
+checkpoint/statistics payload or evaluation motion was used. Missing args.json
+means upstream default fallback, not automatic refusal. Actual checkpoint/code
+grants and exact trained configuration remain unresolved; no backend is integrated.
+
+Limits remain explicit: no collision/penetration or anatomical certification,
+automatic finger grasping, inferred weapon semantics, automatic body skinning or
+non-humanoid retargeting. These authoring controls supplement real learned body
+generation; they do not replace it with procedural generation or pose blending.
+
+Integrated additively onto origin/dev c239748's advisory review/calibration work.
+Preserved both CLI namespaces, review source/tests and implementation notes.
+The combined Windows Release build and all eighteen registered CTests pass;
+equipment arithmetic and exported assets are unchanged by the integration.
+
 ## Native advisory review and human calibration (2026-10-28)
 
 Owner requested an agent-facing observation environment with human judgment,
@@ -60,6 +153,7 @@ balance/force certification, aesthetic judgment, automatic repair, feedback-trai
 model or direct Tide pose-editor integration. Screenshots/UI were inspected as
 review-interface checks. No engine renderer or GPU work ran; TIDE_HIDDEN=1 was set
 for native invocations. The engine checkout and owner installation are untouched.
+
 
 ## Dex2HOI audit and native first-person/equipment review (2026-10-28)
 

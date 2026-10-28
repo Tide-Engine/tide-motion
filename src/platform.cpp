@@ -1,4 +1,5 @@
 #include "motion.hpp"
+#include "equipment.hpp"
 #include <nlohmann/json.hpp>
 #include <cstdlib>
 #include <algorithm>
@@ -165,6 +166,31 @@ static void body_scene(const Clip& c,const fs::path& root,const PreviewOptions& 
         props.push_back("prop"+std::to_string(i)+ext);
         fs::copy_file(attachment.mesh,root/props.back(),fs::copy_options::overwrite_existing);
     }
+    std::vector<std::string> equipment_meshes;
+    if(options.equipment) {
+        const auto& eq=*options.equipment;Clip tracks;tracks.name="equipment";tracks.fps=c.fps;
+        for(size_t i=0;i<eq.objects.size();++i) {
+            tracks.joints.push_back({"Object"+std::to_string(i),-1,{}});
+            tracks.joints.push_back({"Scale"+std::to_string(i),-1,{}});
+            const auto& object=eq.objects[i];std::string mesh;
+            if(object.builtin_rod) {
+                mesh="equipment-rod.glb";
+                if(!fs::exists(root/mesh)) {
+                    EquipmentResult unit;unit.body.joints.push_back({"PreviewRodRoot",-1,{}});unit.body.poses.push_back({});
+                    EquipmentTrack rod;rod.name="PreviewRod";rod.builtin_rod=true;rod.poses.push_back({});rod.scales.push_back({1,1,1});unit.objects.push_back(rod);
+                    save_equipment_glb(unit,root/mesh);
+                }
+            } else if(!object.mesh.empty()) {
+                mesh="equipment-mesh-"+std::to_string(i)+object.mesh.extension().string();
+                fs::copy_file(object.mesh,root/mesh,fs::copy_options::overwrite_existing);
+            }
+            equipment_meshes.push_back(mesh);
+        }
+        for(size_t f=0;f<c.frames();++f)for(const auto& object:eq.objects) {
+            tracks.poses.push_back(object.poses.at(f));tracks.poses.push_back({object.scales.at(f),{}});
+        }
+        save_glb(tracks,root/"equipment-tracks.glb");
+    }
     // Framing from the whole clip (a get-up starts lying down): where its feet are, its
     // height above them and how far it reaches out from its root.
     auto extent=preview_extent(c,options);
@@ -192,6 +218,11 @@ asset Animation motion = "motion.glb";
 )";
     if(!texture.empty())scene<<"asset Texture skin = \""<<texture<<"\";\n";
     for(size_t i=0;i<props.size();++i)scene<<"asset Mesh<Corner> prop"<<i<<" = \""<<props[i]<<"\";\n";
+    if(options.equipment) {
+        scene<<"asset SkinnedMesh<Vertex3> equipmentTracks = \"equipment-tracks.glb\";\n";
+        for(size_t i=0;i<equipment_meshes.size();++i)if(!equipment_meshes[i].empty())
+            scene<<"asset Mesh<Corner> equipmentMesh"<<i<<" = \""<<equipment_meshes[i]<<"\";\n";
+    }
     scene<<"const float HEIGHT = "<<num(height)<<";\nconst float VIEW = "<<num(view)<<";\nconst float FLOOR = "<<num(low)<<";\n";
     scene<<R"(const float TILE = HEIGHT * 0.22;
 const float SPREAD = VIEW * 0.66;
@@ -214,7 +245,7 @@ local scene Main { }
 )";
     // A prop is drawn in plain light steel on its bone's model matrix without the rig's
     // scale (Synty bones carry 0.01), then offset and turned within that bone.
-    if(!props.empty()||options.camera.enabled) {
+    if(!props.empty()||options.camera.enabled||options.equipment) {
         scene<<R"(
 frag Steel(Corner corner, out Color color, Instance instance)
 {
@@ -236,7 +267,7 @@ float4x4 Unscaled(float4x4 m)
         }
     }
     scene<<"\n// One copy of the body at a place on screen, turned about its own centre.\n";
-    std::string grip_parameters,grip_arguments;
+    std::string grip_parameters=options.equipment?"Pose equipmentPose, ":"",grip_arguments=options.equipment?"equipmentPose, ":"";
     for(size_t i=0;i<props.size();++i) {
         grip_parameters+="Bone grip"+std::to_string(i)+", ";
         grip_arguments+="grip"+std::to_string(i)+", ";
@@ -259,6 +290,12 @@ float4x4 Unscaled(float4x4 m)
 )";
     scene<<(texture.empty()?"    Draw.SkinnedMesh(body, place, pose, Lit);\n":"    Draw.SkinnedMesh(body, place, pose, skin, Lit);\n");
     for(size_t i=0;i<props.size();++i)scene<<"    Draw.Mesh(prop"<<i<<", Math.Mul(Math.Mul(place, Unscaled(pose.Model(grip"<<i<<"))), HELD"<<i<<"), Steel);\n";
+    if(options.equipment)for(size_t i=0;i<equipment_meshes.size();++i)if(!equipment_meshes[i].empty()) {
+        scene<<"    equipmentTracks.skeleton.bones.TryGetByName(\"Object"<<i<<"\", out var equipmentBone"<<i<<");\n";
+        scene<<"    equipmentTracks.skeleton.bones.TryGetByName(\"Scale"<<i<<"\", out var scaleBone"<<i<<");\n";
+        scene<<"    var meshScale"<<i<<" = Math.Transform(equipmentPose.Model(scaleBone"<<i<<"), float3(0));\n";
+        scene<<"    Draw.Mesh(equipmentMesh"<<i<<", Math.Mul(place, Math.Mul(equipmentPose.Model(equipmentBone"<<i<<"), float4x4.Scale(meshScale"<<i<<"))), Steel);\n";
+    }
     scene<<"}\n";
     scene<<R"(
 view Preview(mut PreviewClock clock)
@@ -269,6 +306,10 @@ view Preview(mut PreviewClock clock)
     mut var pose = body.defaultPose;
 )";
     scene<<"    pose.Sample(motion, seconds, Playback."<<(once?"Clamp":"Loop")<<");\n";
+    if(options.equipment) {
+        scene<<"    equipmentTracks.animations.TryGetAt(0, out var equipmentAnimation);\n";
+        scene<<"    var equipmentPose = equipmentAnimation.Sample(seconds, Playback."<<(once?"Clamp":"Loop")<<");\n";
+    }
     scene<<"    body.skeleton.TryGetByName("<<nlohmann::json(c.joints[c.motion_root].name).dump()<<", out var centreBone);\n";
     for(size_t i=0;i<props.size();++i)scene<<"    body.skeleton.TryGetByName("<<nlohmann::json(options.props[i].bone).dump()<<", out var grip"<<i<<");\n";
     scene<<R"(    var centre = Math.Transform(pose.Model(centreBone), float3(0));
@@ -327,7 +368,7 @@ void preview(const Clip& c,const fs::path& source,const PreviewOptions& options)
         auto stem=entry.path().stem().string();
         const bool prop_asset=stem=="prop"||(stem.starts_with("prop")&&stem.size()>4&&
             std::all_of(stem.begin()+4,stem.end(),[](unsigned char ch){return std::isdigit(ch);}));
-        if(entry.is_regular_file()&&(stem=="character"||stem=="skin"||prop_asset))fs::remove(entry.path());
+        if(entry.is_regular_file()&&(stem=="character"||stem=="skin"||prop_asset||stem.starts_with("equipment-")))fs::remove(entry.path());
     }
     if(options.body!=PreviewBody::skeleton)body_scene(c,root,options,once);
     else {
