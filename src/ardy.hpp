@@ -14,8 +14,9 @@ class ArdyModel {
     struct Impl;
     std::unique_ptr<Impl> impl_;
 public:
-    explicit ArdyModel(const fs::path& directory,unsigned threads=8);
+    explicit ArdyModel(const fs::path& directory,unsigned threads=8,const std::string& device="cpu");
     ~ArdyModel();
+    std::string device() const;
     Clip generate(const std::vector<ArdyPrompt>&,const ArdyOptions&,
                   const MotionConditions& = {},const Clip* history=nullptr);
     // Developer-only fixed input tests; never uses Python at runtime.

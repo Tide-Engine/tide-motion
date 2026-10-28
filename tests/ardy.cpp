@@ -36,7 +36,7 @@ int main(int argc,char** argv) try {
         }
         std::ofstream out(dir/"asset-measurements.json");out<<report.dump(2);std::cout<<report.dump(2)<<'\n';return 0;
     }
-    motion::ArdyModel model(motion::utf8path(argv[1]),8);
+    motion::ArdyModel model(motion::utf8path(argv[1]),8,argc>3&&std::string(argv[2])!="--text"?argv[3]:"cpu");
     if(argc>3&&std::string(argv[2])=="--text"){model.write_text_reference("A person walks forward at a relaxed pace.",motion::utf8path(argv[3]));return 0;}
     if(argc>2)model.verify_reference(motion::utf8path(argv[2]));
     return 0;

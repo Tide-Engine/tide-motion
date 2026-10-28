@@ -1,7 +1,8 @@
 param([Parameter(Mandatory=$true)][string]$Tool,
       [Parameter(Mandatory=$true)][string]$Models,
       [Parameter(Mandatory=$true)][string]$History,
-      [Parameter(Mandatory=$true)][string]$OutputDirectory)
+      [Parameter(Mandatory=$true)][string]$OutputDirectory,
+      [ValidateSet('cpu','gpu','auto')][string]$Device='cpu')
 $ErrorActionPreference='Stop'
 $env:TIDE_HIDDEN='1'
 $Tool=(Resolve-Path -LiteralPath $Tool).Path
@@ -16,6 +17,7 @@ $actions=@(
  @{action='generate';backend='ardy';prompt='A person walks forward at a relaxed pace.';duration=6.1;steps=10;threads=8;correct=$false;keyframes=@(@{frame=90;file=$History;sourceFrame=90});effectors=@(@{frame=30;file=$History;sourceFrame=30;effectors='right-hand'});path=@(@{frame=150;x=2;z=1});output='constrained.glb'},
  @{action='generate';backend='ardy';prompt='A person walks forward at a relaxed pace.';duration=60;steps=4;threads=8;correct=$false;output='long.glb'}
 )
+foreach($action in $actions){$action.device=$Device}
 $manifest=Join-Path $OutputDirectory 'jobs.json'
 @{actions=$actions}|ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $manifest -Encoding utf8
 $mx=[Threading.Mutex]::new($false,'TideMotionGpuValidation');$held=$false
@@ -39,7 +41,10 @@ try {
         $file=Join-Path $OutputDirectory $pair[0]
         $info=(& $Tool inspect $file)|ConvertFrom-Json
         if($LASTEXITCODE -ne 0 -or $info.frames -ne $pair[1]){throw "Frame-count/GLB roundtrip failed: $file"}
+        $recipe=Get-Content -LiteralPath "$file.json" -Raw|ConvertFrom-Json
+        if($recipe.backend -ne 'ardy' -or ($Device -ne 'auto' -and $recipe.device -ne $Device)){throw "Wrong inference backend/device: $file"}
+        if($recipe.device -eq 'gpu' -and $recipe.accelerator -ne 'directml'){throw "Missing DirectML provenance: $file"}
     }
-    @{seconds=$timer.Elapsed.TotalSeconds;peakWorkingSetBytes=$peak;threads=8;device='cpu'}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $OutputDirectory 'measurements.json')
+    @{seconds=$timer.Elapsed.TotalSeconds;peakWorkingSetBytes=$peak;threads=8;requestedDevice=$Device}|ConvertTo-Json|Set-Content -LiteralPath (Join-Path $OutputDirectory 'measurements.json')
     Write-Output "PASS native batch, history, changing prompts, path, long-form and GLB frame counts; seconds=$($timer.Elapsed.TotalSeconds) peakBytes=$peak"
 }finally{if($held){$mx.ReleaseMutex()};$mx.Dispose()}

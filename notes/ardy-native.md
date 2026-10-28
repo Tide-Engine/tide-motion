@@ -1,6 +1,6 @@
 # ARDY native offline generation
 
-ARDY is an opt-in native CPU backend. It uses the commercially released SOMA
+ARDY is an opt-in native CPU/Windows DirectML backend. It uses the commercially released SOMA
 KimodoRep checkpoint at `e6c6804fb6b55636ad927145d74959fd46882ccd`, converted from
 [NVIDIA's pinned source](https://github.com/nv-tlabs/ardy/tree/e706e27acc88070918308a10922b8f7174d0825e).
 It generates motion with the complete two-stage denoiser, FSQ tokenizer
@@ -17,7 +17,7 @@ tide-motion models install text --accept-licenses
 tide-motion models import-ardy PATH/TO/CONVERTED --accept-licenses
 tide-motion models check ardy
 tide-motion generate 'A person walks forward at a relaxed pace.' --backend ardy `
-  --duration 6.1 --steps 10 --threads 8 --no-correction -o walk.glb
+  --device gpu --duration 6.1 --steps 10 --threads 8 --no-correction -o walk.glb
 tide-motion generate 'A person walks forward.' --backend ardy --duration 2 `
   --then 'A person waves with their right hand.' --duration 2.1 `
   --history walk.glb --history-frames 64 --no-correction -o continuation.glb
@@ -30,11 +30,17 @@ The supported model-import path verifies the pinned manifest, model sizes/hashes
 and bundled license before copying. No converted weights are hosted or included
 in Git/releases by this work. Conversion is a developer step described below.
 
-Generation defaults to 10 diffusion steps for ARDY (range 1..10); `--device auto`
-and `cpu` both use ORT CPU and native CPU text. `gpu` is explicitly refused.
+Generation defaults to 10 diffusion steps for ARDY (range 1..10). Windows x64
+builds include DirectML for all three motion networks: `--device gpu` requires
+successful GPU initialization/inference, `cpu` selects ORT CPU, and the default
+`auto` tries GPU then falls back to CPU. A native GPU run failure in `auto`
+restarts the whole generation on CPU with the same seed; partially generated
+motion is discarded. Both paths use native CPU text embeddings. Other platforms
+currently have only the CPU path; an explicit GPU request is refused there.
 The native dependency's Vulkan support for Kimodo is unaffected. ARDY defaults
 to 8 CPU threads, and batch actions reuse all three sessions and cached text
-embeddings while their thread setting stays the same.
+embeddings while their thread/device setting stays the same. Recipes record the
+actual device and `accelerator:directml|cpu`, including after a fallback.
 
 Per-prompt duration may be 0.2..600 seconds; the total remains bounded to 18,000
 frames (10 minutes at 30 Hz). The requested output count is rounded seconds×30,
@@ -109,6 +115,46 @@ encoder retains existing Meta Llama 3/model-adapter terms and attribution. No
 research-only checkpoint or evaluation motion data is used. Generated GLBs remain
 ordinary animation assets; NVIDIA's model terms claim no ownership of outputs.
 
+## Native Windows GPU runtime
+
+The packaged backend uses the native [ORT DirectML execution provider](https://onnxruntime.ai/docs/execution-providers/DirectML-ExecutionProvider.html)
+and DirectX 12, with no user CUDA, Python, .NET, SDK or service dependency.
+Windows 10 version 1903 or newer and a suitable DirectX 12 GPU/driver are required
+by DirectML. The backend chooses the high-performance hardware adapter; there
+is no adapter-index option. Only Windows x64 / NVIDIA RTX 4080 SUPER has been
+validated here; AMD/Intel hardware and other platforms are untested.
+
+Pinned native dependencies, downloaded and SHA-256-checked by CMake:
+
+| Package | Version | Archive SHA-256 | Terms |
+|---|---|---|---|
+| [Microsoft.ML.OnnxRuntime.DirectML](https://www.nuget.org/packages/Microsoft.ML.OnnxRuntime.DirectML/1.24.4) | 1.24.4, source `2d924974ef147392ced8409d36bd6d2e7fcc8a74` | `57e9f11b73437bef7a309496135d4c1f96b1a8e9ddba60013fa27bfc1d788681` | MIT + ThirdPartyNotices |
+| [Microsoft.AI.DirectML](https://www.nuget.org/packages/Microsoft.AI.DirectML/1.15.4) | 1.15.4 | `4e7cb7ddce8cf837a7a75dc029209b520ca0101470fcdf275c1f49736a3615b9` | Microsoft DirectML terms + ThirdPartyNotices |
+
+DirectML's bundled section 1(a) permits redistribution within developed Windows
+applications, with Windows/Xbox-only use. The package retains both original
+licenses and third-party notices under `licenses/ardy-ort-directml` and
+`licenses/directml`. The Microsoft SDK is proprietary; ORT is MIT. This change
+does not alter the pinned NVIDIA checkpoint grant or distribute any weights.
+ORT lists DirectML as sustained engineering, a maintenance/platform risk for a
+future dependency update; this is a working optional path, not a portable GPU API.
+
+CPU ORT remains 1.31.1 for ARDY and MotionBricks. The GPU distribution has its own
+ORT 1.24.4 API table in `src/ardy_gpu.cpp`, loaded with an explicit absolute path
+from `bin/ardy-directml`. No ORT C++ global API, allocator, tensor or session crosses
+between versions; only owned numeric vectors do. This avoids downgrading other
+backends. The GPU path uses sequential execution and disabled memory patterns,
+as required by DirectML, and opts out of ORT telemetry through its native API.
+The three DLLs add 35,877,968 uncompressed bytes. There is no runtime download.
+`-DMOTION_ARDY_DIRECTML=OFF` builds/packages the existing CPU-only path.
+
+All three unchanged FP32 model graphs run on GPU, including the FSQ encoder and
+decoder. DDIM, masks, history, origins, preprocessing, FK and GLB export remain
+native C++; local GGML text stays on CPU. Developer `TIDE_ARDY_PROFILE=PATH_PREFIX`
+enables ORT JSON profiling. Actual profiles on the tested GPU contain DML kernel
+events for every network and no CPU execution-provider kernel events. Model
+loading or ONNX export alone is not the evidence for acceleration.
+
 ## Reproduce conversion and reference checks
 
 Developer tooling is excluded from the runtime package. Use an isolated Python
@@ -140,7 +186,7 @@ checks are followed by tests against the actual native ORT 1.31.1 binary.
 Export trace warnings about fixed shapes are expected; no dynamic-shape claim
 is made. Export fails on reference mismatches rather than logging success anyway.
 
-Build normally, then run native `ardy-tests MODEL_DIR REFERENCE_DIR` against
+Build normally, then run native `ardy-tests MODEL_DIR REFERENCE_DIR [cpu|gpu]` against
 generated fixtures. `ardy-tests MODELS/ardy --text TEXT.json` emits the native
 local embedding for an own prompt. `tools/ardy/host_reference.py` uses that exact
 embedding with the upstream PyTorch sampler and captures fixed noise; its optional
@@ -154,6 +200,13 @@ imported history, sparse constraints and a 60-second output. It holds
 checks requested counts through the native GLB loader. `ardy-tests --assets DIR`
 checks FK finiteness, same-seed warm repeatability and GLB roundtrip and records
 travel/foot-slide diagnostics. Never package generated fixtures or weights.
+Pass `-Device gpu` or `-Device cpu` to the inference harness for matched runs.
+`tests/ardy-runtime.ps1 -Tool PACKAGED_EXE -Models MODEL_ROOT -OutputDirectory NEW_DIR`
+tests real GPU inference with only Windows directories on PATH, mixed GPU ARDY /
+CPU MotionBricks sessions when that model is supplied, and actual CPU fallback
+versus strict-GPU refusal in a private deployment missing the DirectML DLLs.
+Both scripts hold `TideMotionGpuValidation`. Use a fresh output directory for
+the runtime script. Model-free CTests never require a GPU or download weights.
 
 ## Validation and limits
 
@@ -173,8 +226,8 @@ in a bounded 91-frame capture. Tide CLI and `tide_platform` were rebuilt from
 privately; TIDE_HIDDEN=1, with the GPU mutex held for capture. No engine source
 changed. The inspected front/profile frame shows a walking pose with intact
 limbs and floor alignment; a frame capture is not proof of continuous contact
-quality. No ARDY GPU acceleration or Linux/macOS support is claimed from this
-Windows CPU validation. The networks can produce skating, semantic misses and
+quality. This original CPU validation does not establish Linux/macOS support;
+subsequent Windows GPU evidence is below. The networks can produce skating, semantic misses and
 constraint error. Text model loading/encoding remains significant for cold runs;
 interleaved Kimodo/ARDY actions currently own separate text encoder instances.
 
@@ -182,3 +235,58 @@ Measured cold/warm/long-form and runtime-package evidence is recorded in
 notes/implementation.md after local validation. ARDY supplements prompt-changing
 long-form continuation; current Kimodo generation and MotionBricks clip/pose
 authoring remain available. No universal quality or speed superiority is claimed.
+
+### Windows GPU validation (2026-10-28)
+
+Windows x64 ClangCL 18.1.8 Release, RTX 4080 SUPER (16 GB, driver 617.42), Ryzen
+9 7900X, eight CPU threads, same external models, prompts, seeds and no pose
+correction. All ten integrated CTests pass with DirectML enabled and in a separate CPU-only
+build. Native GPU reference tests cover every network at 0/4/240 history frames,
+full host generation across four chunks with a future path constraint, and
+imported-history preprocessing/FSQ. Maximum network errors against PyTorch:
+denoiser 0.000138, encoder 0.000000477, decoder 0.001622. The original tensor
+tolerance (0.002 absolute + 0.002 relative) is unchanged. Fixed-input host errors
+are 3.55 mm / 0.783 degrees; imported-history host 0.258 mm / 0.194 degrees;
+including native preprocessing 2.18 mm / 1.85 degrees. GPU decoded host tests use
+5 mm / 0.025 radians instead of CPU's 3 mm / 0.01 radians because different GPU
+reductions can cross discrete FSQ boundaries. This is measured parity, not bitwise
+CPU/GPU equivalence or a universal error bound.
+
+Matched single-process five-action batches, one run per device:
+
+| Work | CPU seconds | DirectML seconds |
+|---|---:|---:|
+| Cold own-prompt 183 frames, 10 steps | 18.010 | 14.673 |
+| Warm same prompt/seed, 183 frames, 10 steps | 5.238 | 0.221 |
+| Imported 64-frame history, changing prompts, path, 123 new frames | 4.503 | 0.576 |
+| Full pose, right hand and future path constraints, 183 frames | 4.925 | 0.221 |
+| Warm 60-second / 1,800-frame generation, 4 steps | 14.835 | 0.700 |
+| Whole process including session loads, text and GLB writes | 49.480 | 19.670 |
+
+Per-generation times include prompt encoding and exclude model session creation;
+warm means cached sessions/embeddings in that batch. Cold is process-cold, not an
+OS disk-cache flush. This is one machine/run, not a portable benchmark. Peak
+sampled process working set was 9.18 GB CPU / 9.48 GB GPU, sampled every 250 ms.
+DXGI per-process local GPU usage sampled after runs peaked at 983,146,496 bytes;
+this excludes other processes and can miss transient peaks. Text loading/encoding
+still dominates cold latency and host RAM. No text GPU acceleration is claimed.
+
+Both batches pass exact requested frame counts, finite FK, native GLB roundtrip
+and same-device cold/warm pose repeatability. Constraints on GPU measured 1.57 cm
+mean / 4.01 cm max full-pose position error, 1.45 cm right-hand error and 3.28 cm
+path error before correction. GPU and CPU are not interchangeable recipes: their
+same-seed four-step 60-second runs traveled 18.87 m and 22.57 m respectively as
+quantization differences accumulated. Foot-slide diagnostics found no samples
+below the strict 3 cm height threshold (null, not zero sliding). Walking, waving
+and the long-run poses were inspected in bounded 91/181/1801-frame hidden Tide
+captures using the CLI/platform built from engine checkout
+`28b61e4db1cb2549fcc9f6bc6d9c6034022f3d9c`. Static captures do not prove contact or
+all-frame semantic quality.
+
+The fresh ZIP installs/reinstalls in a path with spaces and quotes. Packaged
+native GPU generation, CPU MotionBricks in the same process, explicit-GPU failure
+without DLLs, and actual auto CPU generation all pass with a Windows-only PATH.
+All inference/timing/captures were serialized by `TideMotionGpuValidation`.
+Runtime loss mid-generation has a CPU-restart handler but physical device-reset
+fault injection was not performed. No AMD/Intel GPU, Linux/macOS GPU, multi-GPU
+selection, text offload or broad driver compatibility claim is made.

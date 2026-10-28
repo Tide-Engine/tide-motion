@@ -5,6 +5,7 @@
 #ifdef MOTION_MOMASK_EXPERIMENTAL
 #include "momask.hpp"
 #endif
+#include "ardy_gpu.hpp"
 #include <kimodo/kimodo.hpp>
 #include <nlohmann/json.hpp>
 #include <algorithm>
@@ -63,12 +64,14 @@ const char* command_help(std::string_view command) {
 
 Generates a SOMA-30 clip from text (30 fps).
 
-  --backend kimodo|ardy       Optional ARDY native ONNX CPU generation; default Kimodo
+  --backend kimodo|ardy       Optional ARDY native generation; default Kimodo
   --history FILE.glb          ARDY imported SOMA history (last up to 240 frames)
   --history-frames N          ARDY visible history, 4..240, multiple of four
                               ARDY uses 1..10 steps (default 10), switches --then
                               prompts on 60-frame chunk boundaries, without blending.
                               Converted models live in MODELS/ardy; see tools/ardy/.
+                              Windows ARDY uses DirectML GPU with --device gpu;
+                              auto tries GPU and falls back to CPU. Text stays local CPU.
 
       --model v1.1|v1.2      Smooth-root SOMA-RP checkpoint (default v1.1)
   -o, --output FILE.glb       New output (a FILE.glb.json recipe is written beside it)
@@ -125,7 +128,7 @@ Generates a SOMA-30 clip from text (30 fps).
   --constraint-guidance W     How strongly poses and paths steer it, 0..10
                               (default 2, the closest poses in measurements)
   --steps N                   Kimodo 1..1000 (default 50); ARDY 1..10 (default 10)
-  --device auto|gpu|cpu       Where Kimodo runs (default auto: the GPU, or the CPU
+  --device auto|gpu|cpu       Where generation runs (default auto: GPU, or CPU
                               when it is unavailable or fails; gpu never falls back)
   --threads N                 CPU threads, 1..1024 (default: all)
   --models DIR                Model directory (default: TIDE_MOTION_MODELS or the
@@ -421,7 +424,7 @@ std::vector<size_t> protected_recipe_frames(const nlohmann::json& recipe,size_t 
     std::sort(out.begin(),out.end());out.erase(std::unique(out.begin(),out.end()),out.end());return out;
 }
 struct RunContext {
-    std::unique_ptr<ArdyModel> ardy;unsigned ardy_threads=0;
+    std::unique_ptr<ArdyModel> ardy;unsigned ardy_threads=0;std::string ardy_device;
     std::unique_ptr<kimodo::model> kimodo;
     // strict: an explicit --device, which never falls back. gpu_failed: auto fell back
     // in this run, so later auto actions stay on the CPU.
@@ -552,7 +555,7 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
             if(selected_backend=="ardy") {
                 if(action.contains("model"))throw std::runtime_error("model selects Kimodo; omit it for backend ardy");
                 if(action.contains("steps")&&(!action["steps"].is_number_integer()||action["steps"].get<int>()<1||action["steps"].get<int>()>10))throw std::runtime_error("ARDY steps must be 1..10");
-                if(action.value("device",std::string("auto"))=="gpu")throw std::runtime_error("ARDY currently uses native ONNX CPU");
+                if(action.value("device",std::string("auto"))=="gpu"&&!ardy_gpu_compiled())throw std::runtime_error("ARDY GPU: this build has no DirectML support");
                 if(action.contains("transition"))throw std::runtime_error("ARDY does not take transition");
             } else if(action.contains("history")||action.contains("historyFrames"))throw std::runtime_error("history requires backend ardy");
             keys.insert({"prompt","prompts","duration","seed","steps","transition","startPose","endPose","endAt","keyframes","effectors","path","placement","correct","fitPoses","footsteps","attempts",
@@ -1093,7 +1096,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
             if(std::find(flags.begin(),flags.end(),"--model")!=flags.end())throw std::runtime_error("--model selects Kimodo; omit it for --backend ardy");
             if(std::find(flags.begin(),flags.end(),"--steps")==flags.end())steps=10;
             if(steps>10)throw std::runtime_error("ARDY steps must be 1..10");
-            if(device=="gpu")throw std::runtime_error("ARDY currently uses native ONNX CPU; use --device cpu or auto");
+            if(device=="gpu"&&!ardy_gpu_compiled())throw std::runtime_error("ARDY GPU: this build has no DirectML support");
             if(std::find(flags.begin(),flags.end(),"--transition")!=flags.end())throw std::runtime_error("ARDY continues learned history; --transition applies to Kimodo");
         } else if(!history_file.empty()||std::find(flags.begin(),flags.end(),"--history-frames")!=flags.end())throw std::runtime_error("--history and --history-frames require --backend ardy");
         if(!correction.empty()&&!correct)throw std::runtime_error("Use --correction none or --no-correction, not both");
@@ -1188,7 +1191,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
                 if(count<4)throw std::runtime_error("ARDY history needs at least four frames");
                 imported->poses.erase(imported->poses.begin(),imported->poses.end()-static_cast<ptrdiff_t>(count*30));
             }
-            if(!context->ardy||context->ardy_threads!=threads){context->ardy=std::make_unique<ArdyModel>(models/"ardy",threads);context->ardy_threads=threads;}
+            if(!context->ardy||context->ardy_threads!=threads||context->ardy_device!=device){context->ardy.reset();context->ardy=std::make_unique<ArdyModel>(models/"ardy",threads,device);context->ardy_threads=threads;context->ardy_device=device;}
         } else {
             ensure_kimodo(models,context,device,threads,model_version);
             if(condition&&context->kimodo->motion_dim()!=kimodo_features)throw std::runtime_error("Constraints need the SOMA-30 Kimodo model");
@@ -1275,7 +1278,8 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         generate_recipe["modelGgufSha256"]=model_version=="v1.2"?"9c24c5ee9b6b3683947ab2796727ffb2fbd69b2ebc7683214809013687d87a19":"3bf1229f4c1eff1d28f5196a854113da2df9a11a5e21c60694630903bf948ee4";
         if(model_version=="v1.2")generate_recipe["checkpointRevision"]="0e3c89024d896064b6851201373f7834784a386b";
         }
-        generate_recipe["device"]=backend=="kimodo"&&context->kimodo_gpu?"gpu":"cpu";generate_recipe["threads"]=backend=="ardy"&&!threads?8:threads;
+        generate_recipe["device"]=backend=="ardy"?context->ardy->device():context->kimodo_gpu?"gpu":"cpu";generate_recipe["threads"]=backend=="ardy"&&!threads?8:threads;
+        if(backend=="ardy")generate_recipe["accelerator"]=context->ardy->device()=="gpu"?"directml":"cpu";
         if(variants>1)generate_recipe["variants"]={{"count",variants},{"firstSeed",seed},{"sheet",sheet.png.filename().string()}};
         generate_recipe["constraints"]=nlohmann::json::array();
         auto round=[](float value,float unit){return std::round(value/unit)*unit;};

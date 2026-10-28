@@ -2184,3 +2184,136 @@ and 103 toe contact frames corrected in 2.9 ms.
   humanoids only) and is not available to pose-sequence; history (ARDY) still needs SOMA.
 - Linux/macOS inference, CPU inference beyond the thread timing, and a v1.2 comparison of
   the correction were not run; macOS/ARM64 builds are left to CI.
+
+### 2026-10-28 — ARDY native Windows GPU acceleration
+
+Owner requested GPU support after the completed native CPU backend. Implemented
+real DirectML inference for the unchanged pinned denoiser, FSQ encoder and decoder;
+the native sampler/history/mask/origin loop and canonical SOMA GLB export are
+shared with CPU. CPU text embedding remains native/local GGML. No weights,
+evaluation data, research checkpoints, Python environment, hosted text service,
+game simulation or procedural/blended replacement enters the delivered tool.
+
+Contract: `generate --backend ardy --device gpu` requires the GPU path; `cpu`
+forces CPU; `auto` tries GPU and logs CPU fallback if initialization or native GPU
+execution fails. A run-time GPU failure restarts the entire generation from the
+same seed on CPU, discarding partial GPU motion. Only GPU execution failures
+trigger this retry, not prompt/asset/text validation failures. Cached sessions are
+reloaded when requested device/threads change; old sessions are released before
+allocating replacements. CLI and batch recipes record actual `device` and
+`accelerator:directml|cpu`. Default Windows x64 builds stage/install three DLLs
+under `bin/ardy-directml`; `MOTION_ARDY_DIRECTML=OFF` retains a CPU-only build.
+Other platforms do not gain a GPU backend from this change.
+
+Native dependency pins/terms are detailed with primary links in
+`notes/ardy-native.md`: Microsoft.ML.OnnxRuntime.DirectML 1.24.4 (source
+2d924974ef147392ced8409d36bd6d2e7fcc8a74, archive SHA-256
+57e9f11b73437bef7a309496135d4c1f96b1a8e9ddba60013fa27bfc1d788681),
+Microsoft.AI.DirectML 1.15.4 (SHA-256
+4e7cb7ddce8cf837a7a75dc029209b520ca0101470fcdf275c1f49736a3615b9).
+ORT MIT/third-party notices and DirectML proprietary Windows redistribution terms
+and notices ship intact. DirectML section 1(a) permits distribution inside these
+Windows applications. Checkpoint/license pins remain unchanged from native CPU.
+The Microsoft GPU binaries add 35,877,968 uncompressed bytes; no user SDK/CUDA/.NET
+installation is needed. DirectML requires a suitable DX12 driver/Windows version;
+upstream sustained-engineering status remains a maintenance risk.
+
+CPU ORT stays at 1.31.1. The optional GPU TU explicitly loads a separate ORT 1.24.4
+C API table from its absolute executable-relative directory; modules outlive API
+objects. Numeric vectors alone cross that boundary, with no ORT tensor/allocator
+or C++ API-global mixing. Sequential sessions/disabled memory patterns follow
+DirectML requirements, and ORT telemetry is explicitly disabled. Actual adapter
+name and sampled per-process local DXGI memory are logged. Optional developer
+TIDE_ARDY_PROFILE collects provider placement: the recorded profiles contain 43
+denoiser / 7 decoder / 3 encoder DML kernel events and zero CPU-provider kernel
+events (copy/barrier events may have no provider). This is executed native GPU
+evidence, not an ONNX-export/session-load claim.
+
+Validation: Windows x64 ClangCL 18.1.8 /W4 /WX Release, RTX 4080 SUPER 16 GB,
+driver 617.42, Ryzen 9 7900X, eight CPU threads. All eight model-free CTests pass
+in GPU-enabled and separate CPU-only builds. Native reference tests passed all
+three networks at history 0/4/240, four-chunk 183-frame path-constrained host
+generation, imported 64-frame history, and native preprocessing/FSQ. Max tensor
+errors: denoiser 0.000138, encoder 4.77e-7, decoder 0.001622. Original tensor
+assertion (0.002 + 0.002*abs(reference)) is retained. Decoded GPU host bounds are
+5 mm / 0.025 radians versus CPU 3 mm / 0.01 radians to account for measured
+discrete-FSQ sensitivity; actual fixed-input host 3.542 mm / 0.013655 radians,
+imported fixed-input 0.258 mm / 0.003383 radians, native history preprocessing
+max feature error 1.789e-5 and full imported path 2.173 mm / 0.032190 radians.
+GPU/CPU bitwise equivalence is not promised.
+
+Matched five-action batches with the same prompts/seeds/model/no-correction:
+CPU/GPU seconds respectively: cold 183 frames at 10 steps 18.0096/14.6731;
+warm same prompt/seed 5.23834/0.221005; imported-history prompt change plus path
+123 new frames 4.50332/0.575913; sparse full-pose/hand/path constrained 183 frames
+4.92461/0.220701; warm 1,800 frames at four steps 14.8352/0.699501. Generation
+times include local text and exclude session creation. Whole-process wall times
+49.4803/19.6703 seconds; peak 250-ms-sampled host working sets
+9,178,923,008/9,480,347,648 bytes. GPU DXGI sampled per-process local peak
+983,146,496 bytes (not total-system VRAM or a guaranteed transient peak). One run
+per device, process-cold rather than flushed disk caches; no universal speed claim.
+
+Both five-action batches pass requested frame counts, finite transforms/FK, GLB
+roundtrip and same-device cold/warm pose equality. GPU constraint errors before
+correction: full-pose 1.57 cm mean / 4.01 cm max, right hand 1.45 cm, future path
+3.28 cm. Strict 3-cm foot-height diagnostic has zero qualifying samples, hence null
+slide metric rather than a zero-slide claim. Same-seed 60-second four-step CPU/GPU
+travel differed (22.57/18.87 m): quantization and autoregressive accumulation can
+diverge over long sequences. Bounded hidden captures at frames 91/181/1801 show
+walk, changed-prompt right-hand wave and long-run poses; intact limbs/floor
+alignment were inspected. Captures used only Tide CLI/platform built from the
+validated engine checkout D:/Projects/PurrEngine at
+28b61e4db1cb2549fcc9f6bc6d9c6034022f3d9c. They do not prove all-frame contact quality.
+
+Fresh ZIP install/reinstall, checksum/traversal rejection and model preservation
+pass in paths with spaces/quotes. `tests/ardy-runtime.ps1` passes packaged GPU
+generation and mixed GPU ARDY / CPU MotionBricks sessions in one process with
+Windows-only PATH, then explicit GPU failure and actual auto CPU inference in an
+isolated deployment lacking DirectML DLLs. `tests/ardy-inference.ps1 -Device gpu`
+records timings/memory and verifies recipes/GLB counts; `ardy-tests ... gpu`
+exercises full network/host parity; `ardy-tests --assets DIR` verifies FK/GLB and
+repeatability. All inference/timing and preview validation holds the shared named
+TideMotionGpuValidation mutex. Outputs/profiles/models stay ignored under .research.
+
+Limits: text remains CPU and dominates cold time/host RAM; only the stated NVIDIA
+Windows x64 machine is tested. AMD/Intel, other drivers, Linux/macOS GPU and adapter
+selection are unvalidated/unimplemented. Physical GPU device-loss fault injection
+was not performed, though the auto restart handler is implemented. DirectML is
+optional and CPU remains available. No Kimodo checkpoint/contact cleanup or
+MotionBricks authoring behavior changed. Release build targets now include all
+default test executables so existing CTest registration has binaries; no additional
+CI dispatch was triggered.
+
+ARDY GPU integration completion: rebased onto dev's MotionBricks controls/frame
+fix (706665e), native upgrade (b59b270), batched connects (68dd1c5) and optional
+owner-local MoMask (adf5567). Kept all of their sources, notices, contracts and
+documentation; resolved only additive CMake options/targets and CLI includes.
+GPU and CPU reference parity pass again on the integrated binaries. The combined
+DirectML-enabled and CPU-only Release trees pass all nine default CTests (MoMask
+experiment remains off). These validations/measurements use MOTION_VULKAN=OFF;
+Kimodo Vulkan was not revalidated by this thread. DirectML needs no Vulkan SDK.
+The upgrade-containing ZIP also passes the offline self-upgrade, preservation,
+rollback/locking/refusal script. Its real GPU package smoke and mixed GPU/CPU
+sessions pass again. The five-action packaged GPU repeat took 18.173233 seconds,
+peak sampled host working set 9,464,115,200 bytes; warm 183-frame generation
+0.237261 seconds. This repeat is an integration check, not a second matched CPU
+comparison. Weights and generated artifacts remain outside Git.
+
+Final dev integration also preserves 9c418c5's local-install record and 4aeb907's
+Kimodo capability work without changing it. Combined the CMake CLI test arguments
+so both capability fixtures and ARDY GPU support are passed. A stale developer
+source override lacked the new dependency patch; replaced it with private pinned
+kimodo/GGML checkouts under each build directory and applied both repository
+patches. No shared source cache was modified. The final CPU-only build and the
+DirectML build with Kimodo Vulkan enabled (SDK 1.4.363.0) both pass all ten CTests.
+CPU and GPU full-network/host reference tests pass after this integration. The
+fresh Vulkan-enabled ZIP passes installer and native self-upgrade checks. The
+self-upgraded executable, in a path containing spaces, apostrophes and Unicode,
+passes GPU inference, mixed GPU ARDY/CPU MotionBricks, strict refusal/actual auto
+fallback and all five inference/asset cases with Windows-only PATH for the runtime
+smoke. The runtime test also requires all four DirectML/ORT license/notice files.
+Five-action wall time 21.475732 s, sampled host peak 9,442,439,168 bytes, GPU local
+peak 983,146,496 bytes; this is an integration repeat rather than a new matched
+benchmark. Its cold walk GLB is byte-identical to the original GPU benchmark's
+asset, so the original bounded visual evidence still applies. The owner's installed
+tool/models were not modified in this ARDY thread. No additional CI was dispatched.
