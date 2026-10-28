@@ -60,6 +60,18 @@ refuses("go with --character" preview "${work}/source.glb" --map "${work}/bones.
 refuses("one of --mannequin and --skeleton" preview "${work}/source.glb" --mannequin --skeleton --capture "${work}/p.png")
 refuses("mannequin is SOMA-30" preview "${work}/fbx.glb" --mannequin --capture "${work}/p.png")
 refuses("png or .jpg" preview "${work}/source.glb" --character "${work}/target.fbx" --map "${work}/bones.json" --texture "${work}/bones.json" --capture "${work}/p.png" --tide "${CMAKE_COMMAND}")
+# A prop follows any bone of the character, or a SOMA joint of the mannequin.
+file(READ "${work}/bones.json" mapping_text)
+string(JSON hand GET "${mapping_text}" bones RightHand)
+refuses("Tide preview failed" preview "${work}/fbx.glb" --character "${work}/target.fbx" --prop "${work}/target.glb" --prop-bone "${hand}" --prop-offset "0,0.1,0" --prop-rotation "0,90,0" --capture "${work}/p.png" --tide "${CMAKE_COMMAND}")
+refuses("Tide preview failed" preview "${work}/source.glb" --prop "${work}/target.glb" --prop-bone RightHand --capture "${work}/p.png" --tide "${CMAKE_COMMAND}")
+refuses("not a bone of the SOMA mannequin" preview "${work}/source.glb" --prop "${work}/target.glb" --prop-bone "${hand}" --capture "${work}/p.png" --tide "${CMAKE_COMMAND}")
+refuses("is not a bone of" preview "${work}/fbx.glb" --character "${work}/target.fbx" --prop "${work}/target.glb" --prop-bone RightHand --capture "${work}/p.png" --tide "${CMAKE_COMMAND}")
+refuses("needs --prop-bone" preview "${work}/source.glb" --prop "${work}/target.glb" --capture "${work}/p.png")
+refuses("drawn on a body" preview "${work}/source.glb" --skeleton --prop "${work}/target.glb" --prop-bone RightHand --capture "${work}/p.png")
+refuses("goes with --prop" preview "${work}/source.glb" --prop-offset "0,0,0" --capture "${work}/p.png")
+refuses("Use --prop-rotation X,Y,Z" preview "${work}/source.glb" --prop "${work}/target.glb" --prop-bone RightHand --prop-rotation "0,90" --capture "${work}/p.png")
+refuses("glb or .fbx mesh" preview "${work}/source.glb" --prop "${work}/bones.json" --prop-bone RightHand --capture "${work}/p.png" --tide "${CMAKE_COMMAND}")
 message(STATUS "Retarget inspect, batch, reverse, FBX, preview and output contracts pass")
 
 # Constraint poses on a mapped custom rig are retargeted to SOMA with --pose-map before

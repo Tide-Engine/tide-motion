@@ -213,6 +213,26 @@ before.
 6. **Fix it after generating.** `mirror` makes the other side (a right kick into
    a left kick); `--in-place` removes travel; `connect` bridges two clips.
 
+### Pinned swings that turn
+
+A swing pinned every two frames from an existing cut (`--effector right-hand`
+from the cut's frames) between idle poses works; ending turned
+(`--end-at 0,0,60`) made the body kneel after the swing: head 0.65 m down
+(hips 0.40 m) averaged over 4 seeds, against 0.40 m (0.26 m) for the same cut
+going straight. The drop came after the last pinned frame, while the body
+overshot the turn (about 105 degrees) on its way back to the idle, not from the
+pinned hand path. A recovery `--keyframe` from the cut's own last frame
+(`--keyframe 40 cut.glb@24`) fixed it: head 0.44 m (hips 0.28 m), the same as
+going straight, with the hands as close to their targets (about 9.5 cm, measured
+in the body's own frame, before correction). So pin where the move ends up, not
+only the swing.
+
+`--follow ends` turns and moves keyframe and effector targets by the share of
+the end pose's `--end-at` placement their frame has reached (half the turn
+halfway through), so the swing itself happens further round. It changes neither
+the kneel above nor the hands' accuracy; use it when the cut should land in the
+new direction. Otherwise targets stay where they are in their file.
+
 ### Starting and ending in your game's poses
 
 `--start-pose` and `--end-pose` make the clip begin and end exactly in your
@@ -266,7 +286,7 @@ makes the selected pose exact, including sword-idle wrist/spine rotations;
 motion or velocity exact. A wider correction window spreads that residual.
 
 "Two steps" in text is a preference, not a count constraint: the model may take
-2–4. Text alone does not enforce the count; use `--footsteps` for measured sample
+2â€“4. Text alone does not enforce the count; use `--footsteps` for measured sample
 selection. For explicit
 footfall timing use authored SOMA targets with `pose-sequence` and inspect the
 result; intermediate contacts remain a model quality limitation. Do not shorten

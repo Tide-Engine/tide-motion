@@ -112,6 +112,31 @@ static void run_tide(const std::string& tide,const fs::path& root,int width,int 
     if(frames) { args.push_back("--frames");args.push_back(std::to_string(frames)); }
     int code=run_process(args);if(code)throw std::runtime_error("Tide preview failed (exit "+std::to_string(code)+")");
 }
+// The vertical extent of a clip and its widest horizontal reach from the motion root,
+// over every second frame and the last. ground is the median of each frame's lowest
+// joint, so a hand pushing through the floor for a moment does not move it.
+struct Extent { float low=0, high=0, reach=0, ground=0; };
+static Extent clip_extent(const Clip& c) {
+    Extent e;bool first=true;
+    std::vector<size_t> frames;
+    for(size_t f=0;f<c.frames();f+=2)frames.push_back(f);
+    if(c.frames()%2==0)frames.push_back(c.frames()-1);
+    std::vector<float> lows;
+    for(size_t f:frames) {
+        auto pose=world_pose(c,c.frame(f));const auto centre=pose[c.motion_root].p;
+        float lowest=pose.front().p.y;
+        for(const auto& joint:pose) {
+            if(first) {e.low=e.high=joint.p.y;first=false;}
+            lowest=std::min(lowest,joint.p.y);
+            e.low=std::min(e.low,joint.p.y);e.high=std::max(e.high,joint.p.y);
+            e.reach=std::max(e.reach,std::hypot(joint.p.x-centre.x,joint.p.z-centre.z));
+        }
+        lows.push_back(lowest);
+    }
+    std::nth_element(lows.begin(),lows.begin()+static_cast<std::ptrdiff_t>(lows.size()/2),lows.end());
+    e.ground=lows[lows.size()/2];
+    return e;
+}
 // A lit skinned body: the procedural mannequin or the user's character, drawn twice
 // through one camera, facing it and in profile, each centred on the motion root with
 // a floor of tiles that slides under it as the root travels.
@@ -132,14 +157,24 @@ static void body_scene(const Clip& c,const fs::path& root,const PreviewOptions& 
             fs::copy_file(options.texture,root/texture,fs::copy_options::overwrite_existing);
         }
     }
-    // Framing from the first frame: the body's height and where its feet are.
-    auto first=world_pose(c,c.frame(0));
-    float low=first.front().p.y,high=low;
-    for(const auto& joint:first) {low=std::min(low,joint.p.y);high=std::max(high,joint.p.y);}
-    float height=std::max(0.5f,high-low);
+    std::string prop;
+    if(!options.prop.empty()) {
+        auto ext=options.prop.extension().string();for(auto& ch:ext)ch=static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        if(ext!=".glb"&&ext!=".fbx")throw std::runtime_error("--prop must be a .glb or .fbx mesh");
+        prop="prop"+ext;
+        fs::copy_file(options.prop,root/prop,fs::copy_options::overwrite_existing);
+    }
+    // Framing from the whole clip (a get-up starts lying down): where its feet are, its
+    // height above them and how far it reaches out from its root.
+    auto extent=clip_extent(c);
+    float low=extent.ground;
     // Generated and retargeted clips stand on y=0 with joints (toes, ankles) above their
-    // soles; keep that ground unless the first frame is clearly elsewhere (a jump).
-    if(low>-0.05f&&low<0.15f)low=0;
+    // soles; keep that ground unless the clip is clearly elsewhere (mostly in the air).
+    // A retargeted body lying down can sink hands into it (no contacts are solved).
+    if(low>-0.3f&&low<0.15f)low=0;
+    // The camera aims at the middle of the body's height and stands back far enough for
+    // its farthest reach as well: a panel spans 0.63 view heights beside its centre.
+    const float height=std::max(0.5f,extent.high-low),view=std::max(height,(extent.reach+0.15f)/0.63f);
     auto num=[](float v){std::ostringstream o;o.imbue(std::locale::classic());o<<std::setprecision(6)<<std::fixed<<v;return o.str();};
     std::ofstream scene(root/"preview.tide");
     scene<<R"(struct Corner
@@ -154,9 +189,10 @@ asset SkinnedMesh<Corner> body = ")"<<model<<R"(";
 asset Animation motion = "motion.glb";
 )";
     if(!texture.empty())scene<<"asset Texture skin = \""<<texture<<"\";\n";
-    scene<<"const float HEIGHT = "<<num(height)<<";\nconst float FLOOR = "<<num(low)<<";\n";
+    if(!prop.empty())scene<<"asset Mesh<Corner> prop = \""<<prop<<"\";\n";
+    scene<<"const float HEIGHT = "<<num(height)<<";\nconst float VIEW = "<<num(view)<<";\nconst float FLOOR = "<<num(low)<<";\n";
     scene<<R"(const float TILE = HEIGHT * 0.22;
-const float SPREAD = HEIGHT * 0.66;
+const float SPREAD = VIEW * 0.66;
 
 local singleton PreviewClock { float elapsed; }
 local scene Main { }
@@ -173,10 +209,31 @@ local scene Main { }
     var light = 0.3 + 0.2 * (0.5 + 0.5 * normal.y) + 0.6 * Math.Max(0, Math.Dot(normal, sun));
     color = Color(paint.r * light, paint.g * light, paint.b * light, 1);
 }
-
-// One copy of the body at a place on screen, turned about its own centre.
-void Panel(Pose pose, float3 centre, float3 at, float turn)
+)";
+    // A prop is drawn in plain light steel on its bone's model matrix without the rig's
+    // scale (Synty bones carry 0.01), then offset and turned within that bone.
+    if(!prop.empty()) {
+        scene<<R"(
+frag Steel(Corner corner, out Color color, Instance instance)
 {
+    var normal = Math.Normalize(instance.Normal(corner.normal));
+    var sun = Math.Normalize(float3(-0.45, 0.8, -0.55));
+    var light = 0.3 + 0.2 * (0.5 + 0.5 * normal.y) + 0.6 * Math.Max(0, Math.Dot(normal, sun));
+    color = Color(0.78 * light, 0.8 * light, 0.85 * light, 1);
+}
+
+float4x4 Unscaled(float4x4 m)
+{
+    return float4x4(float4(Math.Normalize(m.c0.xyz), 0), float4(Math.Normalize(m.c1.xyz), 0), float4(Math.Normalize(m.c2.xyz), 0), m.c3);
+}
+)";
+        const auto& o=options.prop_offset;const auto& r=options.prop_rotation;
+        scene<<"\nconst float4x4 HELD = float4x4.TRS(float3("<<num(o.x)<<", "<<num(o.y)<<", "<<num(o.z)<<"), quaternion.Euler("
+             <<num(r.x)<<"deg, "<<num(r.y)<<"deg, "<<num(r.z)<<"deg), float3(1));\n";
+    }
+    scene<<"\n// One copy of the body at a place on screen, turned about its own centre.\n";
+    scene<<(prop.empty()?"void Panel(Pose pose, float3 centre, float3 at, float turn)\n":"void Panel(Pose pose, Bone grip, float3 centre, float3 at, float turn)\n");
+    scene<<R"({
     var spin = quaternion.Euler(0, turn, 0);
     var place = Math.Mul(float4x4.TRS(at, spin, float3(1)), float4x4.Translate(float3(-centre.x, 0, -centre.z)));
     for (int i = -2; i <= 2; i++)
@@ -191,7 +248,9 @@ void Panel(Pose pose, float3 centre, float3 at, float turn)
         }
     }
 )";
-    scene<<(texture.empty()?"    Draw.SkinnedMesh(body, place, pose, Lit);\n}\n":"    Draw.SkinnedMesh(body, place, pose, skin, Lit);\n}\n");
+    scene<<(texture.empty()?"    Draw.SkinnedMesh(body, place, pose, Lit);\n":"    Draw.SkinnedMesh(body, place, pose, skin, Lit);\n");
+    if(!prop.empty())scene<<"    Draw.Mesh(prop, Math.Mul(Math.Mul(place, Unscaled(pose.Model(grip))), HELD), Steel);\n";
+    scene<<"}\n";
     scene<<R"(
 view Preview(mut PreviewClock clock)
 {
@@ -202,15 +261,17 @@ view Preview(mut PreviewClock clock)
 )";
     scene<<"    pose.Sample(motion, seconds, Playback."<<(once?"Clamp":"Loop")<<");\n";
     scene<<"    body.skeleton.TryGetByName("<<nlohmann::json(c.joints[c.motion_root].name).dump()<<", out var centreBone);\n";
+    if(!prop.empty())scene<<"    body.skeleton.TryGetByName("<<nlohmann::json(options.prop_bone).dump()<<", out var grip);\n";
     scene<<R"(    var centre = Math.Transform(pose.Model(centreBone), float3(0));
     Draw.Clear(Color(0.17, 0.18, 0.21));
-    Draw.SetCamera(float3(0, FLOOR + HEIGHT * 0.72, -HEIGHT * 2.7), quaternion.Euler(6deg, 0, 0), 30);
+    Draw.SetCamera(float3(0, FLOOR + HEIGHT * 0.72, -VIEW * 2.7), quaternion.Euler(6deg, 0, 0), 30);
 )";
     // Turned so the first frame faces the camera on the left and shows its right side,
     // facing screen right, on the right (the camera looks along +z).
     float facing=options.facing*180/std::numbers::pi_v<float>;
-    scene<<"    Panel(pose, centre, float3(-SPREAD, 0, 0), "<<num(180-facing)<<"deg);\n";
-    scene<<"    Panel(pose, centre, float3(SPREAD, 0, 0), "<<num(90-facing)<<"deg);\n}\n";
+    const std::string grip=prop.empty()?"":"grip, ";
+    scene<<"    Panel(pose, "<<grip<<"centre, float3(-SPREAD, 0, 0), "<<num(180-facing)<<"deg);\n";
+    scene<<"    Panel(pose, "<<grip<<"centre, float3(SPREAD, 0, 0), "<<num(90-facing)<<"deg);\n}\n";
     scene.close();if(!scene)throw std::runtime_error("Cannot write Tide preview scene");
 }
 void preview(const Clip& c,const fs::path& source,const PreviewOptions& options) {
@@ -235,7 +296,7 @@ void preview(const Clip& c,const fs::path& source,const PreviewOptions& options)
     // Files of an earlier preview of the same clip with another body.
     for(const auto& entry:fs::directory_iterator(root)) {
         auto stem=entry.path().stem().string();
-        if(entry.is_regular_file()&&(stem=="character"||stem=="skin"))fs::remove(entry.path());
+        if(entry.is_regular_file()&&(stem=="character"||stem=="skin"||stem=="prop"))fs::remove(entry.path());
     }
     if(options.body!=PreviewBody::skeleton)body_scene(c,root,options,once);
     else {
@@ -253,10 +314,9 @@ view Preview(mut PreviewClock clock)
     scene<<"    var pose = animation.Sample(seconds, Playback."<<(once?"Clamp":"Loop")<<");\n";
     scene<<"    rig.skeleton.bones.TryGetByName("<<nlohmann::json(c.joints[c.motion_root].name).dump()<<", out var centerBone);\n";
     scene<<"    var center = Math.Transform(pose.Model(centerBone), float3(0));\n";
-    auto first=world_pose(c,c.frame(0));
-    float low=first.front().p.y,high=low;
-    for(const auto& joint:first) {low=std::min(low,joint.p.y);high=std::max(high,joint.p.y);}
-    float drawing_scale=350/std::max(0.1f,high-low);
+    // Scaled to the whole clip's height, as the bodies are.
+    const auto extent=clip_extent(c);const float low=extent.low;
+    float drawing_scale=350/std::max(0.1f,extent.high-low);
     // Project into two 2D panels. This uses Tide's ordinary drawing path and works
     // without depending on a particular game camera or skinned character asset.
     for(size_t j=0;j<c.joints.size();++j) {

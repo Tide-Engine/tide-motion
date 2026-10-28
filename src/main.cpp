@@ -15,6 +15,7 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <numbers>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -120,6 +121,11 @@ Generates a SOMA-30 clip from text (30 fps).
   --path X,Z[,YAW]@FRAME      Put the root over ground point X,Z (metres) at output
                               FRAME, optionally facing YAW degrees (0 faces +Z,
                               90 faces +X); repeat for waypoints
+  --follow world|ends         Where --keyframe and --effector targets are: world
+                              (default) as in their file; ends: also turned and
+                              moved by the share of the end pose's --end-at (or
+                              final --path) placement their frame has reached,
+                              counted from the start pose
   --dense-path                Kimodo: constrain the root on every frame from frame 0
                               to the last waypoint, interpolated and smoothed as
                               upstream's dense 2D root path (see below)
@@ -318,6 +324,13 @@ in profile on the right, following its root over a tiled floor.
                               retarget --target does); leave it out for a clip
                               already on the character's rig
   --texture IMAGE.png|.jpg    The character's texture (default: plain clay)
+  --prop MESH.glb|.fbx        Draw a mesh (a weapon) rigidly on --prop-bone
+  --prop-bone BONE            The bone it follows: one of --character's bones
+                              (after retargeting), or a SOMA bone such as
+                              RightHand on the mannequin. The bone's scale is
+                              ignored (Synty bones carry 0.01)
+  --prop-offset X,Y,Z         Move it within the bone, in metres (default 0)
+  --prop-rotation X,Y,Z       Turn it within the bone, Euler degrees (default 0)
   --skeleton                  Draw bones as lines (the default for other rigs
                               when no --character is given)
   --tide PATH                 Tide executable (default: tide on PATH)
@@ -394,7 +407,8 @@ void help(std::string_view command={}) {
   tide-motion batch JOBS.json [--models DIR]
   tide-motion inspect FILE.glb|FILE.fbx [--clip NAME | --skeleton]
   tide-motion preview CLIP.glb [--mannequin | --skeleton | --character MODEL.glb|.fbx
-      [--map BONES.json] [--texture IMAGE.png]] [--tide PATH] [--capture IMAGE.png]
+      [--map BONES.json] [--texture IMAGE.png]] [--prop MESH --prop-bone BONE]
+      [--tide PATH] [--capture IMAGE.png]
       [--gif OUT.gif] [--frames N] [--clip NAME]
   tide-motion help [COMMAND]       one command's options (also COMMAND --help)
   tide-motion --version
@@ -572,6 +586,13 @@ PathConstraint path_point(const std::string& text,long* frame) {
     *frame=frame_index(text.substr(at+1),"path frame");
     return p;
 }
+// Three comma-separated numbers, as --prop-offset X,Y,Z.
+Vec3 triplet(const std::string& text,double limit,const char* label) {
+    std::vector<std::string> parts;size_t start=0;
+    while(true) {auto comma=text.find(',',start);parts.push_back(text.substr(start,comma-start));if(comma==std::string::npos)break;start=comma+1;}
+    if(parts.size()!=3)throw std::runtime_error(std::string("Use ")+label+" X,Y,Z");
+    return {static_cast<float>(number(parts[0],-limit,limit,label)),static_cast<float>(number(parts[1],-limit,limit,label)),static_cast<float>(number(parts[2],-limit,limit,label))};
+}
 int main_impl(const std::vector<std::string>& args,RunContext* context=nullptr);
 // Public CLI uses the shared cache; the native MoMask parser consumes the
 // concrete CACHE/momask directory and owns no automatic download path.
@@ -651,7 +672,7 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
                 if(action.value("device",std::string("auto"))=="gpu"&&!ardy_gpu_compiled())throw std::runtime_error("ARDY GPU: this build has no DirectML support");
                 if(action.contains("transition"))throw std::runtime_error("ARDY does not take transition");
             } else if(action.contains("history")||action.contains("historyFrames"))throw std::runtime_error("history requires backend ardy");
-            keys.insert({"prompt","prompts","duration","seed","steps","transition","startPose","endPose","endAt","keyframes","effectors","path","placement","correct","fitPoses","footsteps","attempts",
+            keys.insert({"prompt","prompts","duration","seed","steps","transition","startPose","endPose","endAt","keyframes","effectors","path","placement","follow","correct","fitPoses","footsteps","attempts",
                 "variants","variantsGif","tide","guidance","constraintGuidance","device","threads","correctionFrames","inPlace","model","rig","densePath","correction","poseMap","backend","history","historyFrames"});
             if(action.contains("backend")) {auto b=action["backend"].get<std::string>();if(b!="kimodo"&&b!="ardy")throw std::runtime_error("backend is kimodo or ardy");argv.insert(argv.end(),{"--backend",b});}
             if(action.contains("history"))argv.insert(argv.end(),{"--history",path(action["history"]).string()});
@@ -661,6 +682,11 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
                 auto value=action["placement"].get<std::string>();
                 if(value!="auto"&&value!="world"&&value!="free")throw std::runtime_error("placement is auto, world or free");
                 argv.insert(argv.end(),{"--placement",value});
+            }
+            if(action.contains("follow")) {
+                auto value=action["follow"].get<std::string>();
+                if(value!="world"&&value!="ends")throw std::runtime_error("follow is world or ends");
+                argv.insert(argv.end(),{"--follow",value});
             }
             if(action.contains("correct")&&!action["correct"].get<bool>())argv.push_back("--no-correction");
             if(action.contains("correction")) {auto value=action["correction"].get<std::string>();if(value!="tide"&&value!="kimodo"&&value!="none")throw std::runtime_error("correction is tide, kimodo or none");argv.insert(argv.end(),{"--correction",value});}
@@ -897,13 +923,14 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     if(!command_help(args[1]))throw unknown(args[1]);
     std::string command=args[1],clip_name,from_name,to_name,tide="tide";
     for(size_t i=2;i<args.size();++i)if(args[i]=="--help"||args[i]=="-h") {help(command);return 0;}
-    fs::path models,output,capture,gif,target_file,map_file,character_file,texture_file,contacts_file;bool mannequin=false;
+    fs::path models,output,capture,gif,target_file,map_file,character_file,texture_file,contacts_file,prop_file;bool mannequin=false;
+    std::string prop_bone;Vec3 prop_offset{},prop_rotation{};
     if(command=="generate"||command=="connect"||command=="pose-sequence"||command=="models"||command=="batch"||command=="dart")models=model_directory();
     double duration=3;uint64_t seed=0;unsigned steps=50,transition=5;int frames=0;
     BricksRequest bricks_request;std::string tokens_text;fs::path contacts_out;float contact_threshold=0.5f;
     bool accept=false,joined=false,skeleton=false,to_soma=false,correct=true,dense_path=false;Vec3 offset{};
     std::string correction,rig="soma30";fs::path pose_map_file;
-    Placement placement=Placement::automatic;std::string placement_name="auto";
+    Placement placement=Placement::automatic;std::string placement_name="auto",follow="world";
     unsigned variants=1,threads=0;int correction_frames=10;bool variants_gif=false,in_place=false;
     Guidance guidance;std::string device="auto",backend="kimodo",model_version="v1.1";fs::path history_file;unsigned history_frames=240;
     bool fit_poses=false;int wanted_footsteps=-1;unsigned attempts=8;
@@ -933,6 +960,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         else if(a=="--effector") {unsigned bits=parse_effectors(value());long f=frame_index(value(),"effector frame");pose_specs.push_back({"effector",f,value(),bits});}
         else if(a=="--path") {long f=0;auto p=path_point(value(),&f);path_specs.push_back({p,f});}
         else if(a=="--gif")gif=utf8path(value());
+        else if(a=="--follow") {follow=value();if(follow!="world"&&follow!="ends")throw std::runtime_error("--follow is world or ends");}
         else if(a=="--placement") {
             placement_name=value();
             if(placement_name=="auto")placement=Placement::automatic;
@@ -977,6 +1005,10 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         else if(a=="--mannequin")mannequin=true;
         else if(a=="--character")character_file=utf8path(value());
         else if(a=="--texture")texture_file=utf8path(value());
+        else if(a=="--prop")prop_file=utf8path(value());
+        else if(a=="--prop-bone")prop_bone=value();
+        else if(a=="--prop-offset")prop_offset=triplet(value(),100,"--prop-offset");
+        else if(a=="--prop-rotation")prop_rotation=triplet(value(),3600,"--prop-rotation");
         else if(a=="--to-soma")to_soma=true;
         else if(a=="--target")target_file=utf8path(value());
         else if(a=="--map")map_file=utf8path(value());
@@ -984,14 +1016,14 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         else pos.push_back(a);
     }
     std::set<std::string> allowed;
-    if(command=="generate")allowed={"--models","-o","--output","--duration","--seed","--steps","--then","--transition","--start-pose","--end-pose","--end-at","--keyframe","--effector","--path","--placement","--fit-poses","--footsteps","--attempts","--no-correction",
+    if(command=="generate")allowed={"--models","-o","--output","--duration","--seed","--steps","--then","--transition","--start-pose","--end-pose","--end-at","--keyframe","--effector","--path","--placement","--follow","--fit-poses","--footsteps","--attempts","--no-correction",
         "--correction","--rig","--dense-path","--pose-map",
         "--correction-frames","--in-place","--variants","--variants-gif","--tide","--guidance","--constraint-guidance","--device","--threads","--model","--backend","--history","--history-frames"};
     else if(command=="connect")allowed={"--models","-o","--output","--tokens","--target-poses","--contacts-out","--contact-threshold","--joined","--offset","--from-clip","--to-clip","--threads"};
     else if(command=="mirror")allowed={"-o","--output","--clip"};
     else if(command=="retarget")allowed={"-o","--output","--target","--map","--to-soma","--clip"};
     else if(command=="inspect")allowed={"--clip","--skeleton"};
-    else if(command=="preview")allowed={"--clip","--tide","--capture","--gif","--frames","--mannequin","--skeleton","--character","--map","--texture"};
+    else if(command=="preview")allowed={"--clip","--tide","--capture","--gif","--frames","--mannequin","--skeleton","--character","--map","--texture","--prop","--prop-bone","--prop-offset","--prop-rotation"};
     else if(command=="cleanup")allowed={"-o","--output","--contacts","--map","--clip"};
     else if(command=="models")allowed={"--models","--accept-licenses"};
     else if(command=="pose-sequence")allowed={"-o","--output","--models","--threads","--contacts-out","--contact-threshold"};
@@ -1056,6 +1088,19 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
                 std::cerr<<"Not a SOMA-30 clip: drawing its skeleton (give --character MODEL to see it on a body).\n";
                 options.body=PreviewBody::skeleton;
             }
+            if(!prop_file.empty()) {
+                if(options.body==PreviewBody::skeleton)throw std::runtime_error("--prop is drawn on a body; use --mannequin or --character");
+                if(prop_bone.empty())throw std::runtime_error("--prop needs --prop-bone BONE (a bone of --character, or a SOMA bone such as RightHand on the mannequin)");
+                // The prop follows a bone of the body that is drawn: any node of the character
+                // (Tide binds by name; Synty's Prop_R has no skin weights), or a SOMA joint.
+                std::vector<std::string> bones;
+                if(options.body==PreviewBody::character)bones=node_names(character_file);
+                else for(const auto& joint:clip.joints)bones.push_back(joint.name);
+                if(std::find(bones.begin(),bones.end(),prop_bone)==bones.end())
+                    throw std::runtime_error("--prop-bone '"+prop_bone+"' is not a bone of "+(options.body==PreviewBody::character?character_file.string():std::string("the SOMA mannequin")));
+                options.prop=prop_file;options.prop_bone=prop_bone;options.prop_offset=prop_offset;options.prop_rotation=prop_rotation;
+            } else for(const char* flag:{"--prop-bone","--prop-offset","--prop-rotation"})
+                if(std::find(flags.begin(),flags.end(),flag)!=flags.end())throw std::runtime_error(std::string(flag)+" goes with --prop");
             preview(clip,path,options);
             return 0;
         }
@@ -1282,7 +1327,23 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         if(selecting&&variants>1)throw std::runtime_error("selection takes one clip; use --variants separately to inspect candidates");
         if(!selecting&&std::find(flags.begin(),flags.end(),"--attempts")!=flags.end())throw std::runtime_error("--attempts requires --footsteps or --fit-poses");
         if(selecting&&seed+attempts-1>4294967295ULL)throw std::runtime_error("--seed plus --attempts passes 4294967295");
+        if(follow=="ends") {
+            if(std::none_of(conditions.poses.begin(),conditions.poses.end(),[](const auto& p){return p.kind=="keyframe"||p.kind=="effector";}))
+                throw std::runtime_error("--follow ends turns --keyframe and --effector targets; give at least one");
+            if(std::none_of(conditions.poses.begin(),conditions.poses.end(),[](const auto& p){return p.kind=="end-pose";}))
+                throw std::runtime_error("--follow ends needs --end-pose");
+        }
+        std::optional<PoseConstraint> end_source;
+        for(const auto& pose:conditions.poses)if(pose.kind=="end-pose")end_source=pose;
         bool shift=place_constraints(conditions,placement);
+        // Targets take their share of the end pose's placement before encoding, so the
+        // model, the recorded errors and correction all see them turned.
+        nlohmann::json followed=nlohmann::json::array();
+        if(follow=="ends") {
+            auto turns=follow_ends(conditions,*end_source);size_t k=0;
+            for(const auto& pose:conditions.poses)if(pose.kind=="keyframe"||pose.kind=="effector")
+                followed.push_back({{"frame",pose.frame},{"kind",pose.kind},{"turnDegrees",turns[k++]*180/std::numbers::pi_v<float>}});
+        }
         std::optional<KimodoCondition> condition;
         kimodo::motion_condition native;
         if(!conditions.empty()) {
@@ -1379,6 +1440,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
                 generate_recipe["inferredPoseLocations"].push_back({{"frame",effective.poses[i].frame},{"x",effective.poses[i].pose[0].p.x},{"z",effective.poses[i].pose[0].p.z}});
         }
         generate_recipe["fitPoses"]=fit_poses;
+        generate_recipe["follow"]=follow;if(follow!="world")generate_recipe["followedTargets"]=followed;
         generate_recipe["placement"]=placement_name;generate_recipe["corrected"]=correction=="kimodo"||(correct&&!conditions.poses.empty());
         generate_recipe["correction"]=correction;generate_recipe["rig"]=rig;
         if(!contacts.empty()) {

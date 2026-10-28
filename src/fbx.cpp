@@ -27,8 +27,7 @@ Transform transform(const ufbx_transform& t,float* scale,const std::string& name
     for(float v:{out.p.x,out.p.y,out.p.z})if(!std::isfinite(v))throw std::runtime_error("FBX node '"+name+"' has a nonfinite position");
     return out;
 }
-}
-Clip read_fbx(const fs::path& path,const std::string& selected,bool rest_only) {
+std::unique_ptr<ufbx_scene,SceneDeleter> load_scene(const fs::path& path) {
     if(fs::file_size(path)>512ULL*1024*1024)throw std::runtime_error("FBX exceeds the 512 MiB input limit");
     std::ifstream input(path,std::ios::binary);
     std::vector<char> bytes(static_cast<size_t>(fs::file_size(path)));
@@ -49,6 +48,16 @@ Clip read_fbx(const fs::path& path,const std::string& selected,bool rest_only) {
     std::unique_ptr<ufbx_scene,SceneDeleter> scene(ufbx_load_memory(bytes.data(),bytes.size(),&opts,&error));
     if(!scene)throw std::runtime_error("Not an FBX that decodes ("+text(error.description)+")");
     if(scene->nodes.count>1024)throw std::runtime_error("Too many FBX nodes");
+    return scene;
+}
+}
+std::vector<std::string> fbx_node_names(const fs::path& path) {
+    auto scene=load_scene(path);std::vector<std::string> names;
+    for(const ufbx_node* node:scene->nodes)if(!node->is_root)names.push_back(text(node->name));
+    return names;
+}
+Clip read_fbx(const fs::path& path,const std::string& selected,bool rest_only) {
+    auto scene=load_scene(path);
     Clip c;c.name=path.stem().string();
     // As for GLB: a character's rig is its skin bones and their ancestors; a file
     // without skins (an animation or skeleton export) uses every node. The unnamed

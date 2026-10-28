@@ -62,6 +62,10 @@ Clip load_rig_glb(const fs::path&);
 // .fbx through ufbx with Tide's import conventions (Y-up metres); used by the GLB loaders.
 bool is_fbx(const fs::path&);
 Clip read_fbx(const fs::path&, const std::string& animation, bool rest_only);
+// Every named node of a GLB or FBX file (FBX as Tide imports it), bones with no skin
+// weights included; preview binds a prop to one of them by name.
+std::vector<std::string> node_names(const fs::path&);
+std::vector<std::string> fbx_node_names(const fs::path&);
 void save_glb(const Clip&, const fs::path&);
 struct RetargetMapping {
     std::array<std::string,30> bones;
@@ -118,6 +122,14 @@ struct MotionConditions {
 enum class Placement { automatic, world, free };
 bool place_constraints(MotionConditions&, Placement);
 void shift_to_last_pose(Clip& result, const MotionConditions&);
+// Turns a pose constraint by `turn` radians of yaw about the vertical through `pivot`,
+// then moves it by `move` on the ground; its body-local rotations are unchanged.
+void turn_pose(PoseConstraint&, Vec3 pivot, float turn, Vec3 move);
+// --follow ends: keyframes and effectors take the fraction of the end pose's placement
+// (the turn and move --end-at or a final path point gave it) that their frame lies
+// between the start and end poses, about the end pose's original hips. `source` is
+// the end pose before placement. Returns the turn applied to each such pose (radians).
+std::vector<float> follow_ends(MotionConditions&, const PoseConstraint& source);
 // Makes full-body poses exact, fading the residual out over up to `frames` frames each
 // side (0 sets only the constrained frame).
 void correct_poses(Clip& result, const MotionConditions&, int frames=10);
@@ -230,6 +242,9 @@ struct PreviewOptions {
     std::string tide="tide"; fs::path capture, gif; int frames=0;
     PreviewBody body=PreviewBody::mannequin; fs::path character, texture;
     float facing=0; // radians, the first frame's heading (0 faces +Z)
+    // A mesh drawn rigidly on a bone of the body (its model matrix without scale),
+    // then offset (metres) and turned (Euler degrees, as Tide's quaternion.Euler) in it.
+    fs::path prop; std::string prop_bone; Vec3 prop_offset{}, prop_rotation{};
 };
 void preview(const Clip&, const fs::path& source, const PreviewOptions&);
 // One image (and optionally a GIF) of several SOMA clips on the mannequin, a labelled

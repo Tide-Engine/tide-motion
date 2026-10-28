@@ -387,6 +387,14 @@ tide-motion retarget swing.glb --target PolygonSyntyCharacter.fbx --map examples
 tide-motion retarget A_Idle_Base_Sword.fbx --to-soma --map examples/synty-polygon.json -o idle-soma.glb
 ```
 
+A character rigged by Mixamo (bones named `mixamorig:Hips`, `mixamorig:LeftUpLeg`
+and so on) works with [examples/mixamo.json](examples/mixamo.json), in either
+direction. Fingers are not in SOMA, so a clip that goes through SOMA keeps the
+character's fingers in their rest pose. Some Mixamo downloads name bones
+`mixamorig1:` or without a prefix; edit the values to match `inspect --skeleton`.
+A clip downloaded from Mixamo onto a character you uploaded keeps that
+character's own bone names, so it takes that character's mapping instead.
+
 The mapping's keys are SOMA's anatomical names; values name your character's
 bones. The example uses illustrative pelvis/spine/arm/leg names, not automatic
 rig detection. Required keys are `Hips`, `Chest`, `Head`, and each side's
@@ -465,6 +473,23 @@ visible. It uses a separately installed Tide; no engine is bundled.
   ignored, as FBX packs often carry unrelated ones).
 - **Lines** (`--skeleton`, and the default for other rigs without `--character`):
   the original front/side bone drawing.
+
+The camera is framed from the whole clip, so a clip that starts lying down (a
+get-up) or reaches out fits as well as one that starts standing.
+
+To judge a weapon move, `--prop MESH.glb|.fbx --prop-bone BONE` draws your mesh
+rigidly on a bone, in plain steel. On a character the bone is any of its nodes,
+including grip bones without skin weights (Synty's `Prop_R` takes Synty weapons
+as they are); the bone's own scale is ignored, so a centimetre rig's 0.01 does
+not shrink the mesh. On the mannequin it is a SOMA joint such as `RightHand`,
+whose axes are SOMA's rest axes, not a grip, so most weapons need turning.
+`--prop-offset X,Y,Z` (metres) and `--prop-rotation X,Y,Z` (Euler degrees, as
+Tide's `quaternion.Euler`) adjust it within the bone. There are no presets.
+
+```sh
+tide-motion preview cut.glb --character PolygonSyntyCharacter.fbx --map examples/synty-polygon.json \
+  --texture T_Polygon_Dummy_01.png --prop SM_Wep_Sword_01.fbx --prop-bone Prop_R --gif cut.gif
+```
 
 Captures use Tide's ordinary bounded capture mode. `--gif OUT.gif` records the
 clip exactly once, from its first frame to its last, at 30 fps and 960 by 540
@@ -545,7 +570,8 @@ every constraint option:
 ```
 
 Every generate option has a field: `variants`, `variantsGif`, `guidance`,
-`constraintGuidance`, `correction` (`"tide"`, `"kimodo"`, `"none"`), `rig`
+`constraintGuidance`, `correction` (`"tide"`, `"kimodo"`, `"none"`), `follow`
+(`"world"`, `"ends"`), `rig`
 (`"soma30"`, `"soma77"`), `densePath`, `poseMap`, `correctionFrames`, `inPlace`, `device` (`"auto"`,
 `"gpu"`, `"cpu"`), `threads` and `tide`; `connect` takes `threads` too. Variant
 outputs and their sheet are checked for collisions with every other output
@@ -901,6 +927,16 @@ pose's output frame now places that pose too; duplicate path points are refused.
 Batch generate actions accept `"endAt": [0,-1]` or `[0,-1,90]` with `endPose`.
 Explicit placement overrides `--placement free` for that pose. `--end-at` requires
 `--end-pose` and cannot be combined with `--in-place`.
+
+Keyframe and effector targets stay where they are in their file (`--follow
+world`, the default). With `--follow ends` (batch `"follow": "ends"`) they also
+turn and move by the share of the end pose's placement (`--end-at`, or a final
+`--path` point) their frame has reached, counting from the start pose: a target
+halfway through a clip ending `--end-at 0,0,60` turns 30 degrees about the end
+pose's original hips. The body-local pose is unchanged, and recorded errors and
+correction use the turned targets. Recipes list each target's turn under
+`followedTargets`. It needs `--end-pose` and at least one keyframe or effector.
+See PROMPTING.md (Pinned swings that turn) for what it does and does not change.
 
 Free placement uses two native Kimodo inference passes per seed: first choose
 travel with the anchored poses/path and prompt, then constrain the floating

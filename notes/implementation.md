@@ -2541,3 +2541,103 @@ override. Raw-only native Linux preparation matches every graph/tensor digest.
 No additional inference algorithm changes were needed after this integration;
 the earlier bounded visual evidence therefore still applies. No installed owner
 executable/model cache, engine source, release or additional CI run is changed.
+
+
+## Parry requests: preview framing, props, turning targets, Mixamo mapping (2026-10-28)
+
+Owner requests from making Parry's sword-duel animations with 0.5.1 (findings in
+tide-prototypes notes/animation-pipeline.md). Baseline: origin/dev 01f51a8. No model,
+dependency or license change; nothing generated or third-party enters Git.
+
+Preview framing: `body_scene` framed from frame 0, so a get-up starting on its back
+got HEIGHT 0.5 (the minimum) and the camera sat inside the body, then showed only
+legs. Framing now comes from the whole clip (every second frame and the last):
+the top joint, the floor as the median of each frame's lowest joint (a hand pushed
+through the floor for a moment does not lift it) snapped to y=0 within -0.3..0.15 m
+(a retargeted Synty body lying down sinks its fingers 12-30 cm; no contacts are
+solved), and the widest horizontal reach from the motion root. HEIGHT (vertical
+extent, camera aim and tiles) and VIEW (camera distance and panel spread, at least
+(reach+0.15)/0.63, a panel's half-width) are separate, so a wide lying body pulls
+the camera back without lifting its aim. The skeleton drawing uses the same extent.
+Measured scene constants (Synty character / mannequin), before -> after: get-up
+(owner's h2_getup seed 0) HEIGHT 0.5 / 0.5 -> 1.566 / 1.554, VIEW 2.322 / 1.867,
+Synty FLOOR -0.109 -> 0; standing idle 1.5748 -> 1.5753 / 1.5501 -> 1.5628 (VIEW
+equal, at most 0.8% zoom); arms-up cheer 1.575 -> 2.189 (its raised arms now fit).
+GIFs inspected: the get-up is whole and centred throughout; the idle looks unchanged.
+
+Props: `preview --prop MESH.glb|.fbx --prop-bone BONE [--prop-offset X,Y,Z]
+[--prop-rotation X,Y,Z]` adds `asset Mesh<Corner> prop` and draws it in plain steel
+with Math.Mul(place, Unscaled(pose.Model(bone)), TRS(offset, Euler degrees)), as
+tide-prototypes tools/motion/swordview/preview.tide does; Unscaled normalises the
+matrix columns, removing Synty's 0.01. The bone is checked before Tide runs against
+every named node of the character file (new node_names: GLB nodes, or FBX nodes as
+ufbx/Tide import them), because Synty's Prop_R carries no skin weights and is not in
+load_rig_glb's skin rig, yet Tide's skeleton binds it. On the mannequin any SOMA
+joint is accepted (decision: attach, not refuse); SOMA RightHand's axes are rest
+axes rather than a grip, so a weapon lies along the forearm unless turned. Refused:
+--prop with --skeleton, without --prop-bone, a non-mesh extension, unknown bones,
+offset/rotation without --prop and malformed triplets. Verified: the Synty sword on
+Prop_R with no offset matches the owner's swordview GIF of the same clip frame for
+frame (rightcut-soma, 25 frames).
+
+Targets that turn: the owner's turning cut (prompt "turns to the left and slashes",
+2 s, idle start/end, --end-at 0,0,60, placement free, right hand pinned at frames
+24-31 from rightcut-soma 9-16, seeds 0-3, v1.1, 50 steps, RTX 4080 SUPER under
+TideMotionGpuValidation) was regenerated with the baseline binary; it reproduced the
+owner's 0.5.1 recipes exactly. Metrics by independent GLB FK (.research turncut.py,
+not shipped): head drop 0.65 m, hips 0.40 m (the same cut going straight, which
+also has a recovery keyframe at 40: 0.40 / 0.26; the source cut alone drops its
+hips 0.21 m and twists them 81 degrees); hand-to-target error in the body's own
+frame (hand relative to hips, turned by the hip heading) 9.4 cm mean / 12.8 max.
+The drop is at frames 36-44, after the last pin, while heading overshoots to ~105
+degrees and returns to 60: not the pinned path fighting the turn.
+
+Two designs were implemented and measured on the same seeds:
+- ends: a keyframe/effector at frame f takes t=(f-start)/(end-start) of the end
+  pose's placement (yaw turn about its original hips plus the ground move),
+  applied before encoding. Head/hips drop 0.64 / 0.38; body-frame hand error 9.5 /
+  13.4 cm; swing heading +27 degrees further round (85 vs 58).
+- body: a learned guide pass without those targets (as free placement does) put each
+  target at the guide hips' ground position and facing at its frame. Drop 0.65 /
+  0.40; hand error 9.7 / 13.1 cm. On the straight step-cut it moved the swing's hip
+  heading from +55 to -9 degrees: the guide does not twist like the cut, so placing
+  targets at its facing erases the move's own hip rotation. Not shipped (also twice
+  the sampling).
+Adding the recovery keyframe (frame 40 from source frame 24) fixed the kneel in every
+mode: world 0.44 / 0.28, ends 0.44 / 0.27, body 0.45 / 0.28; hand error unchanged
+(9.5-9.7 cm). Shipped: `--follow world|ends` (batch `follow`), default world
+(byte-identical animation payload to the baseline on all four seeds); recipes
+record `follow` and per-target `followedTargets` turns. ends needs an end pose and a
+keyframe or effector; turns take the shorter way round. A rerun of ends with the
+final binary matched the measured output byte for byte. Advice and numbers are in
+PROMPTING.md (Pinned swings that turn). Sword GIFs of before / ends / keyframe /
+keyframe+ends on the Synty character were inspected: only the keyframed rows stay up.
+
+Mixamo: examples/mixamo.json maps mixamorig: names (Spine/Spine1/Spine2 to SOMA
+Spine1/Spine2/Chest, UpLeg/Leg to Leg/Shin). Checked on a real Mixamo rig (IRONVALE
+Stylized Lumberjack, owner-bought, 52 bones, local only): Walking, Turn and death
+--to-soma and back onto the same FBX; new developer mode `retarget-tests --compare A
+B [BONES.json]` compares world positions/rotations of shared (mapped) bones: mapped
+bones within 3.0e-7 m and 0.04 degrees on all three. Unmapped fingers return to the
+rest pose (SOMA has none): 0.3-0.9 cm mean position difference over all 52 bones.
+Lumberjack clips via SOMA onto the Synty character and the round trip on the
+lumberjack were viewed as GIFs. Parry's "Standing Melee Attack Downward" is not
+mixamorig-named: Mixamo kept the uploaded Synty skeleton, so it takes
+synty-polygon.json (round trip exact: 4.9e-7 m, 0.07 degrees) and mixamo.json
+refuses it (mapped bone not found).
+
+Also noted by the owner, not acted on: --correction kimodo mixed on planted-foot
+slide, 16-28 degree pre-correction errors at their sword idle (consistent with the
+documented upstream behaviour above).
+
+Validation: Windows x64 ClangCL 18 Release with Vulkan, all twelve CTests pass
+(TEMP/TMP isolated under .research). New contracts: follow_ends geometry (half turn
+about the end pose's hips, half move, height and body-local rotations kept, start/end
+unmoved, unplaced end is identity, refusal without an end pose); CLI/batch follow
+refusals and acceptance through model preflight; preview prop acceptance on an FBX
+custom rig and the mannequin, and every refusal; help text. Visual evidence used a
+Tide built from engine origin/dev 367ae4da2 in a private detached worktree (the
+D:/Projects/PurrEngine checkout at 28b61e4db predates `tide run --record`); the CLI
+and MinGW platform were built there and staged under .research, with the unbuilt
+MinGW host tools filled from the same tree's release build. No engine source
+changed. Linux/macOS builds are left to CI.

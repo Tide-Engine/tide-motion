@@ -5,6 +5,7 @@
 #include <functional>
 #include <cstring>
 #include <iostream>
+#include <set>
 #include <stdexcept>
 
 using namespace motion;
@@ -112,6 +113,30 @@ void write_fbx(const Clip& rig,const fs::path& path) {
     out<<"}\n";
 }
 int main(int argc,char** argv) try {
+    if((argc==4||argc==5)&&std::string(argv[1])=="--compare") {
+        // Developer check of a round trip (character -> SOMA -> character): world
+        // positions and rotations of every bone the two clips share, frame by frame.
+        // With BONES.json, only the character bones it maps (the rest follow their parents).
+        auto a=load_glb(argv[2],"",false),b=load_glb(argv[3],"",false);
+        std::set<std::string> mapped;
+        if(argc==5) {std::ifstream in(argv[4]);nlohmann::json m;in>>m;for(const auto& item:m["bones"].items())mapped.insert(item.value().get<std::string>());}
+        check(a.frames()==b.frames(),"The clips have different frame counts");
+        double sum=0,worst=0,angle_sum=0,angle_worst=0;size_t count=0;std::string worst_name;
+        for(size_t f=0;f<a.frames();++f) {
+            auto wa=world_pose(a,a.frame(f)),wb=world_pose(b,b.frame(f));
+            for(size_t i=0;i<a.joints.size();++i)for(size_t k=0;k<b.joints.size();++k)if(a.joints[i].name==b.joints[k].name&&(mapped.empty()||mapped.contains(a.joints[i].name))) {
+                auto d=wa[i].p-wb[k].p;double e=std::sqrt(dot(d,d));
+                Quat p=normalized(wa[i].q),q=normalized(wb[k].q);
+                double angle=2*std::acos(std::min(1.0,std::abs(double(p.x*q.x+p.y*q.y+p.z*q.z+p.w*q.w))))*180/3.14159265358979;
+                sum+=e;angle_sum+=angle;++count;angle_worst=std::max(angle_worst,angle);
+                if(e>worst){worst=e;worst_name=a.joints[i].name;}
+            }
+        }
+        check(count>0,"The clips share no bone names");
+        std::cout<<"{\"bones\":"<<count/a.frames()<<",\"frames\":"<<a.frames()<<",\"positionMeanMetres\":"<<sum/static_cast<double>(count)<<",\"positionMaxMetres\":"<<worst
+                 <<",\"positionMaxBone\":\""<<worst_name<<"\",\"rotationMeanDegrees\":"<<angle_sum/static_cast<double>(count)<<",\"rotationMaxDegrees\":"<<angle_worst<<"}\n";
+        return 0;
+    }
     auto f=fixture();
     auto dir=fs::temp_directory_path()/"tide-motion-retarget-tests";
     if(argc==3&&std::string(argv[1])=="--fixtures")dir=argv[2];

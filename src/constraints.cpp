@@ -191,6 +191,30 @@ void shift_to_last_pose(Clip& result,const MotionConditions& conditions) {
     Vec3 at=result.frame(last->frame)[0].p,want=last->pose[0].p,delta{want.x-at.x,0,want.z-at.z};
     for(size_t f=0;f<result.frames();++f)result.frame(f)[0].p=result.frame(f)[0].p+delta;
 }
+void turn_pose(PoseConstraint& pose,Vec3 pivot,float turn,Vec3 move) {
+    // The hips are the rig's root, so turning them turns the whole pose.
+    auto& hips=pose.pose[0];const Quat spin=yaw(turn);
+    Vec3 d=hips.p-pivot;d.y=0;d=rotate(spin,d);
+    hips.p={pivot.x+d.x+move.x,hips.p.y,pivot.z+d.z+move.z};
+    hips.q=normalized(spin*hips.q);
+}
+std::vector<float> follow_ends(MotionConditions& conditions,const PoseConstraint& source) {
+    const PoseConstraint* end=nullptr;size_t start=0;
+    for(const auto& pose:conditions.poses) {if(pose.kind=="end-pose")end=&pose;if(pose.kind=="start-pose")start=pose.frame;}
+    if(!end)throw std::runtime_error("--follow ends needs --end-pose");
+    Clip rig;rig.joints=soma();
+    // The shorter way round, as a final facing does not say how many turns were made.
+    const float turn=std::remainder(kimodo_heading(rig,end->pose)-kimodo_heading(rig,source.pose),2*std::numbers::pi_v<float>);
+    const Vec3 pivot{source.pose[0].p.x,0,source.pose[0].p.z},move{end->pose[0].p.x-pivot.x,0,end->pose[0].p.z-pivot.z};
+    const float span=static_cast<float>(end->frame-start);
+    std::vector<float> turns;
+    for(auto& pose:conditions.poses) {
+        if(pose.kind!="keyframe"&&pose.kind!="effector")continue;
+        const float t=span>0?std::clamp((static_cast<float>(pose.frame)-static_cast<float>(start))/span,0.0f,1.0f):1.0f;
+        turn_pose(pose,pivot,t*turn,move*t);turns.push_back(t*turn);
+    }
+    return turns;
+}
 void correct_poses(Clip& result,const MotionConditions& conditions,int window) {
     std::vector<size_t> frames;
     for(const auto& pose:conditions.poses)frames.push_back(pose.frame);

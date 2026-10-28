@@ -44,8 +44,8 @@ function(help_lists match)
   endif()
 endfunction()
 help_lists("--then.*--transition.*--start-pose.*--end-pose.*--keyframe.*--effector.*--path.*--gif.*help \\[COMMAND\\]" --help)
-help_lists("--start-pose.*--end-pose.*--keyframe.*--effector.*--path.*--placement.*--no-correction" generate --help)
-help_lists("--mannequin.*--character.*--map.*--texture.*--skeleton.*--gif.*nightly.45" help preview)
+help_lists("--start-pose.*--end-pose.*--keyframe.*--effector.*--path.*--follow.*--placement.*--no-correction" generate --help)
+help_lists("--mannequin.*--character.*--map.*--texture.*--prop.*--prop-bone.*--prop-offset.*--prop-rotation.*--skeleton.*--gif.*nightly.45" help preview)
 help_lists("--to-soma.*--map" retarget -h)
 help_lists("--skeleton" inspect --help)
 # Constraints are resolved before any model is checked or loaded.
@@ -243,7 +243,16 @@ refuses("requires --end-pose" generate "walk" --end-at "0,-1" -o "${WORK}/end-at
 refuses("Missing or incomplete" generate "walk" --start-pose "${source}" --end-pose "${source}" --end-at "0,-1,90" -o "${WORK}/end-at.glb" --models "${empty}")
 refuses("Missing or incomplete" generate "walk" --start-pose "${source}" --end-pose "${source}" --path "0,-1@-1" -o "${WORK}/end-at.glb" --models "${empty}")
 refuses("Two path points" generate "walk" --end-pose "${source}" --end-at "0,-1" --path "0,-2@-1" -o "${WORK}/end-at.glb" --models "${empty}")
-file(WRITE "${WORK}/end-at.json" "{\"actions\":[{\"action\":\"generate\",\"prompt\":\"walk\",\"endPose\":\"with spaces and 'quotes'/source.glb\",\"endAt\":[0,-1,90],\"output\":\"end-at.glb\"}]}")
+# --follow ends turns keyframe/effector targets by the end pose's placement.
+refuses("world or ends" generate "walk" --follow body -o "${WORK}/follow.glb" --models "${empty}")
+refuses("needs --end-pose" generate "walk" --start-pose "${source}" --effector right-hand 20 "${source}" --follow ends -o "${WORK}/follow.glb" --models "${empty}")
+refuses("give at least one" generate "walk" --start-pose "${source}" --end-pose "${source}" --end-at "0,0,60" --follow ends -o "${WORK}/follow.glb" --models "${empty}")
+refuses("Missing or incomplete" generate "walk" --start-pose "${source}" --end-pose "${source}" --end-at "0,0,60" --effector right-hand 20 "${source}" --keyframe 40 "${source}" --follow ends -o "${WORK}/follow.glb" --models "${empty}")
+file(WRITE "${WORK}/follow.json" "{\"actions\":[{\"action\":\"generate\",\"prompt\":\"walk\",\"startPose\":\"with spaces and 'quotes'/source.glb\",\"endPose\":\"with spaces and 'quotes'/source.glb\",\"endAt\":[0,0,60],\"effectors\":[{\"effectors\":\"right-hand\",\"frame\":20,\"file\":\"with spaces and 'quotes'/source.glb\"}],\"follow\":\"ends\",\"output\":\"follow.glb\"}]}")
+refuses("Missing or incomplete" batch "${WORK}/follow.json" --models "${empty}")
+file(WRITE "${WORK}/bad-follow.json" "{\"actions\":[{\"action\":\"generate\",\"prompt\":\"walk\",\"follow\":\"body\",\"output\":\"follow.glb\"}]}")
+refuses("follow is world or ends" batch "${WORK}/bad-follow.json" --models "${empty}")
+file(WRITE "${WORK}/end-at.json""{\"actions\":[{\"action\":\"generate\",\"prompt\":\"walk\",\"endPose\":\"with spaces and 'quotes'/source.glb\",\"endAt\":[0,-1,90],\"output\":\"end-at.glb\"}]}")
 refuses("Missing or incomplete" batch "${WORK}/end-at.json" --models "${empty}")
 
 # Invalid connected source protection is refused before an inference model loads.

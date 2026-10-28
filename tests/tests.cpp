@@ -218,6 +218,35 @@ void kimodo_contracts() {
     for(size_t j=1;j<30;++j)check(same(located.poses[1].pose[j].q,conditions.poses[1].pose[j].q),"Placement preserves local body rotations");
     auto lc=build_condition(located,60);
     check(std::abs(lc.observed[59*kimodo_features]-(-2-c.origin.x))<1e-5f,"Merged pose uses path location");
+    // --follow ends: an end pose turned to face 60 degrees and moved 1 m turns a target
+    // halfway through the clip by half that turn about its original hips and moves it 0.5 m;
+    // its height and body-local rotations stay, and the start and end themselves do not move.
+    {
+        MotionConditions follow;
+        auto start=test_pose(0,{0,0.9f,0},0),end=test_pose(0,{0.2f,0.9f,0.1f},0),cut=test_pose(0.4f,{0.6f,0.8f,0.5f},0.3f);
+        follow.poses.push_back({"start-pose",0,"idle.glb",-1,start,0});
+        follow.poses.push_back({"end-pose",60,"idle.glb",0,end,0});
+        follow.poses.push_back({"effector",30,"cut.glb",9,cut,parse_effectors("right-hand")});
+        follow.path.push_back({60,1.2f,0.1f,true,60});
+        const auto source=follow.poses[1];
+        (void)place_constraints(follow,Placement::world);
+        auto turns=follow_ends(follow,source);
+        const float half=0.5f*std::remainder(1.0471976f-kimodo_heading(rig,end),6.2831853f);
+        check(turns.size()==1&&std::abs(turns[0]-half)<1e-4f,"Halfway target takes half the end pose's turn");
+        Vec3 d=cut[0].p-Vec3{0.2f,0,0.1f};d.y=0;d=rotate(yaw(half),d);
+        const Vec3 want{0.2f+d.x+0.5f,0.8f,0.1f+d.z};
+        const Vec3 got=follow.poses[2].pose[0].p;
+        check(std::abs(got.x-want.x)<1e-5f&&std::abs(got.y-want.y)<1e-6f&&std::abs(got.z-want.z)<1e-5f,"Target turns about the end pose's hips and moves half its offset");
+        check(std::abs(std::remainder(kimodo_heading(rig,follow.poses[2].pose)-kimodo_heading(rig,cut)-half,6.2831853f))<1e-4f,"Target facing turns with it");
+        for(size_t j=1;j<30;++j)check(same(follow.poses[2].pose[j].q,cut[j].q),"Following keeps body-local rotations");
+        check(follow.poses[0].pose[0].p.x==0&&follow.poses[1].pose[0].p.x==1.2f,"Start and end poses are not moved again");
+        auto unturned=follow;unturned.path.clear();unturned.poses[2].pose=cut;unturned.poses[1].pose=end;
+        (void)follow_ends(unturned,unturned.poses[1]);
+        for(size_t j=0;j<30;++j)check(same(unturned.poses[2].pose[j].q,cut[j].q)&&unturned.poses[2].pose[j].p.x==cut[j].p.x,"An unplaced end pose leaves targets where they are");
+        MotionConditions no_end;no_end.poses.push_back(follow.poses[2]);
+        bool refused=false;try{(void)follow_ends(no_end,source);}catch(...){refused=true;}
+        check(refused,"Following the ends needs an end pose");
+    }
     auto duplicate=located;duplicate.path.push_back(located.path.back());
     bool duplicate_refused=false;try{(void)place_constraints(duplicate,Placement::world);}catch(...){duplicate_refused=true;}
     check(duplicate_refused,"Duplicate paths still refused");

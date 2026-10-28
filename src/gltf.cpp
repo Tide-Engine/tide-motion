@@ -26,6 +26,20 @@ bool is_fbx(const fs::path& path) {
     auto ext=path.extension().string();for(auto& ch:ext)ch=static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
     return ext==".fbx";
 }
+std::vector<std::string> node_names(const fs::path& path) {
+    if(is_fbx(path))return fbx_node_names(path);
+    if(path.extension()!=".glb")throw std::runtime_error("Input must be a self-contained .glb or .fbx; export glTF to GLB first");
+    if(fs::file_size(path)>512ULL*1024*1024)throw std::runtime_error("GLB exceeds the 512 MiB input limit");
+    std::ifstream input(path,std::ios::binary);
+    std::vector<char> bytes(static_cast<size_t>(fs::file_size(path)));
+    if(!input.read(bytes.data(),static_cast<std::streamsize>(bytes.size())))throw std::runtime_error("Cannot read "+path.string());
+    cgltf_options opts{};cgltf_data* raw=nullptr;
+    if(cgltf_parse(&opts,bytes.data(),bytes.size(),&raw)!=cgltf_result_success)throw std::runtime_error("Malformed GLB");
+    std::unique_ptr<cgltf_data,decltype(&cgltf_free)> data(raw,cgltf_free);
+    std::vector<std::string> names;
+    for(size_t i=0;i<data->nodes_count;++i)if(data->nodes[i].name)names.push_back(data->nodes[i].name);
+    return names;
+}
 static Clip read_glb(const fs::path& path,const std::string& selected,bool canonical,bool rest_only) {
     if(is_fbx(path)) {
         if(canonical)throw std::runtime_error("SOMA clips must be GLB; convert an FBX clip with retarget --to-soma first");
