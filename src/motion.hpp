@@ -58,6 +58,10 @@ Clip mirror_soma77(const Clip&);
 std::vector<Transform> world_pose(const Clip&, std::span<const Transform>);
 std::vector<Transform> sample(const Clip&, float);
 Clip load_glb(const fs::path&, const std::string& animation="", bool canonical=true);
+// Explicit transform-track selection plus ancestors. Render-only descendants
+// are excluded, so their static nonuniform mesh scale is not a rig restriction.
+// No nodes are identified automatically; unrelated channels are not imported.
+Clip load_glb_nodes(const fs::path&,const std::vector<std::string>& nodes);
 Clip load_rig_glb(const fs::path&, const std::vector<std::string>& extra_nodes={});
 // .fbx through ufbx with Tide's import conventions (Y-up metres); used by the GLB loaders.
 bool is_fbx(const fs::path&);

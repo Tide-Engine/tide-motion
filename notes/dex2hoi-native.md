@@ -51,6 +51,10 @@ by sixty predicted frames at 30 Hz (70 total). These are the selected upstream
 inference settings, not a claim that the missing training `args.json` has been
 recovered. Longer autoregression and GRAB are not integrated.
 
+The [first private weapon trials](dex2hoi-test-drive.md) fail reliable grip contact,
+prefix continuity and lift/slash prompt control. Native inference/parity working
+does not make these weights a validated weapon-animation solution.
+
 The version-1 history manifest has these fields:
 
 ```json
@@ -119,6 +123,36 @@ weapon collision solver, automatic grasp or automatic bow/string reconstruction.
 Existing equipment authoring can inspect/correct explicitly specified grips and
 author bow release as a separate offline step. Animated equipment GLBs contain
 extra object nodes; select the intended skeleton explicitly when reusing them.
+
+## Inspect body and learned props together
+
+```powershell
+tide-motion dex2hoi preview C:/own/lift.glb --input C:/own/history.json `
+  --character C:/own/compatible-character.glb --tide C:/Tide/bin/tide.exe `
+  --gif C:/own/lift.gif
+```
+
+This read-only command opens no model sessions/cache. It reconstructs the explicit
+original body rig and independently learned world object tracks from the GLB,
+then draws both through the normal native renderer. The character must have the
+same explicitly named rest rig; no automatic retargeting is performed. It checks
+70 frames/30 Hz, track names, rest/hierarchy, preserved input prefix, and input/
+history/mesh hashes when a generation recipe is present. Captures/GIFs refuse
+overwrites and input/output path collisions.
+
+For first-person inspection add `--first-person --camera-mode root` and use a
+compatible character with only arm geometry visible. Camera controls are the
+ordinary explicit `--camera-bone`, `--camera-offset X,Y,Z`,
+`--camera-rotation X,Y,Z`, `--camera-fov` and `--camera-near`. This changes viewing
+and visible character geometry, not the generated animation. A full-body clip
+does not automatically have the framing or motion of a dedicated viewmodel.
+Run the engine with `TIDE_HIDDEN=1` and `--gif`, `--capture` or `--frames` bounds.
+
+The explicit animation-node loader includes requested bones/object roots and
+their ancestors. It excludes render-only mesh descendants, whose static
+nonuniform scale is valid geometry rather than a skeletal scale contract.
+The original GLB/mesh is not rewritten, and learned object trajectories remain
+unchanged. The general all-node rig importer keeps its existing restrictions.
 
 ## Sampling and reproducibility
 

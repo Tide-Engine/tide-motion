@@ -9,6 +9,7 @@
 #include <fstream>
 #include <functional>
 #include <memory>
+#include <set>
 #include <stdexcept>
 
 namespace motion {
@@ -90,7 +91,7 @@ std::vector<std::string> node_names(const fs::path& path) {
     for(size_t i=0;i<data->nodes_count;++i)if(data->nodes[i].name)names.push_back(data->nodes[i].name);
     return names;
 }
-static Clip read_glb(const fs::path& path,const std::string& selected,bool canonical,bool rest_only,const std::vector<std::string>& extra_nodes={}) {
+static Clip read_glb(const fs::path& path,const std::string& selected,bool canonical,bool rest_only,const std::vector<std::string>& extra_nodes={},const std::vector<std::string>* selected_nodes=nullptr) {
     if(is_fbx(path)) {
         if(canonical)throw std::runtime_error("SOMA clips must be GLB; convert an FBX clip with retarget --to-soma first");
         return read_fbx(path,selected,rest_only,extra_nodes);
@@ -163,7 +164,20 @@ static Clip read_glb(const fs::path& path,const std::string& selected,bool canon
         };
         // A character can have unrelated mesh/camera transforms. Its reference
         // rig consists of skin joints and their ancestors, not render geometry.
-        if(rest_only&&data->skins_count) {
+        if(selected_nodes) {
+            if(selected_nodes->empty())throw std::runtime_error("Explicit GLB node selection is empty");
+            std::set<std::string> unique;
+            for(const auto& name:*selected_nodes) {
+                if(name.empty()||!unique.insert(name).second)throw std::runtime_error("Explicit GLB node names must be unique and nonempty");
+                cgltf_node* found=nullptr;
+                for(size_t i=0;i<data->nodes_count;++i)if(data->nodes[i].name&&name==data->nodes[i].name) {
+                    if(found)throw std::runtime_error("Ambiguous selected GLB node: "+name);
+                    found=&data->nodes[i];
+                }
+                if(!found)throw std::runtime_error("Selected GLB node not found: "+name);
+                append(found);
+            }
+        } else if(rest_only&&data->skins_count) {
             for(size_t s=0;s<data->skins_count;++s)for(size_t j=0;j<data->skins[s].joints_count;++j)append(data->skins[s].joints[j]);
         } else for(size_t i=0;i<data->nodes_count;++i)append(&data->nodes[i]);
         if(rest_only)for(const auto& name:extra_nodes) {
@@ -219,7 +233,10 @@ static Clip read_glb(const fs::path& path,const std::string& selected,bool canon
     for(size_t i=0;i<animation->channels_count;++i) {
         auto& channel=animation->channels[i];
         auto at=std::find(nodes.begin(),nodes.end(),channel.target_node);
-        if(at==nodes.end())throw std::runtime_error("Animation contains a track outside the selected rig");
+        if(at==nodes.end()) {
+            if(selected_nodes)continue;
+            throw std::runtime_error("Animation contains a track outside the selected rig");
+        }
         size_t joint=static_cast<size_t>(at-nodes.begin());
         int kind=channel.target_path==cgltf_animation_path_type_translation?0:channel.target_path==cgltf_animation_path_type_rotation?1:channel.target_path==cgltf_animation_path_type_scale?2:3;
         if(kind==3||(kind==2&&canonical))throw std::runtime_error("Bake out scale or morph animation before importing");
@@ -254,6 +271,10 @@ static Clip read_glb(const fs::path& path,const std::string& selected,bool canon
     return c;
 }
 Clip load_glb(const fs::path& path,const std::string& selected,bool canonical) { return read_glb(path,selected,canonical,false); }
+Clip load_glb_nodes(const fs::path& path,const std::vector<std::string>& nodes) {
+    if(is_fbx(path))throw std::runtime_error("Explicit animation node selection requires GLB");
+    return read_glb(path,"",false,false,{},&nodes);
+}
 Clip load_rig_glb(const fs::path& path,const std::vector<std::string>& extra_nodes) { return read_glb(path,"",false,true,extra_nodes); }
 void save_glb(const Clip& c,const fs::path& path) {
     c.validate();

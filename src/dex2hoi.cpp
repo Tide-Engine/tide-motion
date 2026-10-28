@@ -1,6 +1,7 @@
 #include "dex2hoi.hpp"
 #include "dex2hoi_bundle.hpp"
 #include "dex2hoi_motion.hpp"
+#include "dex2hoi_preview.hpp"
 #include <onnxruntime_cxx_api.h>
 #include <algorithm>
 #include <chrono>
@@ -246,6 +247,10 @@ tide-motion dex2hoi generate --input OWN-HISTORY.json --prompt TEXT -o NEW.glb
 tide-motion dex2hoi denoise --bundle BUNDLE --input TENSORS.json -o NEW.json [--threads N]
 tide-motion dex2hoi install PREPARED-BUNDLE --bundle NEW-PRIVATE-DESTINATION
 tide-motion dex2hoi check --bundle BUNDLE
+tide-motion dex2hoi preview CLIP.glb --input OWN-HISTORY.json --character CHARACTER.glb
+    [--first-person] [--camera-mode root|bone] [--camera-bone NAME]
+    [--camera-offset X,Y,Z] [--camera-rotation X,Y,Z] [--camera-fov N] [--camera-near N]
+    [--tide PATH] [--gif OUT.gif] [--capture OUT.png] [--frames N]
 
 Native CPU ONNX inference with manually supplied weights. Generation uses one
 10-frame history plus 60 predicted frames at 30 Hz. The input names an explicit
@@ -327,6 +332,7 @@ Dex2HoiNormalizer normalizer(const fs::path& bundle) {
 int command(const std::vector<std::string>& args) {
     if(args.size()<3||args[2]=="help"||std::find(args.begin()+2,args.end(),"--help")!=args.end()){std::cout<<help();return 0;}
     const auto& action=args[2];
+    if(action=="preview")return preview_command(args);
     if(action=="install") {
         require(args.size()==6&&args[4]=="--bundle","install needs PREPARED-BUNDLE --bundle NEW-DESTINATION");
         auto bundle=import_bundle(utf8path(args[3]),utf8path(args[5]));

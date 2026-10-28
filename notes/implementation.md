@@ -1,5 +1,81 @@
 # Native animation authoring
 
+## Dex2HOI matched weapon tests and combined native preview (2026-10-28)
+
+Owner requested actual tests after manual/private native integration. Three raw
+70frame native HUMOTO runs use seed7, full500 cosine timesteps, CFG2.5 and four CPU
+threads. Replaced the old integration fixture's SOMA identity-basis mapping and
+approximate object clouds with private released65bone reference rest frames,
+newly authored static guard pose, own sword/shield meshes and actual128surface
+samples. No upstream mesh, skin, evaluation motion or dataset prefix was used.
+Reference rest matrices, converted fixtures, weights and generated assets remain
+private outside Git/releases. No model/dependency revision or arithmetic changed.
+
+[dex2hoi-test-drive.md](dex2hoi-test-drive.md) records exact prompts/input hashes,
+methods and limits. Independently measured designated palm/handle gaps over the
+sixty generated frames: lift36.38cm mean/43.81cm max; slash36.48/43.74cm; two-prop
+sword44.50/47.02cm, shield11.22/13.79cm. Object9→10 jumps67.71/68.19/80.61cm for
+the swords and47.15cm for shield. Initial authored marker gaps <2.6e-8m, samples
+on actual prop triangles <1.4e-8m. All samples finite; source prefix positions exact,
+rotation error ≤1.71e-6degrees; fixed bone lengths are not contact certification.
+No IK, remounting, snapping or blends were applied to conceal these failures.
+
+Matched lift/slash recipes confirm same model/input/history/seed/schedule/CFG/
+device/threads; nine text token positions differ. Learned motions differ only
+3.38mm body-joint world RMS,9.23mm sword-origin RMS,.62deg mean sword rotation.
+Requested lift keeps its top point below its starting height in every learned
+frame. Inspected playback and metrics do not demonstrate useful weapon motion.
+This is one manually authored static prefix/seed experiment, not a dataset-wide
+model ranking or proof that every compatible prefix fails. Prior numerical parity
+does not imply quality. No commercial/weight grant is invented by these tests.
+
+Added graph-free `dex2hoi preview CLIP --input HISTORY --character CHARACTER`,
+which reconstructs the explicit source body and independently learned world props
+for the existing native character/equipment renderer. It validates source rig,
+70frames30Hz, named channels, prefix preservation, metadata, optional input/history/
+mesh recipe hashes, character compatibility and capture/GIF path collisions.
+Native first-person camera controls and arms-only compatible visualization geometry
+now show the same learned props with arms. No model cache/session or Python runtime
+is involved. Captures/GIFs refuse overwrite; source assets are read-only.
+
+Added explicit `load_glb_nodes` transform selection plus ancestors. Rendering-only
+prop descendants can carry static nonuniform geometry scale without being treated
+as skeletal bones. The normal importer behavior is retained; requested rig scales
+still validate. No source mesh is rewritten or world object track replaced. New
+regression appends actual triangle geometry with nonuniform scale beneath a prop,
+then checks all70 body/object samples, excluded geometry nodes and unchanged file
+hash. Other tests cover invalid names/rig/rest/hierarchy/frames/prefix/recipe pins,
+camera options, duplicates, collisions and overwrite refusal.
+
+The developer-only tools/dex2hoi/measure.py independently parses actual GLB tracks/
+FK and records designated marker, motion, geometry and fingertip-bone/triangle
+observations. NumPy comes from the existing pinned developer environment, never
+installed inference. Private analyzer selfchecks include quaternion round trips,
+exact triangle distance cases and native planar-root travel agreement. Extracted
+world samples feed a scrub-able diagnostic skeleton/prop viewer; it is not engine
+renderer equivalence or skin contact/penetration certification.
+
+All22 Windows ClangCL18.1.8 Release CTests pass. GCC13.3 C++20 -Wall -Wextra
+-Wpedantic -Werror syntax checks pass for the affected GLB/preview units; no full
+Linux renderer claim. Native human+props/arms-only captures and70frame GIFs use
+TIDE_HIDDEN=1 and explicit bounds, held TideMotionGpuValidation, unchanged clean
+engine367ae4da2d31913176ae1e2624e1d78a1204f03c/staged checkout-built executable.
+Both views were inspected. FPS camera tuning is explicit and separate from motion:
+root-carried eye, offset0,.08,.15m, pitch25deg, FOV100,near.01m. It exposes the arms
+but does not repair contact or provide a dedicated first-person model. An earlier
+camera behind shoulders caused upper-arm occlusion; the default lost most hands.
+Private frame contact sheets use developer-only Pillow11.3.0; no installed runtime
+dependency was added. The staged runtime package also previews with Windows-only
+PATH and an intentionally invalid model-cache environment, confirming that this
+read-only command does not discover or load model weights.
+
+Retained native advisory review HTML/adjacent JSON for all three raw clips and
+recipes, following concurrent origin/devc9936d2's authoring feedback guidance.
+Quaternion measurements are sampled; custom-rig body/ground, collision, balance
+and aesthetic checks remain unknown. No hint count ranks assets or triggers a
+correction/export gate; explicit authored contacts and action playback drive
+the test conclusions. Concurrent advisory guidance is preserved on integration.
+
 ## DART complete authoring controls and native optimization (2026-10-28)
 
 Supersedes the earlier three-label/source/gradient capability limits below.
