@@ -770,8 +770,10 @@ Every local translation, root rotation/path and world ankle orientation is kept.
 Unreachable targets leave reported error rather than stretching/moving the root.
 protectedFrames holds exact whole poses. Constraint frames from the adjacent
 source recipe are protected automatically and retained for repeated cleanup;
-external clips and retargeted clips whose constraint metadata was not transferred
-need explicit protectedFrames. No assumption that an ankle is a sole or toe.
+external clips whose constraint metadata was not transferred need explicit
+protectedFrames. Retarget carries known constraint/protected frame indices into
+its recipe; pose-sequence start/arrival frames and previous protectedFrames are
+also inherited by cleanup. No assumption that an ankle is a sole or toe.
 Recipes include effective intervals/settings/mapping, solver version, source
 recipe, protected frames, mean horizontal step before/after (m/frame), max anchor
 residual (m), max local joint correction (degrees), samples and skip reason.
@@ -833,3 +835,22 @@ no inverted knees/limbs or broken skin binding in those sampled poses. The idle'
 forward lean remains. This is limited sampled visual inspection, not a guarantee
 of temporal quality or full foot locking. No GPU inference ran, so no GPU mutex
 was needed; future inference validation must hold TideMotionGpuValidation.
+
+
+Integration completion: rebased onto origin/dev c714588, retaining the concurrent
+pose-sequence implementation, 0.5.1 prompting/preview/installer changes and ARDY
+research. Resolved additive shared-file conflicts; rebuilt the integrated CPU
+executable and all six CTests pass. Added coverage for inherited protectedFrames,
+pose-sequence arrivals and protection through two retarget directions; both
+affected CLI suites pass. The new native test uses a unique temporary filename,
+and integration CTests used .research/test-temp as TEMP/TMP to isolate this
+worktree from concurrent tests.
+
+A final real constrained generate -> Synty retarget -> cleanup run preserves
+frames 0/74 through metadata propagation. Independent FK: left/right ankle mean
+1.644/0.936 -> 1.359/0.768 mm/frame on intervals 0..15, world bone-length error
+<1.3e-7 m. Native checker: root/local translation error zero, world bone-length
+error <1.8e-7 m. The independent checker verifies every protected frame component
+within 2e-6 and ankle orientation. No model load/inference was repeated for this
+integration; existing generated assets were consumed. No PR, model publication,
+force push or additional workflow dispatch is part of this work.

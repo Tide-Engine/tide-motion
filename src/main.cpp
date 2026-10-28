@@ -311,6 +311,35 @@ double integer(const std::string& text,double low,double high,const char* label)
     if(value!=std::floor(value))throw std::runtime_error(std::string(label)+" must be an integer");
     return value;
 }
+// Preserve authored frames through model-free edits and mapped retargeting.
+nlohmann::json source_metadata(const fs::path& source) {
+    auto path=fs::path(source.string()+".json");
+    if(!fs::exists(path))return nlohmann::json::object();
+    if(fs::file_size(path)>1024*1024)throw std::runtime_error("Source recipe exceeds 1 MiB");
+    std::ifstream input(path);nlohmann::json recipe;input>>recipe;
+    if(!recipe.is_object())throw std::runtime_error("Source recipe must be an object");
+    return recipe;
+}
+std::vector<size_t> protected_recipe_frames(const nlohmann::json& recipe,size_t frames) {
+    std::vector<size_t> out;
+    auto add=[&](const nlohmann::json& value) {
+        if(!value.is_number_integer()||value.get<double>()<0||value.get<double>()>=static_cast<double>(frames))throw std::runtime_error("Source constraint frame outside clip");
+        out.push_back(value.get<size_t>());
+    };
+    if(recipe.contains("constraints")) {
+        if(!recipe["constraints"].is_array())throw std::runtime_error("Invalid source constraints");
+        for(const auto& constraint:recipe["constraints"])add(constraint.at("frame"));
+    }
+    if(recipe.contains("protectedFrames")) {
+        if(!recipe["protectedFrames"].is_array())throw std::runtime_error("Invalid source protectedFrames");
+        for(const auto& frame:recipe["protectedFrames"])add(frame);
+    }
+    if(recipe.value("command",std::string{})=="pose-sequence") {
+        add(0);
+        for(const auto& target:recipe.at("authoring").at("targets"))add(target.at("endFrame"));
+    }
+    std::sort(out.begin(),out.end());out.erase(std::unique(out.begin(),out.end()),out.end());return out;
+}
 struct RunContext {
     std::unique_ptr<kimodo::model> kimodo;
     // strict: an explicit --device, which never falls back. gpu_failed: auto fell back
@@ -757,18 +786,9 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         auto plan=load_cleanup_plan(contacts_file);
         clip=load_glb(utf8path(pos[0]),clip_name,false);
         std::optional<RetargetMapping> mapping;if(!map_file.empty())mapping=load_mapping(map_file);
-        auto sidecar=utf8path(pos[0]+".json");
-        nlohmann::json source_recipe;
-        if(fs::exists(sidecar)) {
-            if(fs::file_size(sidecar)>1024*1024)throw std::runtime_error("Source recipe exceeds 1 MiB");
-            std::ifstream input(sidecar);input>>source_recipe;
-            if(source_recipe.contains("constraints"))for(const auto& constraint:source_recipe.at("constraints")) {
-                const auto& frame=constraint.at("frame");
-                if(!frame.is_number_unsigned()&&!frame.is_number_integer())throw std::runtime_error("Invalid source constraint frame");
-                if(frame.get<double>()<0||frame.get<double>()>=static_cast<double>(clip.frames()))throw std::runtime_error("Source constraint frame outside clip");
-                plan.protected_frames.push_back(frame.get<size_t>());
-            }
-        }
+        auto source_recipe=source_metadata(utf8path(pos[0]));
+        auto protected_frames=protected_recipe_frames(source_recipe,clip.frames());
+        plan.protected_frames.insert(plan.protected_frames.end(),protected_frames.begin(),protected_frames.end());
         auto reports=cleanup_contacts(clip,plan,mapping?&*mapping:nullptr);
         mirror_recipe={{"tool","tide-motion"},{"version",MOTION_VERSION},{"command","cleanup"},{"source",pos[0]},{"clip",clip_name},
             {"fps",clip.fps},{"frames",clip.frames()},{"solver","tide-two-bone-v1"},{"fadeFrames",plan.fade_frames},{"maxCorrectionMetres",plan.max_correction},{"protectedFrames",plan.protected_frames},
@@ -797,8 +817,9 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         auto result=retarget(source,target,mapping,to_soma);
         if(result.discarded_translations)std::cerr<<"Note: source has non-root translation animation; target bone lengths are preserved, so those translations are not copied.\n";
         clip=std::move(result.clip);
+        auto protected_frames=protected_recipe_frames(source_metadata(utf8path(pos[0])),source.frames());
         std::ifstream mapping_stream(map_file);nlohmann::json mapping_json;mapping_stream>>mapping_json;
-        retarget_recipe={{"tool","tide-motion"},{"version",MOTION_VERSION},{"command",command},{"source",pos[0]},{"target",target_file.string()},{"toSoma",to_soma},{"clip",clip_name},{"mapping",mapping_json},{"rootScale",result.scale},{"headingDegrees",result.heading_degrees},{"discardedNonRootTranslations",result.discarded_translations},{"fps",clip.fps},{"frames",clip.frames()}};
+        retarget_recipe={{"tool","tide-motion"},{"version",MOTION_VERSION},{"command",command},{"source",pos[0]},{"target",target_file.string()},{"toSoma",to_soma},{"clip",clip_name},{"mapping",mapping_json},{"rootScale",result.scale},{"headingDegrees",result.heading_degrees},{"discardedNonRootTranslations",result.discarded_translations},{"protectedFrames",protected_frames},{"fps",clip.fps},{"frames",clip.frames()}};
     } else if(command=="generate") {
         if(pos.size()!=1||pos[0].empty())throw std::runtime_error("generate takes one quoted prompt");
         if(segments.size()>16)throw std::runtime_error("generate takes at most 16 prompts");

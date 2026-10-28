@@ -1,5 +1,6 @@
 #include "motion.hpp"
 #include <cmath>
+#include <chrono>
 #include <iostream>
 #include <stdexcept>
 using namespace motion;
@@ -63,7 +64,7 @@ int main(int argc,char** argv) {try {
     for(size_t f=0;f<c.frames();++f)c.frame(f)[0].p.y+=0.003f*static_cast<float>(f);
     p.max_correction=0.2f;auto unreachable=cleanup_contacts(c,p,&m);
     check(std::isfinite(unreachable[0].residual_max),"unreachable target produced nonfinite output");
-    auto path=fs::temp_directory_path()/"tide-cleanup-contract.glb";save_glb(c,path);auto read=load_glb(path,"",false);fs::remove(path);check(read.frames()==c.frames(),"cleanup export");
+    auto path=fs::temp_directory_path()/("tide-cleanup-"+std::to_string(std::chrono::steady_clock::now().time_since_epoch().count())+".glb");save_glb(c,path);auto read=load_glb(path,"",false);fs::remove(path);check(read.frames()==c.frames(),"cleanup export");
     p.contacts={{0,0,100}};bool refused=false;try{cleanup_contacts(c,p,&m);}catch(const std::exception&){refused=true;}check(refused,"bad interval accepted");
     std::cout<<"contact contracts passed\n";return 0;
 } catch(const std::exception& e) {std::cerr<<e.what()<<"\n";return 1;}}

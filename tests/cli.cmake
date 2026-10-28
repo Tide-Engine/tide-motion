@@ -156,3 +156,16 @@ file(WRITE "${WORK}/bad-contacts.json" "{\"contacts\":[{\"foot\":\"left-foot\",\
 refuses("integer" cleanup "${source}" --contacts "${WORK}/bad-contacts.json" -o "${WORK}/unused-clean.glb")
 file(WRITE "${WORK}/bad-cleanup-jobs.json" "{\"actions\":[{\"action\":\"generate\",\"prompt\":\"walk\",\"output\":\"unused-generate.glb\"},{\"action\":\"cleanup\",\"source\":\"clean.glb\",\"contacts\":\"bad-contacts.json\",\"output\":\"unused-clean.glb\"}]}")
 refuses("Batch action 2" batch "${WORK}/bad-cleanup-jobs.json")
+
+# Source protected frames and pose-sequence arrivals survive subsequent cleanup.
+file(WRITE "${source}.json" "{\"command\":\"pose-sequence\",\"protectedFrames\":[2],\"authoring\":{\"targets\":[{\"endFrame\":1}]}}")
+file(REMOVE "${WORK}/arrival-clean.glb" "${WORK}/arrival-clean.glb.json")
+execute_process(COMMAND "${TOOL}" cleanup "${source}" --contacts "${WORK}/contacts.json" -o "${WORK}/arrival-clean.glb" RESULT_VARIABLE code ERROR_VARIABLE err)
+if(NOT code EQUAL 0)
+  message(FATAL_ERROR "arrival cleanup failed: ${err}")
+endif()
+file(READ "${WORK}/arrival-clean.glb.json" recipe)
+string(JSON pins LENGTH "${recipe}" protectedFrames)
+if(NOT pins EQUAL 3)
+  message(FATAL_ERROR "pose arrivals/protected frames were not carried into cleanup")
+endif()
