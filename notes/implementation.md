@@ -2641,3 +2641,86 @@ D:/Projects/PurrEngine checkout at 28b61e4db predates `tide run --record`); the 
 and MinGW platform were built there and staged under .research, with the unbuilt
 MinGW host tools filled from the same tree's release build. No engine source
 changed. Linux/macOS builds are left to CI.
+## MoMask shared controls and native GPU (2026-10-28)
+
+Owner asked whether backends support the same features and to add feasible
+support. Audited the exact pinned MoMask interfaces: text, whole-body RVQ tokens,
+residual history/quantizer and padding; no Kimodo spatial constraint inputs or
+ARDY autoregressive history interface. Added real application controls instead
+of claiming those learned capabilities: --variants 1..64 (seed sequences/session
+reuse/contact sheets), --threads 1..1024, --device cpu|auto|gpu, --in-place generation,
+--rig soma30|soma77 and matching standard batch fields. MoMask CPU/four threads,
+all backend defaults/model pins and manual-weight installation remain unchanged.
+In-place is refused for edits. Source SOMA-77 now keeps its existing extra tracks
+at every frame and its rig/rest offsets; body edits pass through SOMA-30. All
+outside and endpoint poses are restored explicitly. Static presentation fingers
+on new SOMA-77 generations are recorded as such, not predicted fingers. Other
+custom rigs remain explicit retargeting work. Variant/partial/collision/seed
+overflow controls preflight before session creation, including the uint32 edge.
+
+Native Windows x64 DirectML uses the existing pinned/licensed ORT 1.24.4 +
+DirectML 1.15.4 distribution already packaged for ARDY. No additional runtime
+archive/dependency or model re-export is needed. The optional MoMask GPU TU has
+its own C API table; only owned numeric byte vectors/shapes/type IDs cross the
+CPU ORT 1.31.1 boundary. It validates float/int64/bool inputs, output shapes and
+sizes; existing finite-value/model checks remain. CLIP stays CPU; four motion
+graphs use DirectML with CPU auxiliary nodes. Telemetry is disabled. GPU is
+strict; auto logs initialization fallback or restarts a GPU-failed current job
+from its original seed on CPU before any asset write. Missing-runtime strict
+refusal and actual auto CPU inference pass; physical runtime device-loss injection
+was not performed. Context sessions reload when device/threads/cache change.
+MOTION_MOMASK_DIRECTML is independent but initially follows the ARDY option on
+fresh builds. Shared DLL staging/notices preserve ARDY's existing behavior.
+
+GPU validation held TideMotionGpuValidation, used TIDE_HIDDEN=1 and private test
+TEMP/TMP. All 12 real motion-network PyTorch fixture cases (4/7/49 tokens) pass;
+encoder integer indices match exactly. Max absolute errors: masked 9.78e-6,
+residual 2.39e-5, decoder .00155258. GPU bound .002+.002*abs(reference) was fixed
+before running; the tighter CPU bound is unchanged. Provider profiles contain
+DML events in all four graphs and CPU auxiliary events (not all-operator GPU
+execution). Per-process sampled GPU local peak 351,043,584 bytes, not total VRAM.
+All eleven model-free CTests and WSL GCC warnings-as-errors syntax checks pass.
+
+A real seven-action batch generates matching CPU/GPU walk tokens, an identical
+warm GPU repeat, a SOMA-77 idle/edit, two in-place SOMA-77 variants, then changes
+CPU thread count. All eight GLBs have 89 finite local/FK frames. Independent
+official-tokenizer/full-sampler reference passes. Model sessions are reused for
+all consecutive equal device/threads jobs. Three-second, 18-step generation:
+CPU .1364 s, first GPU .4916 s, warm GPU .1469 s, excluding session construction;
+single local observations, so no GPU speedup/default change is claimed.
+Independent GLB checks, including a privately authored varying index-finger
+fixture, verify every extra-joint frame and all outside/end local/FK poses after
+native GPU inpaint. Final repeat component error <=5.97e-8 with quaternion sign
+matching. No imported evaluation dataset, SMPL/SMPL-X body or user Python is used.
+
+The existing native variant renderer captured a 960x1088 contact sheet with
+Tide built from D:/Projects/PurrEngine at 28b61e4db and privately staged here;
+the capture uses three hidden frames. Plausible walking poses were inspected.
+The optional GIF attempt correctly refuses this engine's missing run --record
+feature, retaining all assets/PNG; no GIF success is claimed. MoMask generation
+needs no renderer. No Tide engine/CLI source was changed. Existing foot-contact
+quality limits remain. See notes/momask-capabilities.md for supported controls,
+exact remaining spatial/history research tasks and reproducible native/developer
+checks; these are distinct from the unchanged checkpoint commercial-rights gap.
+
+Integrated DART 01f51a8 without changing its source/model/default contracts.
+All twelve combined CTests and the staged native Windows-only-PATH runtime smoke
+pass, including GPU generate -> mirror -> inpaint with one MoMask load, valid
+SOMA-77 reimport and actual auto CPU fallback in a deployment lacking GPU DLLs.
+The first smoke exposed a new export offset bug: SOMA-30 hand endpoints have
+different parent-local offsets in the 77-joint rig. Removed their inappropriate
+translation/rest override on generation, using the existing presentation
+converter unchanged; inpaint now always preserves its input rig. Source SOMA-77
+extra-track restoration remains explicit and tested. A repeat of all affected
+contracts and real packaged inference passes after the fix. No weights changed.
+Final rebase also retains 029d645's preview/props/follow/Mixamo work and both CI
+fixes. Applied the same size-asserted FARPROC bit copy to MoMask's isolated GPU
+entry point for newer Clang compatibility. The combined Vulkan/DirectML build
+passes all twelve CTests and the Windows-only-PATH native package smoke again.
+No ARDY, DART or Kimodo model arithmetic, weights, defaults or engine code changed.
+Final runtime archive contains no model/motion assets or developer Python. Native
+local-archive upgrade refreshed the owner's ordinary installation; all twelve
+existing model-file metadata records remain unchanged, and private MoMask bundle
+verification passes. Installed executable matches the validated Vulkan/DirectML
+build, SHA-256 d4b524f0dc0f6b6a701e0ef053e5bdc6d020fda3157243137480dbcaaa526761.
+

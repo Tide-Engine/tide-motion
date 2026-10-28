@@ -65,16 +65,22 @@ tide-motion inpaint "PROMPT" --source SOMA.glb --begin FRAME --end FRAME -o EDIT
 tide-motion models import-momask BUNDLE_DIRECTORY [--models CACHE]
 tide-motion models check momask [--models CACHE]
 
-MoMask runs natively on the CPU after you manually supply its prepared ONNX
+MoMask runs natively after you manually supply its prepared ONNX
 bundle in CACHE/momask. It is never downloaded by models install/all.
 ASCII prompts only. Native 20 Hz motion converts to canonical SOMA-30 at 30 Hz.
 Generation duration .2..9.8 seconds rounds down to 4 native samples/token.
 Controls: --steps 2..1000 (18), --guidance 0..10 (4), --residual-guidance 0..10
 (generate 5 / inpaint 2), --temperature (0,10] (1), --topkr [0,1) (.9), --seed.
+Shared controls: --device cpu|auto|gpu (default cpu), --threads 1..1024 (4),
+--variants 1..64, --variants-gif, --tide PATH, --rig soma30|soma77, --in-place.
+Windows GPU uses DirectML motion networks; CLIP text stays CPU. Auto falls back
+to CPU; gpu is strict. In-place is generation-only to preserve edited sources.
 Inpaint uses source frames [begin,end), at least 12 frames, in a source no longer
 than 293 frames. Outside poses are kept; endpoints are corrected inside the range.
+SOMA-77 input keeps its extra-joint tracks; generation adds static relaxed hands,
+not predicted fingers. Inpaint preserves the input's rig by default.
 --models CACHE follows TIDE_MOTION_MODELS or the OS cache when omitted.
-Other Kimodo/ARDY controls are not accepted. Weight rights remain unresolved;
+Kimodo spatial constraints/ARDY history controls are not accepted. Weight rights remain unresolved;
 manual import does not grant commercial rights. See notes/momask-local.md.
 )";
     if(command=="dart")return R"(tide-motion dart PLAN.json -o OUT.glb [--models DIR] [--threads N]
@@ -651,7 +657,7 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
         bool deferred_source=false;
         if(momask_action) {
             if(action.value("backend",std::string("momask"))!="momask")throw std::runtime_error("inpaint backend must be momask");
-            keys.insert({"backend","prompt","duration","seed","steps","guidance","residualGuidance","temperature","topkr","source","begin","end"});
+            keys.insert({"backend","prompt","duration","seed","steps","guidance","residualGuidance","temperature","topkr","source","begin","end","variants","variantsGif","tide","threads","device","rig","inPlace"});
             argv.insert(argv.end(),{action.at("prompt").get<std::string>(),"--backend","momask"});
             if(action.contains("source")) {
                 auto source=path(action["source"]);deferred_source=outputs.contains(source);
@@ -662,6 +668,10 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
                 if(!action[pair.first].is_number())throw std::runtime_error(std::string(pair.first)+" must be numeric");
                 argv.insert(argv.end(),{pair.second,action[pair.first].dump()});
             }
+            if(action.contains("variants")) {if(!action["variants"].is_number())throw std::runtime_error("variants must be numeric");variants=static_cast<unsigned>(integer(action["variants"].dump(),1,64,"variants"));argv.insert(argv.end(),{"--variants",std::to_string(variants)});}
+            if(action.value("variantsGif",false)){sheet_gif=true;argv.push_back("--variants-gif");}
+            if(action.value("inPlace",false))argv.push_back("--in-place");
+            for(auto pair:{std::pair{"device","--device"},std::pair{"rig","--rig"},std::pair{"tide","--tide"}})if(action.contains(pair.first))argv.insert(argv.end(),{pair.second,action[pair.first].get<std::string>()});
         } else if(type=="dart") {
             keys.insert({"plan","threads"});auto plan=path(action.at("plan"));(void)load_dart_plan(plan);argv.push_back(plan.string());
         } else if(type=="generate") {

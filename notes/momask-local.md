@@ -7,6 +7,12 @@ no verified separate author-issued grant covering commercial use. This backend
 does not assert commercial clearance. Weights stay private, outside Git/releases.
 The earlier primary-source findings remain in `notes/momask.md`.
 
+Current controls also include native Windows DirectML GPU acceleration, variants/
+contact sheets, CPU thread controls, in-place generation, SOMA-77 export and
+source-extra-track preservation. See [the capability comparison, measured GPU
+checks and model limits](momask-capabilities.md). Historical experiment/build
+results below remain labelled by their original integration stage.
+
 ## Use on this Windows machine
 
 MoMask is included in ordinary Tide Motion builds. Import the supported prepared
@@ -27,10 +33,10 @@ the learned interior corrected to them. Every source pose outside the range is
 copied, with no tail truncation. GLB serialization may normalize/negate quaternion
 keys for shortest-sign continuity; the represented outside poses remain unchanged
 (measured worst component roundoff 1.20e-7 after matching quaternion hemispheres).
-Source GLBs must already have Tide's canonical SOMA-30 rig. Use existing explicit
+Source GLBs must already have Tide's canonical SOMA-30 or SOMA-77 rig. Use existing explicit
 mapped-humanoid retargeting before/after this tool for other humanoids.
-Sources with extra joints (including SOMA-77) are refused, so no outside finger
-tracks are silently discarded by the shared reader's SOMA-30 subset conversion.
+SOMA-77 sources preserve all extra-joint tracks at every frame, with body edits
+through the canonical SOMA-30 subset. Other custom extra joints are refused.
 
 Outputs are ordinary skeleton-animation GLBs plus `.glb.json` recipes. Existing
 output/recipe files are refused. Prompts must be ASCII, without HTML entities or
@@ -47,8 +53,13 @@ Motion lengths floor to four native **20 Hz** samples/token. Conversion samples
 the same interval at 30 Hz without a fabricated tail: requested 3 s yields 60
 native samples and 89 exported samples; requested 2 s yields 40 and 59. First
 useful prompt examples are 2–4 s. No Kimodo path/effector/keyframe controls are
-accepted. Native CPU ORT uses four threads. There is no Python, hosted service,
-GPU runtime, daemon or procedural/blended motion generator in this inference path.
+accepted. CPU is the compatibility default, using four threads unless --threads
+selects 1..1024. --device gpu requires native Windows DirectML, auto tries it and
+falls back to CPU; CLIP text stays CPU. --variants 1..64/--variants-gif/--tide reuse
+the shared variant renderer. --rig soma77 adds static relaxed hands on generation;
+source SOMA-77 tracks are preserved on inpaint. --in-place is generation-only,
+so it cannot silently change outside an edit. There is no user Python, hosted
+service, daemon or procedural/blended motion generator in this inference path.
 
 `--models CACHE` or `TIDE_MOTION_MODELS` selects the normal cache; MoMask lives in
 `CACHE/momask`. `models import-momask BUNDLE_DIRECTORY` is a native **local import**,
@@ -71,7 +82,8 @@ sources and output/recipe collisions are checked before loading models. Sources
 may also be outputs of earlier actions in the same batch; their clip validation
 is deferred until produced. One model context verifies files once and reuses all
 five ORT sessions across interleaved actions. A failed job stops and keeps completed
-outputs. This does not add Kimodo's constraint/device/variant controls to MoMask.
+outputs. Device/threads/variants/rig/inPlace fields are supported too. This does
+not add Kimodo spatial constraint inputs or ARDY long-form history to MoMask.
 
 Recipes record the actual bundle hash, rights status, prompt, seed, sampler/RNG
 version, effective controls, CLIP token IDs, base/final RVQ token IDs, source
@@ -201,7 +213,7 @@ sampling/tokenization and source preservation. ONNX/reference artifacts stay in
 ignored scratch. Preserve notices; do not upload/private-copy the weights into
 Git or release archives. Checkpoint commercial scope remains unresolved.
 
-Remaining limits: Windows CPU only validated, ASCII tokenizer scope, one prompt
+Remaining limits: Windows CPU/DirectML validated, ASCII tokenizer scope, one prompt
 per job, published-window bound, lossy SOMA rotation reconstruction/proportions,
 no predicted fingers/facial motion, contact/velocity continuity and broad quality
 coverage. Commercial distribution remains a separate unresolved decision.
@@ -241,5 +253,7 @@ is updated, preserving the four existing model files and PATH; the prepared
 MoMask bundle was imported separately. Running the installed standard example
 with Windows-only PATH produces three 89-frame SOMA clips with one model load.
 Independent token/reference and all outside/edit endpoint checks pass, maximum
-component error 6.5192581e-8 after quaternion sign matching. Extra-joint sources
-are explicitly refused; no new finger preservation/generation claim is made.
+component error 6.5192581e-8 after quaternion sign matching. At that stage extra-joint
+sources were refused; the later capability work adds explicit SOMA-77 extra-track
+preservation, independently tested on an authored varying finger track. No new
+predicted fingers are claimed.
