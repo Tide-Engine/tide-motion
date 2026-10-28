@@ -346,11 +346,10 @@ void Cell(float left, float top, float width, float height, float floorA, float 
 
 float2 OnScreen(float x, float y) { return float2(x * Screen.width / VIEW_W, -y * Screen.height / VIEW_H); }
 
-view Sheet(mut PreviewClock clock)
-{
 )";
     // Only the GIF plays; the sheet is one still frame.
-    if(animated)scene<<"    var seconds = clock.elapsed;\n    clock.elapsed += Frame.dt;\n";
+    if(animated)scene<<"view Sheet(mut PreviewClock clock)\n{\n    var seconds = clock.elapsed;\n    clock.elapsed += Frame.dt;\n";
+    else scene<<"view Sheet()\n{\n";
     scene<<R"(    Draw.Clear(Color(0.13, 0.14, 0.16));
     Draw.SetCamera(float4x4.TRS(float3(VIEW_W * 0.5, -VIEW_H * 0.5, -50), quaternion.Euler(0, 0, 0), float3(1)), float4x4.Ortho(VIEW_W, VIEW_H, 0.1, 200));
 )";
