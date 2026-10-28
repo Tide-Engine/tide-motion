@@ -1,3 +1,8 @@
+# Builds and tests every platform on each push to dev, pull request and v tag.
+# A push to dev whose commits since the last release have a feat: or fix:
+# (or a breaking change) is published as the next version once every
+# platform passed; a pushed v tag publishes its own version. The version comes
+# from the commits (.github/scripts/next-version.sh), as semantic-release does.
 name: Build and release
 
 on:
@@ -18,8 +23,25 @@ env:
   TIDE_HIDDEN: '1'
 
 jobs:
+  version:
+    name: Version
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.next.outputs.version }}
+      published: ${{ steps.next.outputs.published }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Next version
+        id: next
+        shell: bash
+        run: bash .github/scripts/next-version.sh | tee -a "$GITHUB_OUTPUT"
+
   build:
     name: ${{ matrix.platform }}
+    needs: version
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     strategy:
@@ -41,13 +63,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - name: Check release version
-        run: |
-          version=$(sed -n 's/^project(tide-motion VERSION \([0-9.]*\) .*/\1/p' CMakeLists.txt)
-          test -n "$version"
-          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
-            test "$GITHUB_REF_NAME" = "v$version"
-          fi
+      - name: Version
+        run: echo "TIDE_MOTION_VERSION=${{ needs.version.outputs.version }}" >> "$GITHUB_ENV"
       - name: Install Vulkan SDK
         if: runner.os == 'Windows'
         shell: pwsh
@@ -64,14 +81,14 @@ jobs:
           "$root/Bin" >> $env:GITHUB_PATH
       - name: Configure Windows
         if: runner.os == 'Windows'
-        run: cmake -S . -B build -G 'Visual Studio 17 2022' -A x64 -T ClangCL -DMOTION_VULKAN=ON
+        run: cmake -S . -B build -G 'Visual Studio 17 2022' -A x64 -T ClangCL -DMOTION_VULKAN=ON -DTIDE_MOTION_VERSION="$TIDE_MOTION_VERSION"
       - name: Configure Linux
         if: runner.os == 'Linux'
-        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc-13 -DCMAKE_CXX_COMPILER=g++-13 -DMOTION_VULKAN=OFF
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc-13 -DCMAKE_CXX_COMPILER=g++-13 -DMOTION_VULKAN=OFF -DTIDE_MOTION_VERSION="$TIDE_MOTION_VERSION"
       - name: Configure macOS
         if: runner.os == 'macOS'
         run: |
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER="$(xcrun --find clang)" -DCMAKE_CXX_COMPILER="$(xcrun --find clang++)" -DMOTION_VULKAN=OFF
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER="$(xcrun --find clang)" -DCMAKE_CXX_COMPILER="$(xcrun --find clang++)" -DMOTION_VULKAN=OFF -DTIDE_MOTION_VERSION="$TIDE_MOTION_VERSION"
       - name: Build
         run: cmake --build build --config Release --parallel 3
       - name: Test contracts
@@ -105,8 +122,8 @@ jobs:
 
   release:
     name: Publish release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    if: needs.version.outputs.published == 'true'
+    needs: [version, build]
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
@@ -123,7 +140,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_TAG: v${{ needs.version.outputs.version }}
+          TAG_PUSHED: ${{ github.ref_type == 'tag' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -139,7 +157,9 @@ jobs:
           if gh release view "$RELEASE_TAG" --json isDraft > dist/release.json 2>/dev/null; then
             test "$(jq -r .isDraft dist/release.json)" = true
           else
-            gh release create "$RELEASE_TAG" --verify-tag --draft --title "Tide Motion $RELEASE_TAG" --generate-notes
+            # A pushed tag is released as it is; a dev push's tag is made on the commit built.
+            if [[ "$TAG_PUSHED" == true ]]; then target=(--verify-tag); else target=(--target "$GITHUB_SHA"); fi
+            gh release create "$RELEASE_TAG" "${target[@]}" --draft --title "Tide Motion $RELEASE_TAG" --generate-notes
           fi
           gh release upload "$RELEASE_TAG" dist/*.zip dist/*.tar.gz dist/*.sha256 install.ps1 install.sh --clobber
           gh release edit "$RELEASE_TAG" --draft=false --latest

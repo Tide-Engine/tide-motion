@@ -1,5 +1,17 @@
 cmake_minimum_required(VERSION 3.25)
-project(tide-motion VERSION 0.5.1 LANGUAGES C CXX)
+# The version: CI passes the release's (-DTIDE_MOTION_VERSION, from the commits:
+# .github/scripts/next-version.sh); a local build reports the last release tag's.
+if(NOT TIDE_MOTION_VERSION)
+    execute_process(COMMAND git describe --tags --abbrev=0 --match "v[0-9]*.[0-9]*.[0-9]*"
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}" OUTPUT_VARIABLE last_tag
+        OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET RESULT_VARIABLE tag_found)
+    if(tag_found EQUAL 0)
+        string(REGEX REPLACE "^v" "" TIDE_MOTION_VERSION "${last_tag}")
+    else()
+        set(TIDE_MOTION_VERSION 0.0.0)
+    endif()
+endif()
+project(tide-motion VERSION ${TIDE_MOTION_VERSION} LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)

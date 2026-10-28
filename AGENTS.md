@@ -29,6 +29,13 @@ or claim automatic action routing. This guidance does not rank the ARDY backend.
 Use dev, validate locally, commit and push directly. No pull requests or additional
 CI dispatches unless requested. Do not publish model files in Git.
 
+Write conventional commit messages (`feat:`, `fix:`, `perf:`, `docs:`, `ci:`,
+`test:`, `refactor:`, `chore:`; `!` after the type for a breaking change). A push
+to dev whose commits since the last release have a feat or fix publishes the
+next version once every platform passes (`feat` the minor, `fix`/`perf` the
+patch, breaking the minor below 1.0); other types publish nothing. The version
+is worked out by `.github/scripts/next-version.sh`; don't edit it in CMakeLists.
+
 For motion authoring/revisions, use `review` and its adjacent JSON as advisory
 agent feedback; see notes/advisory-review.md. Keep reports with the retained clips
 and recipes in ignored output. A human rating exercise is not required. Hints
