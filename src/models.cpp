@@ -1,7 +1,9 @@
 #include "motion.hpp"
+#include "dart_graph.hpp"
 #include <picosha2.h>
 #include <array>
 #include <bit>
+#include <cmath>
 #include <cstring>
 #include <algorithm>
 #include <nlohmann/json.hpp>
@@ -19,6 +21,16 @@ namespace {
 struct ModelFile { const char* group; const char* file; uint64_t bytes; const char* hash; const char* url; };
 constexpr ModelFile v12_model={"kimodo-v1.2","kimodo-v1.2.gguf",1133166784ULL,"9c24c5ee9b6b3683947ab2796727ffb2fbd69b2ebc7683214809013687d87a19",nullptr};
 constexpr ModelFile files[]={
+    {"dart","dart/denoiser.pt",82342402,"e6c550641deaaccb6313f3529a4ca6602eb00d675dcff3aa47217825b5a43615","https://drive.google.com/uc?export=download&id=1eIKqohAcIkQHtu3W5IirMiMCfm9Iv4vB"},
+    {"dart","dart/vae.pt",49577410,"b818cc8704ad9b408c745cac48943c99bf5402ffca521b25ffaf6639a5d5d276","https://drive.google.com/uc?export=download&id=1s_KsP7CqCd5s8Y2NQ4qQv6xw_jeAEFbx"},
+    {"dart","dart/policy.pt",15339391,"81af5cda56e519afadb7bdf74ba82322cc79f903c1cbea151b05fdc71f460a0e","https://drive.google.com/uc?export=download&id=1q9Vahpx8Ix9QtyoR55ZHPmAld1oFUH52"},
+    {"dart","dart/clip.pt",353976522,"40d365715913c9da98579312b702a82c18be219cc2a73407c4526f58eba950af","https://openaipublic.azureedge.net/clip/models/40d365715913c9da98579312b702a82c18be219cc2a73407c4526f58eba950af/ViT-B-32.pt"},
+    {"dart","dart/stats.pkl",2917,"cb442539380d15a5763b799ba063d9b0b6574a751a03ae0c86d4a6f24bff5bd4","https://drive.google.com/uc?export=download&id=1pz8H_0U0daO_-bvvzaG--zNkqDG91dIl"},
+    {"dart","dart/dart-weights.bin",372168788,"6c186ea7807efe7cef02e639726bb94040f1c44fb8beef0621c667440d7b7877",nullptr},
+    {"dart","dart/denoiser.onnx",245023,"7ccf2e3f881f6380bf78c0fdd2e888a61a5db4f0a78db963a7c1acea176d748a",nullptr},
+    {"dart","dart/decoder.onnx",161074,"866e25acfe54984e84a1426bf8545353b858bb6e97d874b7bbd7c6669c77d579",nullptr},
+    {"dart","dart/policy.onnx",11842,"35383487387d695d1550bb5db0d18469546ab656fc9eb953b0f83530d661cd39",nullptr},
+    {"dart","dart/text.onnx",663015,"5d5ce3c84769ccbd724a43c26b24ccd08046d75c7edc7c6e561bf82866cdce79",nullptr},
     v12_model,
     {"kimodo","kimodo.gguf",1133166784ULL,"3bf1229f4c1eff1d28f5196a854113da2df9a11a5e21c60694630903bf948ee4",
      "https://huggingface.co/LocalAI-io/Kimodo-SOMA-RP-v1.1-GGML/resolve/65f8b8ab34ee7524161cc87b20ae4cb4f5d3a12d/models/kimodo-soma-rp-v1.1-f32.gguf"},
@@ -41,10 +53,13 @@ constexpr ModelFile v12_sources[]={
     {"kimodo-v1.2",".soma-v1.2/stats/motion/local_root/std.npy",160ULL,"5f57b41f51ced7832cffa81702f6e04d8694e16475c184baec6c8be0e98c8dba","https://huggingface.co/nvidia/Kimodo-SOMA-RP-v1.2/resolve/0e3c89024d896064b6851201373f7834784a386b/stats/motion/local_root/std.npy"},
 };
 void prepare_v12(const fs::path& root);
+void prepare_dart(const fs::path& root);
+struct DartSlice {const char* file;uint64_t source,bytes,destination;bool half;};
+#include "generated/dart-graphs.inc"
 void selection_valid(const std::string& selection) {
-    if(selection!="all"&&selection!="kimodo"&&selection!="bricks"&&selection!="kimodo-v1.2"&&selection!="text")throw std::runtime_error("Model selection must be all, kimodo, kimodo-v1.2, text or bricks");
+    if(selection!="all"&&selection!="kimodo"&&selection!="bricks"&&selection!="kimodo-v1.2"&&selection!="text"&&selection!="dart")throw std::runtime_error("Model selection must be all, kimodo, kimodo-v1.2, text, bricks or dart");
 }
-bool selected(const ModelFile& f,const std::string& s) { return (s=="all"&&std::string(f.group)!="kimodo-v1.2")||s==f.group||((s=="kimodo"||s=="kimodo-v1.2"||s=="text")&&std::string(f.group)=="kimodo-text"); }
+bool selected(const ModelFile& f,const std::string& s) { return (s=="all"&&std::string(f.group)!="kimodo-v1.2"&&std::string(f.group)!="dart")||s==f.group||((s=="kimodo"||s=="kimodo-v1.2"||s=="text")&&std::string(f.group)=="kimodo-text"); }
 void verify(const fs::path& path,const ModelFile& f) {
     if(!fs::exists(path)||fs::file_size(path)!=f.bytes)throw std::runtime_error("Missing or incomplete model '"+path.string()+"'; run tide-motion models install "+std::string(std::string(f.group)=="kimodo-text"?"kimodo":f.group));
     if(sha256_file(path)!=f.hash)throw std::runtime_error("Model checksum mismatch: "+path.string()+"; remove this file and reinstall models");
@@ -88,7 +103,7 @@ namespace {
 void install_file(const fs::path& root,const ModelFile& f) {
         auto path=root/f.file;fs::create_directories(path.parent_path());
         if(fs::exists(path)) { verify(path,f);std::cerr<<"Verified "<<path.string()<<"\n";return; }
-        if(!f.url) {prepare_v12(root);verify(path,f);return;}
+        if(!f.url) {if(std::string(f.group)=="dart")prepare_dart(root);else prepare_v12(root);verify(path,f);return;}
         auto temp=path;temp+=".part";
         // A full interrupted download can be verified and committed without another request.
         if(!fs::exists(temp)||fs::file_size(temp)!=f.bytes) {
@@ -103,8 +118,42 @@ void install_file(const fs::path& root,const ModelFile& f) {
         }
         verify(temp,f);fs::rename(temp,path);
 }
-// The input files are size/hash verified before parsing. This is the same F32
-// GGUF boundary as the development reference converter, without a Python runtime.
+// Fixed checkpoint byte slices are read only after complete size/hash checks.
+// The native graphs reference a separately verified F32 tensor file.
+void prepare_dart(const fs::path& root) {
+    if constexpr(std::endian::native!=std::endian::little)throw std::runtime_error("DART conversion requires little endian");
+    for(const auto& f:files)if(std::string(f.group)=="dart"&&f.url)verify(root/f.file,f);
+    auto publish=[&](const fs::path& path) {
+        auto part=path;part+=".part";
+        for(const auto& f:files)if(root/f.file==path){verify(part,f);fs::rename(part,path);return;}
+        throw std::runtime_error("Unknown DART conversion output");
+    };
+    auto weights=root/"dart/dart-weights.bin";
+    if(!fs::exists(weights)) {
+        auto part=weights;part+=".part";std::ofstream out(part,std::ios::binary|std::ios::trunc);
+        for(const auto& slice:dart_slices) {
+            std::ifstream in(root/"dart"/slice.file,std::ios::binary);in.seekg(static_cast<std::streamoff>(slice.source));
+            if(static_cast<uint64_t>(out.tellp())!=slice.destination)throw std::runtime_error("Invalid DART tensor table");
+            if(slice.half)for(uint64_t i=0;i<slice.bytes/4;++i) {
+                uint16_t h=0;in.read(reinterpret_cast<char*>(&h),2);unsigned e=(h>>10)&31,mant=h&1023;
+                float v=e?std::ldexp(1+static_cast<float>(mant)/1024,static_cast<int>(e)-15):std::ldexp(static_cast<float>(mant),-24);
+                if(h&32768)v=-v;
+                out.write(reinterpret_cast<char*>(&v),4);
+            } else {
+                std::vector<char> buffer(static_cast<size_t>(slice.bytes));in.read(buffer.data(),static_cast<std::streamsize>(buffer.size()));out.write(buffer.data(),static_cast<std::streamsize>(buffer.size()));
+            }
+            if(!in||!out)throw std::runtime_error("DART tensor conversion I/O failed");
+        }
+        out.close();if(!out)throw std::runtime_error("DART conversion write failed");publish(weights);
+    }
+    auto graph=[&](const char* file,const std::string& bytes) {
+        auto path=root/"dart"/file;if(fs::exists(path))return;
+        auto part=path;part+=".part";std::ofstream out(part,std::ios::binary|std::ios::trunc);
+        out.write(bytes.data(),static_cast<std::streamsize>(bytes.size()));
+        out.close();if(!out)throw std::runtime_error("DART graph write failed");publish(path);
+    };
+    graph("denoiser.onnx",denoiser_graph());graph("decoder.onnx",decoder_graph());graph("policy.onnx",policy_graph());graph("text.onnx",text_graph());
+}
 void prepare_v12(const fs::path& root) {
     for(const auto& source:v12_sources)install_file(root,source);
     if constexpr(std::endian::native!=std::endian::little)throw std::runtime_error("v1.2 conversion requires a little-endian host");

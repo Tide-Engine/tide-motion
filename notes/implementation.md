@@ -2407,3 +2407,126 @@ The final native upgrade preserves the imported MoMask files too; installed
 help/model verification pass. Existing inference checks were not repeated for
 that header-default change, which does not change MoMask arithmetic or graphs.
 
+## Native DART locomotion backend (2026-10-28)
+
+The owner requested implementation after the initial feasibility gate. The
+supported bounded feature is now `dart PLAN.json -o OUT.glb`: native CPU DART
+continuation and learned waypoint control with walk, run and hop on left leg.
+The earlier source-only DART section is historical; full contracts, evidence,
+pins and limitations are in [dart-backend.md](dart-backend.md).
+
+The author's public issue 25 explicitly grants Apache-2.0 for code/checkpoints.
+The released inference normalizer is used with that model grant after the owner's
+clarification; no independent normalizer prohibition was identified. AMASS
+dataset/training restrictions are not asserted to prohibit inference-only model
+use. More importantly, the separate SMPL dependency has been removed: the native
+predicted-joint path obtains its fixed pelvis offset from the normalizer's
+mean(joint0)-mean(transl), initializes with the model mean plus native generated
+warmup, and reconstructs a fixed reference from generated positions/rotations.
+No full SMPL body/calibration extract, meshes, stand.pkl or evaluation motions
+are used. No training/fine-tuning, user Python, hosted inference, procedural
+motion generator or pose-blending substitute is introduced.
+
+Source pin: zkf1997/DART bb67ae1ed6ce051080468bf15bc6e54a6c3f8417, retaining its
+Apache source license and adaptation notices. OpenAI CLIP source/model is MIT,
+source revision d05afc436d78f1c48dc0dbf8e5980a9d471f35f6, official ViT-B/32 digest
+40d365715913c9da98579312b702a82c18be219cc2a73407c4526f58eba950af. Every checkpoint,
+normalizer, converted tensor and graph URL/size/SHA-256 is pinned in
+notes/dart-models.json and native installation. Dependencies remain pinned.
+Native install verifies all raw files before reading fixed tensor byte ranges,
+converts F16 to F32 and constructs known graphs without deserializing pickle or
+executing TorchScript. Converted tensors match the independently exported
+372,168,788-byte file's digest. Generated schema source contains no learned
+initializer data; no models are committed or packaged. Five source files plus
+the converted cache occupy about 875 MB. `all` keeps its previous selection.
+
+The source VAE's integer latent_std buffer must be replaced with the checkpoint's
+F32 value after load; plain load_state_dict truncated it to zero. The development
+exporter follows upstream's explicit replacement. Four real native graphs agree
+with exported PyTorch tensors to 7.03335e-6 maximum absolute error (limit 2e-4).
+Development-only tools/dart_export.py and its pinned environment are not shipped
+or called by users. Native graph preparation is byte-identical, including a
+fresh-cache HTTPS normalizer download and verification.
+
+Plan version 1 has seed, warmupChunks and segments {text,chunks,target?:[x,z]}.
+Targets use absolute world metres and advance below 0.3 m pelvis error or at the
+budget; misses remain visible in recipes. Two history frames then eight frames
+per primitive at 30 Hz, max below 18,000. All plan/batch paths, labels, ranges and
+budgets preflight before model loading. A RunContext reuses four CPU sessions and
+three CLIP embeddings. Recipes record plan, actual primitive counts/goal errors,
+timing, device/threads, sampler, RNG, source revision and all checkpoint digests.
+The host uses x0 cosine10 DDIM eta0 CFG5, sampled Gaussian policy actions and
+reframed autoregressive history. This is a forward-only goal policy; gradient
+inbetweening, arbitrary text and imported-history conditioning are not exposed.
+
+Fixed explicit 22-joint anatomy maps through existing humanoid calibration to
+canonical SOMA with fixed bone lengths and unit rotations. Root coordinates are
+preserved for independently checkable world goals. No bone identification,
+skinning or non-humanoid solver is claimed. Missing twist/end slots retain their
+unmapped reference transforms. Frame rate stays 30 Hz; the 20 Hz HML/SMPL-H
+variant is not included. Approximate generated reference geometry and the
+decoder's redundant joint/rotation inconsistency limit contact quality.
+
+Windows x64 ClangCL 18.1.8 Release and Ubuntu 24.04 x64/GCC 13 (WSL) builds pass
+twelve model-free CTests after concurrent integration, including strict DART plan/CLI and late-batch refusal
+checks. TEMP/TMP are isolated under this worktree. Linux native graph parity also
+passes at 7.03335e-6; a real Linux three-waypoint clip reaches all three targets.
+New Linux warnings and one existing v1.2 converter indentation warning were
+resolved without changing arithmetic. macOS/ARM64 inference remains untested.
+
+Windows four-thread CPU batch: 24 actions across eight seeds, one verification
+and session load, 48/48 waypoint successes (walking turns and walk/run/hop
+changes). Independent exported GLB/FK: mean/max goal error 0.1484/0.2981 m,
+recipe/root errors agree within 1e-4 m, bone-length variation <2.7e-7 m.
+Continuation run segments are faster than walk in 8/8 clips (mean 2.84 vs 1.19
+m/s). Support-leg fidelity is imperfect. Max joint step 22.39 degrees, largest
+segment-boundary root step 0.1413 m and velocity change 0.6217 m/s. Foot-slide
+proxy averages 3.22 cm/frame (max clip mean 5.87); substantial sliding remains.
+These are own prompts/model-generated warmup, not upstream dataset metrics.
+Observed process time 30.62 s, sampled peak working set 321,949,696 bytes; median
+per-action time 1.01 s after load. No isolated GPU performance claim is made.
+
+A 3,074-frame / 102.43 s continuation exports and reimports, 14.19 s generation,
+with fixed lengths independently verified; its slide proxy worsens to 6.22
+cm/frame. Native hidden Tide preview at 960x540/51 frames succeeds and was
+inspected using the privately staged executable built from clean engine checkout
+D:/Projects/PurrEngine at 28b61e4db1cb2549fcc9f6bc6d9c6034022f3d9c. No engine file
+changes. All inference is CPU, so no expensive GPU work bypassed the shared
+TideMotionGpuValidation mutex. Existing ARDY, Kimodo, authoring and contact
+cleanup implementations/defaults are preserved. No contact quality improvement,
+physics feasibility or deterministic match-simulation behavior is claimed.
+
+Final packaging checks: the Windows runtime ZIP installs/reinstalls under an
+isolated path with spaces/apostrophes, preserves model data, and refuses checksum
+and traversal failures. Its installed executable generates both DART examples
+(146 and 290 frames) and strictly reimports their canonical SOMA assets with
+PATH restricted to Windows system directories. Both actions share one session
+load. Examples, notices and notes/dart-models.json are included; developer Python
+and model files are absent. Native graph declarations are readable generated
+C++ operators/protobuf fields, not an encoded model file. Fresh raw-only native
+preparation matches every pinned graph/tensor hash. Graph construction is a cold
+unoptimized installer function to bound C++ compilation time; ONNX inference is
+unchanged. Windows and Linux pass the twelve current CTests after preserving the
+concurrent ARDY, MotionBricks, selection, Kimodo capabilities and transactional
+upgrade changes. Private pinned Kimodo/GGML source copies receive both current
+patches; shared dependency trees are never modified. A missing isolated Linux
+TMPDIR initially caused test setup failures; creating it and rerunning affected
+checks passes. No inference failure was hidden by that environment correction.
+Native asset checks independently compare 4,624 60 Hz half-frame samples from
+the 24 generated GLBs with double-precision midpoint calculations: maximum
+position error 9.53674e-7 m and quaternion dot error 8.62042e-8 on both platforms.
+DART remains a 30 Hz model; no 20 Hz checkpoint/resampling support is claimed.
+
+Final integration baseline is 24f17c9, preserving ARDY's available-GPU default,
+DirectML packaging, ordinary manual-weight MoMask and every concurrent feature. All twelve CTests pass on both
+Windows and Linux; DART tests now compile with warnings as errors as well. Final
+packaged Windows smoke: 3 actions, one load, 6/6 goals, 4.20 s wall time; its three
+assets are byte-identical to the earlier measured baseline. An intentionally
+unreachable [100,100] target with one chunk produces ten valid frames and reports
+reached:false / 141.44 m error; no endpoint correction or budget overrun occurs.
+Linux TGZ installer/reinstaller, checksum and unsafe-link refusals pass; staged
+native generation/reimport succeeds with PATH=/usr/bin:/bin and no loader-path
+override. Raw-only native Linux preparation matches every graph/tensor digest.
+No additional inference algorithm changes were needed after this integration;
+the earlier bounded visual evidence therefore still applies. No installed owner
+executable/model cache, engine source, release or additional CI run is changed.

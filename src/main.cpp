@@ -4,6 +4,7 @@
 #include "upgrade.hpp"
 #include "momask.hpp"
 #include "ardy_gpu.hpp"
+#include "dart.hpp"
 #include <kimodo/kimodo.hpp>
 #include <nlohmann/json.hpp>
 #include <algorithm>
@@ -74,6 +75,16 @@ than 293 frames. Outside poses are kept; endpoints are corrected inside the rang
 --models CACHE follows TIDE_MOTION_MODELS or the OS cache when omitted.
 Other Kimodo/ARDY controls are not accepted. Weight rights remain unresolved;
 manual import does not grant commercial rights. See notes/momask-local.md.
+)";
+    if(command=="dart")return R"(tide-motion dart PLAN.json -o OUT.glb [--models DIR] [--threads N]
+
+Native offline DART continuation and waypoint control on canonical SOMA at 30 Hz.
+Install explicitly with models install dart --accept-licenses.
+Version-1 plan: seed, warmupChunks, segments [{text, chunks, target?: [x,z]}].
+Supported text: walk, run, hop on left leg. Targets are world metres; chunks is
+the maximum 8-frame primitive count. Target segments stop within 0.3 m or at the
+budget, reporting misses in the recipe. No inbetweening or scene constraints.
+Inference and model conversion are native CPU operations; no Python is required.
 )";
     if(command=="generate")return R"(tide-motion generate "PROMPT" -o CLIP.glb [options]
 
@@ -283,7 +294,7 @@ metres); examples/synty-polygon.json maps Synty POLYGON characters.
 )";
     if(command=="batch")return R"(tide-motion batch JOBS.json [--models DIR]
 
-Runs ordered generate, connect, pose-sequence, retarget, cleanup and mirror actions, loading each model
+Runs ordered generate, inpaint, connect, pose-sequence, dart, retarget, cleanup and mirror actions, loading each model
 once.
 The whole manifest and every output path are checked before anything runs.
 Paths are relative to the manifest. README.md lists every action field.
@@ -335,8 +346,8 @@ Checksums, safe archive paths, package version and runnable executable are check
 before a transactional replacement. Close other running Tide Motion processes
 if Windows reports locked files. No model downloads or engine updates occur.
 )";
-    if(command=="models")return R"(tide-motion models install [all|kimodo|kimodo-v1.2|bricks] --accept-licenses [--models DIR]
-tide-motion models check [all|kimodo|kimodo-v1.2|bricks] [--models DIR]
+    if(command=="models")return R"(tide-motion models install [all|kimodo|kimodo-v1.2|text|bricks|dart] --accept-licenses [--models DIR]
+tide-motion models check [all|kimodo|kimodo-v1.2|text|bricks|dart] [--models DIR]
 tide-motion models import-momask BUNDLE_DIRECTORY [--models DIR]
 tide-motion models check momask [--models DIR]
 
@@ -347,6 +358,8 @@ all retains v1.1 and MotionBricks.
 MoMask is manual-only: import its supported prepared ONNX bundle into DIR/momask.
 Raw .tar/.pt files are not that bundle. No MoMask weights are downloaded or bundled;
 manual import does not establish commercial rights for the supplied checkpoints.
+dart is an explicit opt-in: pinned DART/CLIP files are converted to native ONNX
+graphs locally. It adds no SMPL body assets, Python or hosted inference.
 
   --accept-licenses           Accept the model licences in licenses/ (install)
   --models DIR                Model directory (default: TIDE_MOTION_MODELS or the
@@ -358,8 +371,8 @@ void help(std::string_view command={}) {
     if(const char* text=command_help(command)) {std::cout<<text;return;}
     std::cout<<R"(Tide Motion - native offline animation authoring
 
-  tide-motion models install [all|kimodo|kimodo-v1.2|bricks] --accept-licenses [--models DIR]
-  tide-motion models check [all|kimodo|kimodo-v1.2|bricks] [--models DIR]
+  tide-motion models install [all|kimodo|kimodo-v1.2|text|bricks|dart] --accept-licenses [--models DIR]
+  tide-motion models check [all|kimodo|kimodo-v1.2|text|bricks|ardy|dart] [--models DIR]
   tide-motion generate "PROMPT" -o CLIP.glb [--duration 3] [--seed 0] [--steps 50]
       [--variants N [--variants-gif]] [--guidance 2] [--constraint-guidance 2]
       [--then "PROMPT" [--duration S]]... [--transition 5]
@@ -373,6 +386,7 @@ void help(std::string_view command={}) {
   tide-motion connect FROM.glb TO.glb -o BRIDGE.glb [--tokens N|MIN..MAX] [--joined]
       [--offset X Y Z] [--from-clip NAME] [--to-clip NAME] [--threads N]
   tide-motion pose-sequence POSES.json -o CLIP.glb [--threads N]
+  tide-motion dart PLAN.json -o CLIP.glb [--threads N]
   tide-motion cleanup CLIP.glb --contacts PLAN.json -o CLEAN.glb [--map BONES.json]
   tide-motion mirror CLIP.glb -o MIRRORED.glb [--clip NAME]
   tide-motion retarget SOURCE.glb --target CHARACTER.glb|.fbx --map BONES.json -o CLIP.glb
@@ -464,6 +478,7 @@ struct RunContext {
     struct PendingBridge { Clip from,to; BricksRequest options; fs::path output; };
     struct ReadyBridge { fs::path output; Bridge bridge; size_t requests=1,index=0; };
     bool bricks_prepare=false;std::vector<PendingBridge> bricks_pending;std::deque<ReadyBridge> bricks_ready;
+    std::unique_ptr<DartModel> dart;unsigned dart_threads=0;
 };
 BricksModel& bricks_session(const fs::path& models,unsigned threads,RunContext* context) {
     if(!context->bricks||context->bricks_threads!=threads) {
@@ -626,6 +641,8 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
                 if(!action[pair.first].is_number())throw std::runtime_error(std::string(pair.first)+" must be numeric");
                 argv.insert(argv.end(),{pair.second,action[pair.first].dump()});
             }
+        } else if(type=="dart") {
+            keys.insert({"plan","threads"});auto plan=path(action.at("plan"));(void)load_dart_plan(plan);argv.push_back(plan.string());
         } else if(type=="generate") {
             auto selected_backend=action.value("backend",std::string("kimodo"));
             if(selected_backend=="ardy") {
@@ -763,7 +780,7 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
             if(action.contains("clip"))argv.insert(argv.end(),{"--clip",action["clip"].get<std::string>()});
             keys.insert({"source","target","map","toSoma","clip"});
         }
-        else throw std::runtime_error("Action must be generate, inpaint, connect, pose-sequence, retarget, cleanup or mirror");
+        else throw std::runtime_error("Action must be generate, inpaint, connect, pose-sequence, dart, retarget, cleanup or mirror");
         for(const auto& item:action.items())if(!keys.contains(item.key()))throw std::runtime_error("Unknown action field: "+item.key());
         auto output=path(action.at("output"));
         if(output.extension()!=".glb")throw std::runtime_error("Output must be a .glb path: "+output.string());
@@ -782,7 +799,7 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
         }
         for(const auto& file:written)if(fs::exists(file)||fs::exists(file.string()+".part")||fs::exists(file.string()+".json")||!outputs.insert(file).second)throw std::runtime_error("Output must be a new, distinct path: "+file.string());
         argv.insert(argv.end(),{"-o",output.string()});
-        if(type=="generate"||type=="inpaint"||type=="connect"||type=="pose-sequence")argv.insert(argv.end(),{"--models",models.string()});
+        if(type=="generate"||type=="inpaint"||type=="connect"||type=="pose-sequence"||type=="dart")argv.insert(argv.end(),{"--models",models.string()});
         if(action.contains("tokens")&&action["tokens"].is_array()) {
             const auto& range=action["tokens"];
             if(range.size()!=2||!range[0].is_number()||!range[1].is_number())throw std::runtime_error("tokens is an integer or [min, max]");
@@ -881,7 +898,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     std::string command=args[1],clip_name,from_name,to_name,tide="tide";
     for(size_t i=2;i<args.size();++i)if(args[i]=="--help"||args[i]=="-h") {help(command);return 0;}
     fs::path models,output,capture,gif,target_file,map_file,character_file,texture_file,contacts_file;bool mannequin=false;
-    if(command=="generate"||command=="connect"||command=="pose-sequence"||command=="models"||command=="batch")models=model_directory();
+    if(command=="generate"||command=="connect"||command=="pose-sequence"||command=="models"||command=="batch"||command=="dart")models=model_directory();
     double duration=3;uint64_t seed=0;unsigned steps=50,transition=5;int frames=0;
     BricksRequest bricks_request;std::string tokens_text;fs::path contacts_out;float contact_threshold=0.5f;
     bool accept=false,joined=false,skeleton=false,to_soma=false,correct=true,dense_path=false;Vec3 offset{};
@@ -978,6 +995,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     else if(command=="cleanup")allowed={"-o","--output","--contacts","--map","--clip"};
     else if(command=="models")allowed={"--models","--accept-licenses"};
     else if(command=="pose-sequence")allowed={"-o","--output","--models","--threads","--contacts-out","--contact-threshold"};
+    else if(command=="dart")allowed={"-o","--output","--models","--threads"};
     else if(command=="batch")allowed={"--models"};
     for(const auto& flag:flags)if(!allowed.contains(flag))throw std::runtime_error(command+" does not take "+flag);
     if(command=="batch") {
@@ -1000,12 +1018,12 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
             for(const char* name:{"denoiser.onnx","encoder.onnx","decoder.onnx","manifest.json","LICENSE","NOTICE"})fs::copy_file(source/name,destination/name);
             check_ardy_models(destination);std::cout<<"ARDY models imported into "<<destination.string()<<"\n";return 0;
         }
-        if(pos.empty()||pos.size()>2||(pos[0]!="install"&&pos[0]!="check"))throw std::runtime_error("Use models install/check [all|kimodo|kimodo-v1.2|text|bricks|ardy], or models import-ardy DIR --accept-licenses");
+        if(pos.empty()||pos.size()>2||(pos[0]!="install"&&pos[0]!="check"))throw std::runtime_error("Use models install/check [all|kimodo|kimodo-v1.2|text|bricks|ardy|dart], or models import-ardy DIR --accept-licenses");
         std::string selection=pos.size()==2?pos[1]:"all";
         if(pos[0]=="check"&&selection=="ardy")check_ardy_models(models/"ardy");
         else if(pos[0]=="check")check_models(models,selection);
         else {
-            if(!accept)throw std::runtime_error("Read licenses/NVIDIA-KIMODO-MODEL.txt, NVIDIA-OPEN-MODEL.txt and META-LLAMA-3.txt, then pass --accept-licenses to download models");
+            if(!accept)throw std::runtime_error(selection=="dart"?"Read licenses/DART-SOURCE.txt and OPENAI-CLIP.txt, then pass --accept-licenses to download DART models":"Read licenses/NVIDIA-KIMODO-MODEL.txt, NVIDIA-OPEN-MODEL.txt and META-LLAMA-3.txt, then pass --accept-licenses to download models");
             setup_models(models,selection);
         }
         return 0;
@@ -1087,6 +1105,20 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         recipe["predictedFootContacts"]["plan"]=contacts_out.string();
         std::cout<<"Saved "<<contacts_out.string()<<" ("<<planted.size()<<" predicted contacts)\n";
     };
+    if(command=="dart") {
+        if(pos.size()!=1)throw std::runtime_error("dart takes one JSON plan");
+        auto plan=load_dart_plan(utf8path(pos[0]));
+        if(!context->dart||context->dart_threads!=threads) {
+            check_models(models,"dart");context->dart=std::make_unique<DartModel>(models/"dart",threads);context->dart_threads=threads;
+        }
+        auto result=context->dart->generate(plan);result.clip.name=output.stem().string();save_glb(result.clip,output);
+        nlohmann::json recipe={{"tool","tide-motion"},{"version",MOTION_VERSION},{"command","dart"},{"authoring",plan.recipe},{"threads",threads?threads:4},{"device","cpu"},{"fps",30},{"frames",result.clip.frames()},{"metrics",result.metrics},
+            {"sourceRevision","bb67ae1ed6ce051080468bf15bc6e54a6c3f8417"},{"weightsSha256","6c186ea7807efe7cef02e639726bb94040f1c44fb8beef0621c667440d7b7877"},{"sampler","x0 cosine10 DDIM eta0 CFG5"},
+            {"randomGenerator","std::mt19937 + std::normal_distribution<float>; compiler-dependent normal transform"},
+            {"checkpoints",{{"denoiser","e6c550641deaaccb6313f3529a4ca6602eb00d675dcff3aa47217825b5a43615"},{"decoder","b818cc8704ad9b408c745cac48943c99bf5402ffca521b25ffaf6639a5d5d276"},{"policy","81af5cda56e519afadb7bdf74ba82322cc79f903c1cbea151b05fdc71f460a0e"},{"text","40d365715913c9da98579312b702a82c18be219cc2a73407c4526f58eba950af"},{"normalizer","cb442539380d15a5763b799ba063d9b0b6574a751a03ae0c86d4a6f24bff5bd4"}}}};
+        std::ofstream metadata(output.string()+".json");metadata<<recipe.dump(2)<<"\n";metadata.close();if(!metadata)throw std::runtime_error("Animation saved but could not write DART recipe");
+        std::cout<<"Saved "<<output.string()<<" ("<<result.clip.frames()<<" frames)\n";return 0;
+    }
     if(command=="pose-sequence") {
         if(pos.size()!=1)throw std::runtime_error("pose-sequence takes one JSON recipe");
         auto plan=load_pose_sequence(utf8path(pos[0]));

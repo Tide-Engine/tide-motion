@@ -1,6 +1,13 @@
 # DART native backend investigation — 2026-10-28
 
-Status: **not an installed or supported backend**. Checkpoint integration is
+**Historical assessment, superseded by [the implemented native backend](dart-backend.md).**
+The initial normalizer/body-file gate below was revisited after the owner's
+clarification. The implemented predicted-joint route uses the released model
+normalizer and generated references, removing the separate SMPL body/calibration
+dependency. Earlier statements that integration had stopped describe this first
+assessment, not the current supported feature.
+
+Initial assessment status (superseded): **not an installed or supported backend**. Checkpoint integration was
 blocked on the exact normalization/calibration asset grants below. Forward-only
 continuation and policy goal reaching are technically separable from gradient
 inbetweening. No DART model inference, conversion parity, generated GLB, goal

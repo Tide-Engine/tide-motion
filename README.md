@@ -608,6 +608,51 @@ both installers together. A failed build publishes nothing; a publish retry can
 resume a draft but cannot overwrite an already published release. The Windows
 release is built with Vulkan; the others use CPU inference.
 
+## DART waypoint control and continuation (opt-in)
+
+`dart` runs the released DART locomotion policy, diffusion model, motion decoder
+and CLIP text tower natively on the CPU. It exports canonical SOMA-30 GLBs for
+the existing preview and mapped humanoid retargeting commands. Defaults and the
+`models install all` selection stay unchanged.
+
+```powershell
+tide-motion models install dart --accept-licenses
+tide-motion dart examples/dart-goals.json -o goals.glb
+tide-motion dart examples/dart-continuation.json -o continuation.glb --threads 4
+```
+
+A plan contains `version: 1`, optional `seed` (default 1), `warmupChunks` (1..32,
+default 8), and 1..64 `segments`. Each segment has `text`, `chunks` (1..512) and
+an optional `target: [x,z]` in absolute world metres. The supported text labels
+are **`walk`, `run`, `hop on left leg`**, matching the released policy's skills.
+Arbitrary prompts, imported start clips, inbetweening, terrain and scene targets
+are not exposed by this bounded backend.
+
+Each primitive adds eight frames at 30 Hz. Without a target, `chunks` is its
+exact count. With a target, it is the maximum budget: the controller advances
+to the next segment within 0.3 m horizontal pelvis error or at budget exhaustion.
+The recipe reports reached/missed targets and measured errors; this is learned
+goal control, not exact endpoint correction. The output includes two initial
+history frames and is capped below 18,000 frames. Plans and paths remain local.
+Batch actions use `{"action":"dart","plan":"plan.json","output":"clip.glb","threads":4}`;
+plans resolve relative to the batch manifest and all are preflighted before
+any inference. One set of sessions and three text embeddings is reused.
+
+Initialization uses the model's mean features followed by native generated walk
+warmup. The predicted-joint path derives its pelvis offset from the released
+normalizer and constructs a fixed reference skeleton from generated output;
+it requires no SMPL-X mesh, shape model, sample motion or user Python. Native
+installation verifies the official checkpoint bytes and constructs the pinned
+ONNX graphs/float tensors locally. About 875 MB of model/cache disk space is
+needed. Code/model pins and the licensing scope are in
+[notes/dart-backend.md](notes/dart-backend.md).
+
+Windows CPU validation reached 48/48 tested waypoints across eight seeds and
+passed native/PyTorch tensor comparisons. Foot sliding remains substantial in
+some outputs, hopping can choose the wrong support leg, and sharp action changes
+can show velocity changes. Inspect generated clips before use; this does not
+guarantee contacts or physical feasibility. It is offline asset authoring.
+
 ## Licenses
 
 Source: Apache-2.0. Third-party code and binary notices are in `licenses/`.

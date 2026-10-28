@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "seed": 1,
+  "warmupChunks": 8,
+  "segments": [
+    {"text": "walk", "chunks": 64, "target": [0, 2]},
+    {"text": "walk", "chunks": 64, "target": [2, 2]},
+    {"text": "walk", "chunks": 64, "target": [2, 0]}
+  ]
+}
