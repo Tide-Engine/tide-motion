@@ -1,4 +1,4 @@
-# Tide Motion
+# Tide Motion 
 
 Native, offline animation authoring using Kimodo for text-to-motion and
 MotionBricks for transitions between clips. It is a separate tool and repository;
