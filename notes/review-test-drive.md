@@ -104,3 +104,19 @@ CPU build passes all 18 CTests. Running native review again on all five retained
 clips exactly reproduces every observation and continuous measurement. No new
 inference/benchmark is claimed for unrelated backend changes; MotionBricks assets
 and their independent key-pose checks remain the same.
+
+## Owner feedback after playback
+
+The owner preferred the original left toe and agreed the observations captured a
+useful difference. This supersedes any inference that the lower-motion alternative
+was aesthetically preferable on that side. Retain both assets; no global clip
+winner or preference about the right toe is inferred. The feedback names a body
+part but no timestamp, so do not invent a particular problematic frame or classify
+every left-toe interval as an error. The private agent decision now records that
+scoped human preference separately from the unchanged measurements.
+
+The owner authorized proceeding with the hints as advisory agent feedback, without
+requiring a human calibration exercise. AGENTS.md now makes that the authoring
+workflow and explicitly rules out automatic correction, export gates and metric-
+based artistic ranking. No detector, inference, threshold or runtime behavior
+changes were needed for this clarification.

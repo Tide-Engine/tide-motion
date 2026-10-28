@@ -3560,3 +3560,16 @@ pins and notices. All 18 combined Windows Release CPU CTests pass. A fresh nativ
 review of all five retained test-drive clips reproduces every observation and
 continuous measurement exactly. No owner installation update or model download
 was performed by this test-drive work.
+
+## Advisory hints accepted for agent use / scoped owner feedback (2026-10-28)
+
+Owner authorized proceeding with advisory hints without a human rating exercise
+and preferred the original left toe in the parry comparison. Recorded that scoped
+preference in the test-drive note and private agent decision, preserving all
+measurements/assets. No particular frame, right-toe preference or global winner
+is inferred. AGENTS.md now directs authoring agents to use native review JSON,
+retain evidence and respect intent/human feedback. Hints never gate export,
+automatically cause cleanup or turn lower statistics into artistic rankings.
+No detector, inference, threshold, dependency, installation or runtime changes.
+Documentation/feedback-only validation: diff checks; existing native validation
+remains the previously passed combined 18-test suite.

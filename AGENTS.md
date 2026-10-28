@@ -28,3 +28,13 @@ or claim automatic action routing. This guidance does not rank the ARDY backend.
 
 Use dev, validate locally, commit and push directly. No pull requests or additional
 CI dispatches unless requested. Do not publish model files in Git.
+
+For motion authoring/revisions, use `review` and its adjacent JSON as advisory
+agent feedback; see notes/advisory-review.md. Keep reports with the retained clips
+and recipes in ignored output. A human rating exercise is not required. Hints
+must not block export, automatically trigger correction, or rank artistic quality
+by their count or by lower measurements. Human feedback and intended action/style
+take precedence; preserve originals and intentional deviations. The owner preferred
+the original left toe in the parry test despite the alternative's lower toe-motion
+measurements (notes/review-test-drive.md). Treat that as scoped feedback, not a
+universal preference for more or less movement. Unchecked properties stay unknown.

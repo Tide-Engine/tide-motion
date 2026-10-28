@@ -7,6 +7,12 @@ HTML in an existing browser enables two-view skeleton playback and human feedbac
 Tide's pose editor remains the place for authoring guides. Source assets are never
 changed. This is an initial calibration environment, not an automatic quality gate.
 
+Normal use is agent-driven: author or revise a candidate, run review, inspect its
+JSON alongside the intended action and source recipe, and retain useful evidence.
+The owner need not interpret or rate the diagnostic panel. Plain-language feedback
+can establish which observations matter. Hints never block generation/export or
+automatically request cleanup. Lower values and fewer hints are not artistic goals.
+
 ## Input
 
 ```json
