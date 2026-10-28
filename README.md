@@ -29,14 +29,14 @@ macOS may require approval in Privacy & Security for a downloaded executable.
 Windows:
 
 ```powershell
-./install.ps1 -Archive ./tide-motion-0.3.0-windows-x64.zip -AddToPath
+./install.ps1 -Archive ./tide-motion-0.5.0-windows-x64.zip -AddToPath
 ```
 
 Reopen the terminal after adding PATH. `-Root <directory>` selects another
 installation. Linux/macOS (select your platform's archive):
 
 ```sh
-sh install.sh ./tide-motion-0.3.0-linux-x64.tar.gz
+sh install.sh ./tide-motion-0.5.0-linux-x64.tar.gz
 export PATH="$HOME/.local/share/tide-motion/bin:$PATH"
 ```
 
@@ -65,8 +65,10 @@ Allow at least 12 GB of available RAM for CPU text generation.
 The Windows package generates with Kimodo on the first Vulkan 1.2 GPU when its
 driver is installed, and on the CPU otherwise; it says which when generating.
 On an RTX 4080 SUPER a 2-second, 20-step clip took 35 seconds instead of 13
-minutes on its CPU. `KIMODO_BACKEND=cpu` forces the CPU. MotionBricks (`connect`)
-always runs on the CPU. Other platforms' packages are CPU-only for now.
+minutes on its CPU. `--device cpu` (or `KIMODO_BACKEND=cpu`) forces the CPU,
+`--device gpu` fails rather than falling back, and `--threads N` caps the CPU
+threads. MotionBricks (`connect`) always runs on the CPU (`--threads` applies
+there too). Other platforms' packages are CPU-only for now.
 
 `--models DIR` or `TIDE_MOTION_MODELS` selects the model cache. Otherwise it is
 `%LOCALAPPDATA%/TideMotion/models` on Windows, and
@@ -84,6 +86,108 @@ Choose `--seed` to make candidates and `--steps` to control diffusion work (defa
 identical output across different hardware or runtime versions is not promised.
 Save the resulting assets rather than regenerating them during game builds.
 `tide-motion help generate` (or `generate --help`) lists every option.
+
+| Option | Does |
+|---|---|
+| `--variants N` | Makes N clips (1–64) from seeds `--seed`, `--seed`+1, …, keeping the model loaded, and a contact sheet |
+| `--variants-gif` | Also a GIF of every variant playing at once |
+| `--guidance W` | How strongly the prompt steers the motion, 0–10 (default 2; see below) |
+| `--constraint-guidance W` | How strongly poses and paths steer it, 0–10 (default 2) |
+| `--correction-frames N` | Frames each side the pose correction fades over, 0–60 (default 10; 0 sets only the frame) |
+| `--in-place` | Removes horizontal root travel, keeping height, facing and sway |
+| `--device auto\|gpu\|cpu` | Where Kimodo runs (default auto: the GPU, falling back to the CPU) |
+| `--threads N` | CPU threads, 1–1024 (default: all) |
+| `--tide PATH` | The Tide that draws the contact sheet (default: `tide` on PATH) |
+
+### Variants and the contact sheet
+
+```sh
+tide-motion generate "A person kicks forward with the right leg" --duration 2.5 \
+  --start-pose idle.glb --end-pose idle.glb@0 --variants 8 -o kick.glb
+```
+
+This writes `kick.seed0.glb` … `kick.seed7.glb`, each with its recipe, and
+`kick.variants.png`: one labelled cell per seed showing six moments of the clip
+(its first and last frames and its strongest movements, with their times) in
+right profile above and facing the camera below, on the mannequin (left limbs
+blue, right orange). A kick that didn't happen is obvious at a glance. To
+remake one exactly, run the same command with `--seed 5` and without
+`--variants`. Names always carry the seed (`-o kick.glb --seed 20 --variants 4`
+gives seeds 20–23). `--variants-gif` adds `kick.variants.gif`, every variant
+playing at once. The sheet uses an installed Tide, as `preview` does; without
+one the clips are still written and the sheet is reported as skipped.
+
+### Mirror
+
+```sh
+tide-motion mirror kick.seed5.glb -o kick-left.glb
+```
+
+Swaps left and right in a SOMA-30 clip and reflects it across the character's
+sagittal plane at its first frame (through its root, upward and along its
+facing), so a right kick becomes a left kick that starts in the same place,
+facing the same way. No model is loaded. SOMA's rest skeleton is symmetric to
+within a fraction of a millimetre, so mirroring twice returns the clip to within
+a few millimetres.
+
+### In place
+
+`--in-place` removes the root's horizontal travel for clips that gameplay moves:
+the travel is the hips' ground path averaged over a second, subtracted from
+every frame, so frame 0 stays put and height, facing and the body's sway remain
+(a 3-second walk that travelled 4.85 m stayed within 11 cm). It is applied last;
+constraint errors in the recipe are measured before it, and poses after frame 0
+move with the travel removed. It refuses `--path`, whose only purpose is travel.
+
+### Getting a good result
+
+Measured on an RTX 4080 SUPER with kick prompts starting and ending in an idle
+pose (`--start-pose idle.glb --end-pose idle.glb@0`), 50 steps; a clip counts
+as a kick when a foot rises 0.45 m above the floor.
+
+- **Short, motion-only prompts.** "A person kicks forward with the right leg"
+  kicked far more often than "A person holding a sword in a fighting stance kicks
+  forward with the right leg, then returns to the stance", which never kicked at
+  4 seconds at any guidance. Describe the movement, not the character or scene.
+- **1.5–3 seconds per move.** Longer clips dilute a single action: at the
+  default guidance the short prompt kicked 18/24 times at 2.5 s and 12/24 at 4 s.
+  Chain moves with `--then` rather than stretching one prompt.
+- **Make variants and pick.** Results vary a lot by seed. `--variants 8` costs
+  about 1.5 s a clip on that GPU after loading, and the contact sheet shows which
+  ones worked.
+- **Raise `--guidance` to 3–4 when the move doesn't happen.** Higher guidance
+  follows the prompt harder but exaggerates the whole body (a boxer's guard,
+  hops, flung arms at 6), slides the feet more and strays further from pose
+  constraints:
+
+| `--guidance` | Kicks, 2.5 s | Kicks, 4 s | Foot slide (cm/frame) | Pose error mean / max (cm) |
+|---|---|---|---|---|
+| 1 | 0/8 | 0/8 | 0.15 / 0.06 | 2.0 / 4.8 |
+| 2 (default) | 18/24 | 12/24 | 0.22 / 0.15 | 2.1 / 5.3 |
+| 3 | 15/24 | 21/24 | 0.24 / 0.21 | 2.1–2.4 / 5.8–6.3 |
+| 4 | 23/24 | 23/24 | 0.29 / 0.29 | 2.3–2.8 / 6.4–7.5 |
+| 6 | 8/8 | 8/8 | 0.39 / 0.45 | 2.4–4.1 / 6.8–10.0 |
+
+  (Short prompt; foot slide is the planted foot's mean horizontal movement at
+  2.5 s / 4 s; pose error is the model's error at the start and end poses before
+  correction. The 8/8 rows used 8 seeds, the others 24.) Guidance 1 hardly moves.
+- **Leave `--constraint-guidance` at 2.** It weighs pose and path constraints
+  (and the frames that join `--then` prompts). Lower lets the motion drift from
+  them, higher makes it overshoot and also suppresses the action:
+
+| `--constraint-guidance` | Kicks, 2.5 s | Kicks, 4 s | Pose error mean / max (cm), 2.5 s | 4 s |
+|---|---|---|---|---|
+| 1 | 8/8 | 5/8 | 5.5 / 12.9 | 3.7 / 9.2 |
+| 2 (default) | 7/8 | 2/8 | 2.1 / 5.1 | 2.1 / 5.0 |
+| 3 | 7/8 | 1/8 | 2.2 / 5.2 | 2.1 / 4.7 |
+| 4 | 7/8 | 1/8 | 2.3 / 5.4 | 2.1 / 4.8 |
+| 6 | 6/8 | 0/8 | 2.9 / 6.0 | 2.4 / 5.6 |
+
+  Full-body correction makes start and end poses exact either way.
+- **Keep the correction window.** `--correction-frames 0` sets the constrained
+  frame alone: on a kick whose start and end hands were 60 degrees from the pose,
+  that frame popped 60 degrees (30 with 2 frames, 22 with 4); from 10 frames on
+  the largest steps were the kick itself.
 
 ### Prompt sequences
 
@@ -155,8 +259,9 @@ model's error at each constraint, and the recipe stores it; on an RTX 4080 SUPER
 full-body poses typically landed within 1–2 cm on average (4–5 cm at the worst
 joint) and 3–8 degrees, effectors within about 5 cm and path points within
 3–10 cm. Full-body poses are then made exact: the residual is faded out over up
-to 10 frames either side, ending before any neighbouring constraint, so clips
-join without a pop. `--no-correction` keeps the model's poses unchanged. Effector
+to 10 frames either side (`--correction-frames N`; 0 sets only the constrained
+frame, which can pop), ending before any neighbouring constraint, so clips join
+without a pop. `--no-correction` keeps the model's poses unchanged. Effector
 targets and path points are not corrected.
 
 ## Connect clips
@@ -297,9 +402,10 @@ loops the clip for `N` frames at 60 fps instead. `TIDE_HIDDEN` previews require
 
 Existing output files are refused. Every generated GLB has a JSON recipe beside
 it recording prompt/input paths and generation settings: for `generate`, each
-prompt with its duration and frames, the transition, placement, every constraint
-with its source file and frame, the model's error there (`modelError`) and the
-error after correction (`error`). Paths and prompts remain local: this tool sends
+prompt with its duration and frames, the transition, placement, seed, guidance,
+constraint guidance, correction frames, in-place, the device it ran on, threads,
+the variant set, every constraint with its source file and frame, the model's
+error there (`modelError`) and the error after correction (`error`). Paths and prompts remain local: this tool sends
 no telemetry and starts no server.
 
 ## Batch actions
@@ -363,6 +469,19 @@ every constraint option:
   "seed": 5,
   "output": "sequence-from-guard.glb"
 }
+```
+
+Every generate option has a field: `variants`, `variantsGif`, `guidance`,
+`constraintGuidance`, `correctionFrames`, `inPlace`, `device` (`"auto"`,
+`"gpu"`, `"cpu"`), `threads` and `tide`; `connect` takes `threads` too. Variant
+outputs and their sheet are checked for collisions with every other output
+before anything runs. A `mirror` action takes `source`, optional `clip` and
+`output`:
+
+```json
+{ "action": "generate", "prompt": "A person kicks forward with the right leg", "duration": 2.5,
+  "variants": 8, "guidance": 3, "startPose": "idle.glb", "endPose": "idle.glb", "output": "kick.glb" },
+{ "action": "mirror", "source": "kick.seed5.glb", "output": "kick-left.glb" }
 ```
 
 A pose is a file path (default frame as on the command line) or `{ "file", "frame" }`;

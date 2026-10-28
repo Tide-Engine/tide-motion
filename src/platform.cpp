@@ -91,6 +91,27 @@ fs::path model_directory() {
 #endif
     throw std::runtime_error("Cannot determine model cache; use --models <directory>");
 }
+// Runs a preview project. A GIF needs tide run --record; with clip_frames it records a
+// clip of that many frames exactly once (unless frames is given).
+static void run_tide(const std::string& tide,const fs::path& root,int width,int height,const fs::path& gif,const fs::path& capture,int frames,size_t clip_frames) {
+    std::string executable=tide;
+    if(tide.find('/')!=std::string::npos||tide.find('\\')!=std::string::npos)executable=fs::absolute(utf8path(tide)).string();
+    std::vector<std::string> args{executable,"run",root.string(),"--size",std::to_string(width),std::to_string(height)};
+    if(!gif.empty()) {
+        // tide run --record arrived in 0.5.0-nightly.45; older builds lack its help topic.
+        auto probe=root/"record-help.txt";
+        int probed=run_process({executable,"help","run","--record"},probe);
+        std::ifstream text(probe);std::string usage((std::istreambuf_iterator<char>(text)),std::istreambuf_iterator<char>());
+        if(probed||usage.find("--record")==std::string::npos)throw std::runtime_error("preview --gif needs Tide 0.5.0-nightly.45 or later (tide run --record); update Tide or use --capture");
+        // Headless runs use fixed 1/60 s frames and the GIF keeps every second one
+        // (30 a second), so 2(F-1)+1 frames show each of a clip's F frames once.
+        if(!frames&&clip_frames)frames=static_cast<int>(2*(clip_frames-1)+1);
+        args.push_back("--record");args.push_back(fs::absolute(gif).string());
+    }
+    if(!capture.empty()) { args.push_back("--capture");args.push_back(fs::absolute(capture).string()); }
+    if(frames) { args.push_back("--frames");args.push_back(std::to_string(frames)); }
+    int code=run_process(args);if(code)throw std::runtime_error("Tide preview failed (exit "+std::to_string(code)+")");
+}
 // A lit skinned body: the procedural mannequin or the user's character, drawn twice
 // through one camera, facing it and in profile, each centred on the motion root with
 // a floor of tiles that slides under it as the root travels.
@@ -253,22 +274,140 @@ view Preview(mut PreviewClock clock)
     scene<<"    Draw.Line(float2(30, -200), float2(450, -200), 1, Color(0.3, 0.3, 0.3));\n}\n";
     scene.close();if(!scene)throw std::runtime_error("Cannot write Tide preview scene");
     }
-    std::string executable=tide;
-    if(tide.find('/')!=std::string::npos||tide.find('\\')!=std::string::npos)executable=fs::absolute(utf8path(tide)).string();
-    std::vector<std::string> args{executable,"run",root.string(),"--size","960","540"};
-    if(!gif.empty()) {
-        // tide run --record arrived in 0.5.0-nightly.45; older builds lack its help topic.
-        auto probe=root/"record-help.txt";
-        int probed=run_process({executable,"help","run","--record"},probe);
-        std::ifstream text(probe);std::string usage((std::istreambuf_iterator<char>(text)),std::istreambuf_iterator<char>());
-        if(probed||usage.find("--record")==std::string::npos)throw std::runtime_error("preview --gif needs Tide 0.5.0-nightly.45 or later (tide run --record); update Tide or use --capture");
-        // Headless runs use fixed 1/60 s frames and the GIF keeps every second one
-        // (30 a second), so 2(F-1)+1 frames show each of a clip's F frames once.
-        if(once)frames=static_cast<int>(2*(c.frames()-1)+1);
-        args.push_back("--record");args.push_back(fs::absolute(gif).string());
+    run_tide(tide,root,960,540,gif,capture,frames,once?c.frames():0);
+}
+// Several SOMA clips on the mannequin through one orthographic camera, a labelled cell
+// each. The sheet shows key poses (key_frames) along two rows, in right profile and
+// facing the camera; the GIF plays every clip at once, facing and in profile.
+static void variants_scene(const std::vector<Clip>& clips,const std::vector<std::string>& labels,const fs::path& root,bool animated,float* aspect,size_t* across) {
+    save_mannequin(root/"character.glb");
+    auto first=world_pose(clips[0],clips[0].frame(0));
+    float low=first.front().p.y,high=low;
+    for(const auto& joint:first) {low=std::min(low,joint.p.y);high=std::max(high,joint.p.y);}
+    const float height=std::max(0.5f,high-low);
+    if(low>-0.05f&&low<0.15f)low=0;
+    const size_t n=clips.size(),poses=animated?1:6;
+    size_t columns=animated?std::min(n,static_cast<size_t>(std::ceil(std::sqrt(2.0*static_cast<double>(n)))))
+        :n<=3?1:static_cast<size_t>(std::ceil(std::sqrt(static_cast<double>(n)/2)));
+    columns=std::max<size_t>(1,columns);
+    const size_t rows=(n+columns-1)/columns;
+    // Metres: a pose every 0.8 heights; a cell is a label strip and one row (GIF: the
+    // two views side by side) or two rows (sheet: profile above, front below).
+    const float step=0.8f*height,pad=0.35f*height,label=0.32f*height,row=1.3f*height;
+    const float cell_w=static_cast<float>(animated?2:poses)*step+pad,cell_h=label+row*static_cast<float>(animated?1:2)+(animated?0.25f:0.0f)*height;
+    const float view_w=static_cast<float>(columns)*cell_w,view_h=static_cast<float>(rows)*cell_h;
+    *aspect=view_w/view_h;*across=columns;
+    auto num=[](float v){std::ostringstream o;o.imbue(std::locale::classic());o<<std::setprecision(5)<<std::fixed<<v;return o.str();};
+    std::ofstream scene(root/"preview.tide");
+    scene<<R"(struct Corner
+{
+    float3 position;
+    float3 normal;
+    float2 uv;
+    Color color = Color.white;
+}
+
+asset SkinnedMesh<Corner> body = "character.glb";
+)";
+    for(size_t i=0;i<n;++i)scene<<"asset Animation v"<<i<<" = \"v"<<i<<".glb\";\n";
+    scene<<"const float HEIGHT = "<<num(height)<<";\nconst float FLOOR = "<<num(low)<<";\n";
+    scene<<"const float VIEW_W = "<<num(view_w)<<";\nconst float VIEW_H = "<<num(view_h)<<";\n";
+    scene<<R"(
+local singleton PreviewClock { float elapsed; }
+local scene Main { }
+
+frag Lit(Corner corner, out Color color, Instance instance)
+{
+    var paint = corner.color;
+    var normal = Math.Normalize(instance.Normal(corner.normal));
+    var sun = Math.Normalize(float3(-0.45, 0.8, -0.55));
+    var light = 0.3 + 0.2 * (0.5 + 0.5 * normal.y) + 0.6 * Math.Max(0, Math.Dot(normal, sun));
+    color = Color(paint.r * light, paint.g * light, paint.b * light, 1);
+}
+
+// One copy of the body standing at a place, turned about its own centre.
+void Body(Pose pose, float3 at, float turn)
+{
+)";
+    scene<<"    body.skeleton.TryGetByName("<<nlohmann::json(clips[0].joints[clips[0].motion_root].name).dump()<<", out var centreBone);\n";
+    scene<<R"(    var centre = Math.Transform(pose.Model(centreBone), float3(0));
+    var spin = quaternion.Euler(0, turn, 0);
+    var place = Math.Mul(float4x4.TRS(at - float3(0, FLOOR, 0), spin, float3(1)), float4x4.Translate(float3(-centre.x, 0, -centre.z)));
+    Draw.SkinnedMesh(body, place, pose, Lit);
+}
+
+// A cell's backdrop and a floor line under each row.
+void Cell(float left, float top, float width, float height, float floorA, float floorB)
+{
+    Draw.Plane(float3(left + width * 0.5, top - height * 0.5, 4), float2(width - HEIGHT * 0.06, height - HEIGHT * 0.06), quaternion.Euler(-90deg, 0, 0), Color(0.21, 0.22, 0.25));
+    Draw.Cube(float3(left + width * 0.5, floorA - 0.01, 0), float3(width - HEIGHT * 0.3, 0.02, 0.6), Color(0.45, 0.46, 0.5));
+    Draw.Cube(float3(left + width * 0.5, floorB - 0.01, 0), float3(width - HEIGHT * 0.3, 0.02, 0.6), Color(0.45, 0.46, 0.5));
+}
+
+float2 OnScreen(float x, float y) { return float2(x * Screen.width / VIEW_W, -y * Screen.height / VIEW_H); }
+
+view Sheet(mut PreviewClock clock)
+{
+)";
+    // Only the GIF plays; the sheet is one still frame.
+    if(animated)scene<<"    var seconds = clock.elapsed;\n    clock.elapsed += Frame.dt;\n";
+    scene<<R"(    Draw.Clear(Color(0.13, 0.14, 0.16));
+    Draw.SetCamera(float4x4.TRS(float3(VIEW_W * 0.5, -VIEW_H * 0.5, -50), quaternion.Euler(0, 0, 0), float3(1)), float4x4.Ortho(VIEW_W, VIEW_H, 0.1, 200));
+)";
+    struct Text { std::string text; float x,y,size; bool centred; };
+    std::vector<Text> texts;
+    for(size_t i=0;i<n;++i) {
+        const auto& c=clips[i];
+        const float left=static_cast<float>(i%columns)*cell_w,top=-static_cast<float>(i/columns)*cell_h;
+        const float floor_a=top-label-1.1f*height,floor_b=animated?floor_a:floor_a-row;
+        const float facing=kimodo_heading(c,c.frame(0))*180/std::numbers::pi_v<float>;
+        const std::string front=num(180-facing),side=num(90-facing);
+        scene<<"    Cell("<<num(left)<<", "<<num(top)<<", "<<num(cell_w)<<", "<<num(cell_h)<<", "<<num(floor_a)<<", "<<num(floor_b)<<");\n";
+        texts.push_back({labels[i],left+pad*0.5f,top-0.06f*height,0.2f*height,false});
+        if(animated) {
+            scene<<"    {\n        mut var pose = body.defaultPose;\n        pose.Sample(v"<<i<<", seconds, Playback.Clamp);\n";
+            scene<<"        Body(pose, float3("<<num(left+pad*0.5f+0.5f*step)<<", "<<num(floor_a)<<", 0), "<<front<<"deg);\n";
+            scene<<"        Body(pose, float3("<<num(left+pad*0.5f+1.5f*step)<<", "<<num(floor_a)<<", 0), "<<side<<"deg);\n    }\n";
+            continue;
+        }
+        auto frames=key_frames(c,poses);
+        for(size_t k=0;k<frames.size();++k) {
+            const float x=left+pad*0.5f+(static_cast<float>(k)+0.5f)*step,seconds=static_cast<float>(frames[k])/c.fps;
+            scene<<"    {\n        mut var pose = body.defaultPose;\n        pose.Sample(v"<<i<<", "<<num(seconds)<<", Playback.Clamp);\n";
+            scene<<"        Body(pose, float3("<<num(x)<<", "<<num(floor_a)<<", 0), "<<side<<"deg);\n";
+            scene<<"        Body(pose, float3("<<num(x)<<", "<<num(floor_b)<<", 0), "<<front<<"deg);\n    }\n";
+            std::ostringstream time;time.imbue(std::locale::classic());time<<std::setprecision(1)<<std::fixed<<seconds<<" s";
+            texts.push_back({time.str(),x,floor_a-0.04f*height,0.11f*height,true});
+        }
     }
-    if(!capture.empty()) { args.push_back("--capture");args.push_back(fs::absolute(capture).string()); }
-    if(frames) { args.push_back("--frames");args.push_back(std::to_string(frames)); }
-    int code=run_process(args);if(code)throw std::runtime_error("Tide preview failed (exit "+std::to_string(code)+")");
+    scene<<"    Draw.SetScreen();\n";
+    for(const auto& t:texts)scene<<"    Draw.Text("<<nlohmann::json(t.text).dump()<<", OnScreen("<<num(t.x)<<", "<<num(t.y)<<"), "<<num(t.size)<<" * Screen.height / VIEW_H, "
+        <<(t.centred?"Color(0.7, 0.72, 0.76), Anchor.UpperCenter":"Color.white")<<");\n";
+    scene<<"}\n";
+    scene.close();if(!scene)throw std::runtime_error("Cannot write Tide variants scene");
+}
+void preview_variants(const std::vector<Clip>& clips,const std::vector<std::string>& labels,const VariantSheet& options) {
+    if(clips.empty()||clips.size()!=labels.size())throw std::runtime_error("Variant sheet needs one label per clip");
+    for(const auto& c:clips)require_soma(c);
+    auto root=fs::temp_directory_path()/"tide-motion-preview";
+    size_t key=std::hash<std::string>{}(fs::absolute(options.png.empty()?options.gif:options.png).generic_string());
+    root/="variants-"+std::to_string(key);fs::create_directories(root);
+    for(const auto& entry:fs::directory_iterator(root))if(entry.is_regular_file()&&entry.path().extension()==".glb")fs::remove(entry.path());
+    size_t longest=0;
+    for(size_t i=0;i<clips.size();++i) {save_glb(clips[i],root/("v"+std::to_string(i)+".glb"));longest=std::max(longest,clips[i].frames());}
+    auto even=[](double v){return std::max(64,static_cast<int>(std::lround(v/2))*2);};
+    if(!options.png.empty()) {
+        // About 960 pixels a column, at most 4096 either way.
+        float aspect=1;size_t columns=1;variants_scene(clips,labels,root,false,&aspect,&columns);
+        double width=std::min(4096.0,static_cast<double>(columns)*960),height=width/aspect;
+        if(height>4096) {height=4096;width=height*aspect;}
+        run_tide(options.tide,root,even(width),even(height),{},options.png,3,0);
+    }
+    if(!options.gif.empty()) {
+        float aspect=1;size_t columns=1;variants_scene(clips,labels,root,true,&aspect,&columns);
+        double width=std::min(1920.0,std::max(640.0,static_cast<double>(columns)*360)),height=width/aspect;
+        if(height>1080) {height=1080;width=height*aspect;}
+        run_tide(options.tide,root,even(width),even(height),options.gif,{},0,longest);
+    }
 }
 }

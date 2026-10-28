@@ -171,7 +171,7 @@ void shift_to_last_pose(Clip& result,const MotionConditions& conditions) {
     Vec3 at=result.frame(last->frame)[0].p,want=last->pose[0].p,delta{want.x-at.x,0,want.z-at.z};
     for(size_t f=0;f<result.frames();++f)result.frame(f)[0].p=result.frame(f)[0].p+delta;
 }
-void correct_poses(Clip& result,const MotionConditions& conditions) {
+void correct_poses(Clip& result,const MotionConditions& conditions,int window) {
     std::vector<size_t> frames;
     for(const auto& pose:conditions.poses)frames.push_back(pose.frame);
     for(const auto& point:conditions.path)frames.push_back(point.frame);
@@ -179,9 +179,9 @@ void correct_poses(Clip& result,const MotionConditions& conditions) {
     for(const auto& pose:conditions.poses) {
         if(pose.effectors)continue;
         // The residual at the keyframe (local rotations, root height and anchored ground
-        // position) fades out with a raised cosine over up to 10 frames each side, ending
-        // before any neighbouring constraint so every keyframe stays exact.
-        const long k=static_cast<long>(pose.frame);long before=10,after=10;
+        // position) fades out with a raised cosine over up to `window` frames each side,
+        // ending before any neighbouring constraint so every keyframe stays exact.
+        const long k=static_cast<long>(pose.frame);long before=std::max(0,window),after=before;
         for(size_t frame:frames) {
             long d=static_cast<long>(frame)-k;
             if(d>0)after=std::min(after,d);

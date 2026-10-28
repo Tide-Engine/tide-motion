@@ -78,15 +78,15 @@ Clip decode_bricks(const Clip& source,const BricksInputs& in,std::span<const flo
 struct BricksModel::Impl {
     Ort::Env env{ORT_LOGGING_LEVEL_WARNING,"tide-motion"};
     Ort::Session session{nullptr};
-    explicit Impl(const fs::path& model) {
+    Impl(const fs::path& model,unsigned threads) {
         Ort::SessionOptions opts;
-        opts.SetIntraOpNumThreads(static_cast<int>(std::max(1u,std::thread::hardware_concurrency()/2)));
+        opts.SetIntraOpNumThreads(static_cast<int>(threads?threads:std::max(1u,std::thread::hardware_concurrency()/2)));
         opts.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_ALL);
         std::cerr<<"Loading MotionBricks SOMA (native ONNX CPU inference)...\n";
         session=Ort::Session(env,model.c_str(),opts);
     }
 };
-BricksModel::BricksModel(const fs::path& model):impl_(std::make_unique<Impl>(model)) { }
+BricksModel::BricksModel(const fs::path& model,unsigned threads):impl_(std::make_unique<Impl>(model,threads)) { }
 BricksModel::~BricksModel()=default;
 Clip BricksModel::generate(const Clip& a,const Clip& b,int tokens) {
     require_soma(a); require_soma(b);

@@ -388,7 +388,7 @@ COMMAND --help. Version 0.3.0 (CMake project version, --version and recipes).
 Left out: raw coordinate hand/foot targets (upstream effector sets need a whole
 pose for rotation and root context, so targets come from SOMA clips); upstream
 dense root paths with its smoothing (sparse waypoints only; many --path points
-approximate one); IK for effectors and foot-skate cleanup; tunable CFG; the
+approximate one); IK for effectors and foot-skate cleanup; tunable CFG (added in 0.5.0); the
 77-joint output; constraints on non-SOMA rigs without retarget --to-soma. Free
 placement is validated empirically, not by upstream.
 
@@ -463,3 +463,126 @@ normal maps, multiple materials or embedded textures); no automatic mapping;
 FBX scale animation and non-uniform scale are refused; preview needs the clip
 and character to share names when --map is not used; --to-soma from Synty
 leans the spine (see above).
+
+## Generation controls (0.5.0)
+
+Owner request (2026-10-28): pick quickly from several variants and expose every
+useful control. About 100 kick clips generated that day varied a lot by seed,
+prompt wording and duration ("A person kicks forward with the right leg" kicked
+29/35 across 1.5–5 s, a long sword-stance prompt 15/35, kicks mostly vanished
+beyond 3 s).
+
+CLI (generate): `--variants N` (1..64, seeds S..S+N-1 with one model load;
+outputs CLIP.seedS.glb plus recipes, the plain name only when N is 1),
+`--variants-gif`, `--tide PATH`, `--guidance W` and `--constraint-guidance W`
+(Kimodo's separated text/constraint CFG weights, 0..10, finite, default 2/2 as
+before), `--device auto|gpu|cpu`, `--threads N` (1..1024), `--correction-frames N`
+(0..60, default 10), `--in-place`. connect: `--threads N` (ONNX Runtime
+intra-op threads; default stays half the hardware threads). New command
+`mirror CLIP.glb -o OUT.glb [--clip NAME]`. Batch fields: variants, variantsGif,
+tide, guidance, constraintGuidance, device, threads, correctionFrames, inPlace;
+connect threads; a mirror action (source, clip, output). Batch preflight expands
+variant names and sheet paths and refuses any collision before anything runs.
+Recipes add guidance, constraintGuidance, correctionFrames, inPlace, device (the
+one actually used), threads and variants {count, firstSeed, sheet}; mirror
+writes a recipe too. An unknown command (also `help NAME`) now says so instead of
+printing the whole help. Every new value is validated before models are checked.
+
+Device: auto is the 0.2.0 behaviour (probe, CPU fallback on probe/load/generate
+failure; later auto actions of a batch stay on the CPU after a failure). gpu
+probes Vulkan and fails instead of falling back (a CPU-only build refuses before
+hashing the models); cpu sets KIMODO_BACKEND=cpu without probing. Threads set
+KIMODO_THREADS, which kimodo.cpp reads when its CPU backends initialise
+(motion weights and text encoder); 0 restores the operator's value. Both apply
+at load, so a batch action asking for a different device/threads reloads Kimodo
+(the operator's KIMODO_BACKEND/KIMODO_THREADS are remembered and restored for
+auto). kimodo_runtime_options exists in the C API but is not wired to the C++
+model::load in this revision, so the environment is the interface.
+
+Variant contact sheet: platform.cpp writes one Tide project with the mannequin
+and one Animation asset per clip, drawn through an orthographic camera
+(float4x4.Ortho) so cells have no perspective; Draw.SetScreen text labels "seed
+S" and each pose's time. A cell shows six key frames (edit.cpp key_frames: the
+first and last frames, then local peaks of the largest root-relative joint
+movement from frame 0, kept at least frames/12 apart, then midpoints of the
+widest gaps), right profile above, facing below, a floor line under each row.
+About 960 pixels a column, at most 4096 either side; 8 variants are 1920x2264
+and render in about 3 s with `tide run --capture --frames 3`. The GIF lays each
+variant out facing and in profile and records the longest clip once. Any sheet
+failure (Tide absent, old Tide) is reported as skipped after the clips are
+saved. Checked on a real 8-variant kick run: the one clip kickcheck scored as no
+kick (seed 5, foot 0.03 m) is plainly standing in every cell, the seven kicks
+(0.58–1.25 m) show the leg up in profile.
+
+Mirror (edit.cpp mirror_soma): SOMA-30 rest offsets are symmetric about x
+(left is +x facing +z; largest asymmetry 0.24 mm at the hips) with identity rest
+rotations, so a local rotation L becomes M L M (M the x reflection, quaternion
+(x,-y,-z,w)) on its Left/Right counterpart; the root takes A^-1 M A W M with A the
+first frame's heading, and its position is reflected across the plane through
+the first frame's root, up and its facing. The clip starts in the same place and
+facing (within 0.3 degrees, from that asymmetry); mirroring twice returns it to
+within a few millimetres. A Kimodo right kick (right foot 1.25 m, left 0.01 m)
+mirrors to left 1.24 m, right 0.01 m.
+
+In place (remove_root_travel): the hips' ground path averaged over 31 frames
+(ends padded by point reflection so steady travel stays linear) is subtracted
+from every frame relative to frame 0; height, facing and sway stay. A 3-second
+walk that travelled 4.85 m stays within 0.11 m. Applied after correction;
+recorded constraint errors precede it. Refused with --path (the path only
+specifies travel). Not foot planting: feet may slide where the averaged travel
+differs from the true contact motion.
+
+Correction window: correct_poses takes the frame count (0 = only the frame).
+The default output is byte-identical to 0.4.0 (same seed, prompt and poses).
+posecheck on a 2.5 s kick between idle poses: model error 60 degrees at the
+hands; window 0 pops 60.4/60.2 degrees in one frame at the ends, 2 frames 30,
+4 frames 21.6; 10 (default) and 20 leave the kick's own 30-degree steps as the
+largest.
+
+### Measurements (RTX 4080 SUPER, Vulkan, 50 steps)
+
+Kicks start and end in Parry's idle (`--start-pose idle-soma.glb --end-pose
+idle-soma.glb@0`); scored by forward kinematics (scratch tools score.py,
+kickcheck.py): kick = a foot 0.45 m above the floor; slide = mean horizontal
+movement of a foot within 3 cm of the floor (cm/frame); pose error = recipe
+modelError positionMean (max) at the two poses before correction. Batches with
+variants ran at about 1.5 s a clip after loading (160 clips plus 20 sheets in
+4 min 12 s).
+
+Text guidance, short prompt (24 seeds at 2/3/4, 8 at 1/6), kicks 2.5 s / 4 s:
+1: 0/8, 0/8; 2: 18/24, 12/24; 3: 15/24, 21/24; 4: 23/24, 23/24; 6: 8/8, 8/8.
+Slide 0.15/0.06, 0.22/0.15, 0.24/0.21, 0.29/0.29, 0.39/0.45. Pose error
+2.1/2.0, 2.1/2.1, 2.1/2.4, 2.3/2.8, 2.4/4.1 cm (max 4.9 to 10.0). Sword prompt
+(8 seeds): 2.5 s 1, 6, 7, 8, 8 kicks of 8; 4 s none at any guidance. Sheets:
+guidance 4 kicks reliably but adds a boxer's guard to most variants; 6
+caricatures (hops, arms flung up). Default kept at 2; documented 3–4 when the
+move is missing. The worst single per-frame joint step (87 degrees) was one
+sword clip at guidance 3; otherwise worst steps rose with guidance from about 13
+to 35 degrees, mostly the kick itself.
+
+Constraint guidance, short prompt, 8 seeds, kicks 2.5 s / 4 s and pose error
+(cm mean/max): 1: 8/8, 5/8, 5.5/12.9 and 3.7/9.2; 2: 7/8, 2/8, 2.1/5.1 and
+2.1/5.0; 3: 7/8, 1/8, 2.2/5.2 and 2.1/4.7; 4: 7/8, 1/8, 2.3/5.4 and 2.1/4.8;
+6: 6/8, 0/8, 2.9/6.0 and 2.4/5.6. 2 is the closest overall; higher also pulls
+the motion toward the idle constraints and suppresses the kick. Default kept.
+
+Negative prompt (tried, not shipped): a patch let a negative-prompt embedding
+replace the zero text of both non-text separated-CFG branches (constraint and
+unconditional; with no constraints that is standard negative CFG,
+n + w(t - n)). Same 8 seeds, guidance 2, kicks (baseline / "standing still" /
+"walking" / "A person stands still doing nothing"): short 2.5 s 7 / 7 / 8 / 8;
+short 4 s 2 / 3 / 0 / 7; sword 2.5 s 6 / 5 / 1 / 7; sword 4 s 0 / 0 / 0 / 0. Only
+the full sentence helped, about as much as guidance 3 (8/8 on the same seeds),
+whose sheet looked more natural (clean front kicks rather than knee chambers
+with a guard); "walking" removed kicks; one clip popped 96 degrees. Not clearly
+better than guidance, so the patch and --avoid were removed.
+
+Validation: model-free contracts for variant/sheet names, mirror (twice, start
+place and facing, left/right swap against the reflected FK), in place (travel
+removed, frame 0/height/facing/sway kept), key frames (span, peak included) and
+the correction window (0 and 3); CLI contracts for every new range/refusal, the
+unknown command, variant collisions in CLI and batch, mirror CLI/batch and per-
+command help. Both Windows builds (Vulkan and CPU, ClangCL, warnings as errors)
+pass all five CTests. Not measured: --threads timing on the CPU path (only
+validated and plumbed), CPU fallback of --device gpu on a broken driver (the
+refusal path is the CPU-only build's), Linux/macOS builds (left to CI).

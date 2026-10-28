@@ -60,6 +60,72 @@ void mannequin_contracts() {
     check(volume>0.02&&volume<0.2,"Closed outward surface with a body-sized volume");
     fs::remove(path);
 }
+// Generation controls without a model: variant names, mirror, in-place, key frames and
+// the correction window.
+bool same(Quat a,Quat b) {return a.x==b.x&&a.y==b.y&&a.z==b.z&&a.w==b.w;}
+void edit_contracts() {
+    check(variant_path(fs::path("out")/"kick.glb",7)==fs::path("out")/"kick.seed7.glb","Variant names carry the seed");
+    check(variant_path("a.b.glb",4294967295ull)==fs::path("a.b.seed4294967295.glb"),"Variant names keep earlier dots");
+    check(variants_path("kick.glb",".png")==fs::path("kick.variants.png")&&variants_path("kick.glb",".gif")==fs::path("kick.variants.gif"),"Contact sheet names");
+    Clip rig;rig.joints=soma();
+    // A clip facing 0.6 rad away from +Z, walking and turning, with every joint moving.
+    Clip c;c.joints=soma();
+    for(size_t f=0;f<40;++f) {auto p=test_pose(0.07f*static_cast<float>(f),{1.0f+0.03f*static_cast<float>(f),0.9f+0.01f*std::sin(0.3f*static_cast<float>(f)),-2.0f+0.02f*static_cast<float>(f)},0.6f+0.01f*static_cast<float>(f));c.poses.insert(c.poses.end(),p.begin(),p.end());}
+    auto mirrored=c;mirror_soma(mirrored);
+    auto twice=mirrored;mirror_soma(twice);
+    for(size_t f=0;f<c.frames();++f)for(size_t j=0;j<30;++j) {
+        check(angle(twice.frame(f)[j].q,c.frame(f)[j].q)<5e-3f,"Mirroring twice restores rotations (SOMA is symmetric to 0.2 mm)");
+        Vec3 d=twice.frame(f)[j].p-c.frame(f)[j].p;check(dot(d,d)<1e-4f,"Mirroring twice restores the root (within 1 cm: the plane comes from each clip's own heading)");
+    }
+    check(dot(mirrored.frame(0)[0].p-c.frame(0)[0].p,mirrored.frame(0)[0].p-c.frame(0)[0].p)<1e-10f,"Mirror starts in the same place");
+    check(std::abs(std::remainder(kimodo_heading(mirrored,mirrored.frame(0))-kimodo_heading(c,c.frame(0)),6.2831853f))<5e-3f,"Mirror starts facing the same way");
+    // A mirrored left foot is the right foot reflected across the first frame's sagittal plane.
+    const float h=kimodo_heading(c,c.frame(0));Vec3 origin=c.frame(0)[0].p;origin.y=0;
+    for(size_t f:{0u,17u,39u}) {
+        auto a=world_pose(c,c.frame(f)),b=world_pose(mirrored,mirrored.frame(f));
+        for(auto [from,to]:{std::pair{28,24},std::pair{24,28},std::pair{19,13},std::pair{6,6}}) {
+            Vec3 local=rotate(yaw(-h),a[static_cast<size_t>(from)].p-origin);local.x=-local.x;Vec3 want=origin+rotate(yaw(h),local),d=b[static_cast<size_t>(to)].p-want;
+            check(std::sqrt(dot(d,d))<0.01f,"Mirror swaps sides across the sagittal plane");
+        }
+    }
+    bool rejected=false;try{Clip other;other.joints=soma();other.joints.pop_back();other.poses.assign(29,{});mirror_soma(other);}catch(...){rejected=true;}
+    check(rejected,"Mirror needs a SOMA-30 clip");
+    // In place: steady travel goes, frame 0, height, facing and small sway stay.
+    Clip walk;walk.joints=soma();
+    for(size_t f=0;f<90;++f) {
+        auto p=test_pose(0.0f,{0.05f*std::sin(0.4f*static_cast<float>(f)),0.9f+0.02f*std::sin(0.5f*static_cast<float>(f)),0.04f*static_cast<float>(f)},0.2f);
+        walk.poses.insert(walk.poses.end(),p.begin(),p.end());
+    }
+    auto still=walk;remove_root_travel(still);
+    for(size_t f=0;f<walk.frames();++f) {
+        auto a=walk.frame(f)[0],b=still.frame(f)[0];
+        check(a.p.y==b.p.y&&a.q.x==b.q.x&&a.q.y==b.q.y&&a.q.w==b.q.w,"In place keeps height and facing");
+        check(std::hypot(b.p.x,b.p.z)<0.1f,"In place removes travel (3.6 m here), keeping 5 cm sway");
+    }
+    check(still.frame(0)[0].p.x==walk.frame(0)[0].p.x&&still.frame(0)[0].p.z==walk.frame(0)[0].p.z,"In place keeps frame 0");
+    float sway=0;for(size_t f=0;f<still.frames();++f)sway=std::max(sway,std::abs(still.frame(f)[0].p.x));
+    check(sway>0.03f,"In place keeps sway");
+    // Key frames: first, last and the clip's strongest moment.
+    Clip kick;kick.joints=soma();
+    for(size_t f=0;f<75;++f) {
+        auto p=test_pose(0.0f,{0,0.9f,0},0);float lift=std::exp(-0.02f*(static_cast<float>(f)-40)*(static_cast<float>(f)-40));
+        p[26].q=axis_angle({1,0,0},-1.4f*lift);kick.poses.insert(kick.poses.end(),p.begin(),p.end());
+    }
+    auto keys=key_frames(kick,6);
+    check(keys.size()==6&&keys.front()==0&&keys.back()==74&&std::is_sorted(keys.begin(),keys.end()),"Key frames span the clip in order");
+    check(std::find(keys.begin(),keys.end(),40u)!=keys.end(),"Key frames include the peak");
+    check(key_frames(kick,100).size()==75,"Short clips show every frame");
+    // Correction window 0 sets only the keyframe.
+    Clip out;out.joints=soma();
+    for(size_t frame=0;frame<30;++frame) {auto p=test_pose(0.05f*static_cast<float>(frame),{0,0.9f,0},0.1f);out.poses.insert(out.poses.end(),p.begin(),p.end());}
+    MotionConditions one;one.poses.push_back({"keyframe",15,"k.glb",0,test_pose(4.0f,{0.1f,0.95f,0},0.3f),0});
+    (void)place_constraints(one,Placement::world);
+    auto snapped=out;correct_poses(snapped,one,0);
+    auto e=constraint_error(snapped,one.poses[0]);check(e.position_max<1e-4f&&e.rotation_max<0.05f,"Window 0 still makes the pose exact");
+    for(size_t frame:{14u,16u})for(size_t j=0;j<30;++j)check(same(snapped.frame(frame)[j].q,out.frame(frame)[j].q),"Window 0 leaves neighbours alone");
+    auto wide=out;correct_poses(wide,one,3);
+    check(angle(wide.frame(13)[3].q,out.frame(13)[3].q)>1e-4f&&same(wide.frame(11)[3].q,out.frame(11)[3].q),"Window 3 fades over three frames");
+}
 void kimodo_contracts() {
     mannequin_contracts();
     Clip rig;rig.joints=soma();
@@ -170,5 +236,6 @@ int main(int argc,char** argv) try {
     }
     fs::remove(path);fs::remove(dir);
     kimodo_contracts();
+    edit_contracts();
     std::cout<<"Motion contracts passed\n";return 0;
 } catch(const std::exception& e) {std::cerr<<e.what()<<"\n";return 1;}

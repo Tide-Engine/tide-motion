@@ -87,8 +87,9 @@ struct MotionConditions {
 enum class Placement { automatic, world, free };
 bool place_constraints(MotionConditions&, Placement);
 void shift_to_last_pose(Clip& result, const MotionConditions&);
-// Makes full-body poses exact, fading the residual out over nearby frames.
-void correct_poses(Clip& result, const MotionConditions&);
+// Makes full-body poses exact, fading the residual out over up to `frames` frames each
+// side (0 sets only the constrained frame).
+void correct_poses(Clip& result, const MotionConditions&, int frames=10);
 struct KimodoCondition { std::vector<float> observed, mask; float first_heading=0; Vec3 origin; };
 KimodoCondition build_condition(const MotionConditions&, size_t frames);
 struct ConstraintError { float root=0, position_mean=0, position_max=0, rotation_mean=0, rotation_max=0; };
@@ -110,11 +111,22 @@ class BricksModel {
     struct Impl;
     std::unique_ptr<Impl> impl_;
 public:
-    explicit BricksModel(const fs::path&);
+    // threads 0 uses half the hardware threads.
+    explicit BricksModel(const fs::path&, unsigned threads=0);
     ~BricksModel();
     Clip generate(const Clip&, const Clip&, int tokens=0);
 };
 Clip join(const Clip&, const Clip& bridge, const Clip&);
+// Variants of CLIP.glb are CLIP.seedN.glb; their contact sheet CLIP.variants.png/.gif.
+fs::path variant_path(const fs::path& output, uint64_t seed);
+fs::path variants_path(const fs::path& output, const std::string& extension);
+// Left and right swapped and reflected across the first frame's sagittal plane (SOMA-30).
+void mirror_soma(Clip&);
+// Removes horizontal root travel (a one-second moving average of the root's ground path),
+// keeping height, facing and sway; frame 0 stays where it was.
+void remove_root_travel(Clip&);
+// Frames that show a clip at a glance: first, last and its strongest moments, in order.
+std::vector<size_t> key_frames(const Clip&, size_t count);
 // A procedural SOMA-30 preview body (skinned GLB, no third-party content).
 void save_mannequin(const fs::path&);
 // Runs and waits; a nonempty output path receives the child's stdout and stderr.
@@ -132,4 +144,8 @@ struct PreviewOptions {
     float facing=0; // radians, the first frame's heading (0 faces +Z)
 };
 void preview(const Clip&, const fs::path& source, const PreviewOptions&);
+// One image (and optionally a GIF) of several SOMA clips on the mannequin, a labelled
+// cell each: key poses in profile and from the front (the GIF plays them together).
+struct VariantSheet { std::string tide="tide"; fs::path png, gif; };
+void preview_variants(const std::vector<Clip>&, const std::vector<std::string>& labels, const VariantSheet&);
 }
