@@ -854,3 +854,49 @@ error <1.8e-7 m. The independent checker verifies every protected frame componen
 within 2e-6 and ankle orientation. No model load/inference was repeated for this
 integration; existing generated assets were consumed. No PR, model publication,
 force push or additional workflow dispatch is part of this work.
+## DART / DartControl source-only investigation (2026-10-28)
+
+Detailed evidence, exact release artifact IDs/configuration hashes, source pins,
+native contracts and follow-up gates are in [dart-feasibility.md](dart-feasibility.md).
+Source revision: zkf1997/DART bb67ae1ed6ce051080468bf15bc6e54a6c3f8417;
+Apache source notice retained in licenses/DART-SOURCE.txt. The author explicitly
+confirms Apache-2.0 for checkpoints in public issue 25, independently of the
+repository badge. This is positive checkpoint distribution/inference evidence.
+AMASS dataset access/training restrictions are a separate question and do not
+by themselves prove that downstream checkpoint inference is prohibited.
+
+Unresolved exact runtime assets: the release's external
+data/seq_data_zero_male/mean_std_h2_f8.pkl needs a commercial inference/conversion
+grant; a compatible zero-beta male SMPL-X skeleton/calibration artifact with a
+permissive grant has not been identified. Stock headless inference constructs
+restricted full SMPL-X body models. Predicted-joint history can avoid per-chunk
+body inference, but still needs the exact pelvis calibration offset and initial
+history encoding. The CC BY SMPL-X Body subset is a possible route, not evidence
+that the full parametric NPZ or an arbitrary extracted offset is cleared. No
+body model, weights or data bundle was fetched for inference, no one contacted,
+and no placeholder backend, install entry or CLI promise was introduced.
+
+Forward continuation and the separately trained goal policy require no
+test-time gradients. The policy drives initial diffusion noise and has specific
+walk/run/left-hop coverage, a clipped 1069-value observation and a 0.3 m success
+threshold. Its checkpoint selects a different denoiser from the continuation
+demo. Inbetweening instead optimizes initial noise with Adam through every DDIM
+step, decoder and autoregressive coordinate/history transform. Native gradients
+remain separate work and do not preclude forward-only implementation once the
+asset gate clears. DART's 276 features use row-6D rotations, Z-up coordinates,
+two history/eight future frames; canonical SOMA conversion/mapping, parity and
+real goal/GLB/preview/packaging tests are not yet implemented or measured.
+
+Lawful native proof work: tests/dart-feasibility is an isolated C++23 project,
+with no production dependency/build changes or installed artifacts. Windows x64
+ClangCL 18.1.8 Release passes both CTests: independently specified row-6D,
+degenerate rotations, pelvis/world inverse and handedness fixtures; six local
+x0-DDIM adjoints match finite differences to 1.67395e-11 maximum error. An
+in-memory synthetic ONNX opset-20 MatMul/LayerNormalization/Gelu graph on pinned
+ORT 1.31.1 CPU matches independent scalar results to 2.37287e-08. The inference
+DLL returns no training API. This is operator/math evidence only, not DART
+export, network gradients, SOMA mapping or inference parity. No GPU used; no
+inference time/memory, goal/seam/action/foot quality numbers are fabricated.
+TIDE_HIDDEN=1 was set for validation. Existing backends/defaults and concurrent
+ARDY integration files are preserved. Reproduce with the isolated commands in
+the detailed note; use a thread-specific build/temp directory.
