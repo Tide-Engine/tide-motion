@@ -143,6 +143,42 @@ int main(int argc,char** argv) try {
     fs::create_directories(dir);
     for(const char* name:{"source.glb","target.glb","retargeted.glb"}) {fs::remove(dir/name);fs::remove((dir/name).string()+".part");}
     save_glb(f.source,dir/"source.glb");save_glb(f.target,dir/"target.glb");
+    rewrite(dir/"source.glb",dir/"prop.glb",[](auto& doc,auto& bin) {
+        const float positions[]={0,0,0,0.1f,0,0,0,0.1f,0};
+        size_t view=doc["bufferViews"].size(),accessor=doc["accessors"].size(),node=doc["nodes"].size();
+        doc["bufferViews"].push_back({{"buffer",0},{"byteOffset",bin.size()},{"byteLength",sizeof(positions)}});
+        const auto* bytes=reinterpret_cast<const char*>(positions);bin.insert(bin.end(),bytes,bytes+sizeof(positions));
+        doc["accessors"].push_back({{"bufferView",view},{"componentType",5126},{"count",3},{"type","VEC3"},{"min",{0,0,0}},{"max",{0.1f,0.1f,0}}});
+        doc["meshes"]=nlohmann::json::array({{{"primitives",nlohmann::json::array({{{"attributes",{{"POSITION",accessor}}}}})}}});
+        doc["nodes"].push_back({{"mesh",0}});doc["scenes"][0]["nodes"].push_back(node);
+    });
+    {std::ofstream out(dir/"prop.fbx");out<<R"(; FBX 7.4.0 project file
+FBXHeaderExtension: { FBXVersion: 7400 }
+GlobalSettings: {
+ Properties70: {
+  P: "UpAxis", "int", "Integer", "",1
+  P: "UpAxisSign", "int", "Integer", "",1
+  P: "FrontAxis", "int", "Integer", "",2
+  P: "FrontAxisSign", "int", "Integer", "",1
+  P: "CoordAxis", "int", "Integer", "",0
+  P: "CoordAxisSign", "int", "Integer", "",1
+  P: "UnitScaleFactor", "double", "Number", "",100
+ }
+}
+Objects: {
+ Geometry: 1, "Geometry::Triangle", "Mesh" {
+  Vertices: *9 { a: 0,0,0,0.1,0,0,0,0.1,0 }
+  PolygonVertexIndex: *3 { a: 0,1,-3 }
+ }
+ Model: 2, "Model::Triangle", "Mesh" { Version: 232 }
+}
+Connections: {
+ C: "OO",1,2
+ C: "OO",2,0
+}
+)";}
+    auto prop_bounds=mesh_bounds(dir/"prop.fbx");
+    check(std::abs(prop_bounds.high.x-0.1f)<1e-4f&&std::abs(prop_bounds.high.y-0.1f)<1e-4f,"FBX prop bounds use Y-up metres");
     {std::ofstream mapping(dir/"bones.json");mapping<<mapping_json(f).dump(2);}
     auto map=load_mapping(dir/"bones.json");
     auto target=load_rig_glb(dir/"target.glb");
@@ -231,7 +267,7 @@ int main(int argc,char** argv) try {
     refuses([&]{(void)load_glb(fbx,"",true);},"SOMA clips must be GLB");
     if(argc==3)return 0;
     fs::remove(fbx);
-    for(const char* name:{"source.glb","target.glb","retargeted.glb","bones.json"})fs::remove(dir/name);
+    for(const char* name:{"source.glb","target.glb","retargeted.glb","bones.json","prop.glb","prop.fbx"})fs::remove(dir/name);
     fs::remove(dir);
     std::cout<<"Retarget contracts passed\n";return 0;
 } catch(const std::exception& e) {std::cerr<<e.what()<<"\n";return 1;}

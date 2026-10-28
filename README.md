@@ -508,9 +508,42 @@ Each `--prop` starts a new attachment. Its following bone, offset and rotation
 options apply to that attachment until the next `--prop`; offsets and rotations
 start at zero for each new attachment. Supply a bone for every prop. These are
 preview attachments: they do not condition generation, solve two-hand grips,
-or add object tracks to the exported animation. Prop size is not included in
-camera framing. See [the prop and first-person investigation](notes/props-first-person.md)
+or add object tracks to the exported animation. Third-person framing includes
+prop geometry, attachment offsets and the full clip's socket motion, using
+conservative bounds. See [the prop and first-person investigation](notes/props-first-person.md)
 for model candidates, current limits and the proposed authoring workflow.
+
+`--first-person` reviews the same animation through an explicit eye camera. The
+built-in mannequin draws only its arms, keeping the complete SOMA hierarchy and
+animation. This is arms-only presentation of full-body motion, not another model.
+On `--character`, supply your own skinned arms model to hide the head/body; the tool
+does not cut or skin a custom mesh. Preserve its animated root/spine ancestors.
+
+```sh
+tide-motion preview cut.glb --first-person --camera-mode root \
+  --camera-bone Head --camera-offset 0,0.08,0.12 --camera-rotation 15,0,0 \
+  --camera-fov 75 --camera-near 0.01 \
+  --prop sword.glb --prop-bone RightHand --prop-rotation 0,90,0 \
+  --save-setup sword-view.json --gif sword-view.gif
+tide-motion preview another-cut.glb --setup sword-view.json --gif another-view.gif
+```
+
+Camera mode `bone` (default) follows the named bone's full animated transform.
+Mode `root` carries that bone's initial eye transform on the animated motion root,
+avoiding head-relative nods and rolls. Both use metres after removing inherited
+bone scale, look along local +Z, and apply offset/Euler rotation in the anchor's
+frame. Set the bone and rotation explicitly on custom rigs: bone names and facing
+are not identified automatically. FOV is vertical degrees (10–150), near distance
+is 0.001–1 metres, and the far plane is 1,000 metres. First-person framing remains
+under camera control; a weapon leaving the view is useful review evidence.
+
+`--save-setup` writes version 1 JSON for the props and camera and refuses existing
+files. It does not save character/map/texture selection; repeat those flags when
+replaying on a custom rig. Serialized mesh paths are absolute. In hand-authored
+setups, relative mesh paths resolve against the JSON file's directory. `--setup`
+replaces prop/camera flags; edit the setup to change them. Unknown fields and
+invalid ranges are refused. The setup records review settings, not inferred
+contact constraints, body motion, or model provenance.
 
 Captures use Tide's ordinary bounded capture mode. `--gif OUT.gif` records the
 clip exactly once, from its first frame to its last, at 30 fps and 960 by 540

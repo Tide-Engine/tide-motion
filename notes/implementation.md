@@ -1,5 +1,64 @@
 # Native animation authoring
 
+## Dex2HOI audit and native first-person/equipment review (2026-10-28)
+
+Owner requested further Dex2HOI investigation and fixing encountered Tide limits.
+The [pinned audit](dex2hoi-feasibility.md) records source revision
+a92aca6b48b7a0c9a45a1465aa984213d3c8ceda, real inputs, native operator work,
+representation/normalization and release gaps. The released HUMOTO demo uses
+dataset-backed histories/state/geometry and is not an arbitrary text + meshes CLI.
+Its PointNet geometry cache, CLIP, dual-stream/fusion networks and forward DDIM
+path suggest a native route, but no export, inference/parity or speed claim is
+made. Top-level code/checkpoint grants and exact checkpoint inventory remain
+unverified. Source was inspected in ignored scratch; no upstream implementation,
+checkpoint, body model or evaluation motion was imported into Tide or Git.
+
+Implemented tool fixes independently of model integration:
+
+- `preview --first-person` provides explicit bone or root-following eye cameras,
+  local metre/Euler offsets, vertical FOV and near plane. Root mode carries the
+  first-frame eye transform on the animated motion root. Rendering uses Tide's
+  existing matrix camera API; no engine source change or dependency update.
+- First-person mannequin renders only arm geometry while retaining all 30 SOMA
+  joints, inverse binds and original animation. Hidden capture initially exposed
+  head/nose geometry crossing the root-following view during a nod; arm-only
+  presentation fixes that occlusion. Custom rigs use supplied skinned arms meshes;
+  no automatic mesh cutting/skinning, arms-only inference or export is claimed.
+- Version 1 `--setup` / `--save-setup` persist props and camera, validate unknown
+  keys/ranges and refuse overwrite. Loaded mesh paths resolve relative to the
+  JSON location; saved paths are absolute. Character/map/texture selection is
+  intentionally explicit at replay. CLI camera/prop options cannot override a
+  loaded setup silently. Setups are review configuration, not model provenance.
+- Third-person framing reads actual GLB/FBX geometry with existing pinned cgltf /
+  ufbx, including active GLB scene/nested transforms and FBX axis/unit conversion.
+  Conservative socket-centred spheres include mesh bounds, offsets and every
+  authored frame. Uniform inherited rig scale affects socket positions but does
+  not shrink held meshes/offsets. Explicit unweighted socket nodes and ancestors
+  join the sampled rig for bounds/calibration. This framing can leave generous
+  space; it is not continuous collision detection. First-person FOV stays authored.
+
+Windows x64 ClangCL 18.1.8 Release CPU build passes all thirteen CTests. New native
+contracts cover active-scene/nested mesh bounds, odd-frame extremes, scaled rigs,
+unweighted sockets, Euler order, setup paths/roundtrips/refusals, and arms geometry
+with its complete rig. FBX metre bounds and CLI camera/setup preflight are covered.
+Earlier prop CLI fixtures were skeleton-only files; they now use self-authored
+triangle meshes because real bounds correctly reject assets with no mesh positions.
+
+TIDE_HIDDEN=1 engine captures at seven frames validate both camera modes, setup
+replay, a 4.2 m test blade in third person and mapped separate skinned arms. A
+15-frame custom-arms GIF run records eight frames. Images were visually inspected:
+arms/equipment remain visible without the mannequin head intrusion; the long blade
+fits in both panels. These are synthetic camera/attachment fixtures, not generated
+weapon skill or grip-quality evidence. Engine CLI/native platform remain from
+checkout 367ae4da2d31913176ae1e2624e1d78a1204f03c, rebuilt/staged as documented
+below; TideMotionGpuValidation held for renderer runs. Fixtures and captures remain
+ignored. No owner installation, model arithmetic, retarget algorithm or pin changes.
+
+Remaining substantial authoring features are explicit: continuous grip diagnostics
+and correction, model object-space contact inputs, independent object-track/mesh
+GLB export, and bow articulation/release events. They are not solved by a camera
+or rigid preview attachment. Dex2HOI has not been integrated or quality-ranked.
+
 ## Props and first-person research / multiple attachments (2026-10-28)
 
 Audited dev 8d535b7 and primary model papers/release repositories. Findings,

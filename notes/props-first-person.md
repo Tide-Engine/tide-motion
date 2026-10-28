@@ -5,6 +5,12 @@ audit, not a benchmark of external models. No new weights, evaluation motions,
 SMPL/MANO assets or third-party meshes were downloaded. Candidate performance
 claims belong to their authors and are not Tide measurements.
 
+Follow-up: [pinned Dex2HOI source/input/operator audit](dex2hoi-feasibility.md).
+Tide now implements first-person bone/root cameras, arms-only mannequin
+presentation, reusable camera/equipment setups and geometry-aware prop framing.
+The baseline limitations below are retained as the audit trail; these four are
+resolved by the follow-up, while grip solving and object/bow export remain open.
+
 ## Findings and recommended direction
 
 The current body generators can suggest weapon gestures, but Tide does not pass

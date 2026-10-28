@@ -144,7 +144,7 @@ static void body_scene(const Clip& c,const fs::path& root,const PreviewOptions& 
     std::string model="character.glb",texture;
     if(options.body==PreviewBody::mannequin) {
         require_soma(c);
-        save_mannequin(root/model);
+        save_mannequin(root/model,options.camera.enabled);
     } else {
         auto ext=options.character.extension().string();for(auto& ch:ext)ch=static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
         if(ext!=".glb"&&ext!=".fbx")throw std::runtime_error("--character must be a .glb or .fbx model");
@@ -167,7 +167,7 @@ static void body_scene(const Clip& c,const fs::path& root,const PreviewOptions& 
     }
     // Framing from the whole clip (a get-up starts lying down): where its feet are, its
     // height above them and how far it reaches out from its root.
-    auto extent=clip_extent(c);
+    auto extent=preview_extent(c,options);
     float low=extent.ground;
     // Generated and retargeted clips stand on y=0 with joints (toes, ankles) above their
     // soles; keep that ground unless the clip is clearly elsewhere (mostly in the air).
@@ -175,7 +175,8 @@ static void body_scene(const Clip& c,const fs::path& root,const PreviewOptions& 
     if(low>-0.3f&&low<0.15f)low=0;
     // The camera aims at the middle of the body's height and stands back far enough for
     // its farthest reach as well: a panel spans 0.63 view heights beside its centre.
-    const float height=std::max(0.5f,extent.high-low),view=std::max(height,(extent.reach+0.15f)/0.63f);
+    const float bottom=std::min(low,extent.low);
+    const float height=std::max(0.5f,extent.high-bottom),view=std::max(height,(extent.reach+0.15f)/0.63f);
     auto num=[](float v){std::ostringstream o;o.imbue(std::locale::classic());o<<std::setprecision(6)<<std::fixed<<v;return o.str();};
     std::ofstream scene(root/"preview.tide");
     scene<<R"(struct Corner
@@ -213,7 +214,7 @@ local scene Main { }
 )";
     // A prop is drawn in plain light steel on its bone's model matrix without the rig's
     // scale (Synty bones carry 0.01), then offset and turned within that bone.
-    if(!props.empty()) {
+    if(!props.empty()||options.camera.enabled) {
         scene<<R"(
 frag Steel(Corner corner, out Color color, Instance instance)
 {
@@ -272,19 +273,39 @@ view Preview(mut PreviewClock clock)
     for(size_t i=0;i<props.size();++i)scene<<"    body.skeleton.TryGetByName("<<nlohmann::json(options.props[i].bone).dump()<<", out var grip"<<i<<");\n";
     scene<<R"(    var centre = Math.Transform(pose.Model(centreBone), float3(0));
     Draw.Clear(Color(0.17, 0.18, 0.21));
-    Draw.SetCamera(float3(0, FLOOR + HEIGHT * 0.72, -VIEW * 2.7), quaternion.Euler(6deg, 0, 0), 30);
 )";
-    // Turned so the first frame faces the camera on the left and shows its right side,
-    // facing screen right, on the right (the camera looks along +z).
-    float facing=options.facing*180/std::numbers::pi_v<float>;
+    if(options.camera.enabled) {
+        const auto& camera=options.camera;
+        auto local=preview_offset(camera.offset,camera.rotation);
+        std::string anchor="eyeBone";
+        if(camera.mode=="root") {
+            auto rig=preview_rig(c,options);auto pose=world_pose(rig,rig.frame(0));
+            size_t eye=0;bool found=false;
+            for(size_t j=0;j<rig.joints.size();++j)if(rig.joints[j].name==camera.bone){eye=j;found=true;}
+            if(!found)throw std::runtime_error("Camera bone not found: "+camera.bone);
+            local=inverse(pose[rig.motion_root])*pose[eye]*local;anchor="centreBone";
+        } else scene<<"    body.skeleton.TryGetByName("<<nlohmann::json(camera.bone).dump()<<", out var eyeBone);\n";
+        scene<<"    var eyeLocal = float4x4.TRS(float3("<<num(local.p.x)<<", "<<num(local.p.y)<<", "<<num(local.p.z)
+             <<"), quaternion("<<num(local.q.x)<<", "<<num(local.q.y)<<", "<<num(local.q.z)<<", "<<num(local.q.w)<<"), float3(1));\n";
+        scene<<"    var eye = Math.Mul(Unscaled(pose.Model("<<anchor<<")), eyeLocal);\n";
+        scene<<"    Draw.SetCamera(eye, float4x4.PerspectiveFov("<<num(camera.fov)<<"deg, Screen.width / Screen.height, "<<num(camera.near_plane)<<", 1000));\n";
+        // Keep the original world space so the camera and props share the body transform.
+        scene<<"    Panel(pose, "<<grip_arguments<<"centre, float3(centre.x, 0, centre.z), 0);\n";
+    } else {
+        scene<<"    Draw.SetCamera(float3(0, "<<num(bottom+height*0.72f)<<", -VIEW * 2.7), quaternion.Euler(6deg, 0, 0), 30);\n";
+        // Turned so the first frame faces the camera on the left and shows its right side,
+        // facing screen right, on the right (the camera looks along +z).
+        float facing=options.facing*180/std::numbers::pi_v<float>;
 
-    scene<<"    Panel(pose, "<<grip_arguments<<"centre, float3(-SPREAD, 0, 0), "<<num(180-facing)<<"deg);\n";
-    scene<<"    Panel(pose, "<<grip_arguments<<"centre, float3(SPREAD, 0, 0), "<<num(90-facing)<<"deg);\n}\n";
+        scene<<"    Panel(pose, "<<grip_arguments<<"centre, float3(-SPREAD, 0, 0), "<<num(180-facing)<<"deg);\n";
+        scene<<"    Panel(pose, "<<grip_arguments<<"centre, float3(SPREAD, 0, 0), "<<num(90-facing)<<"deg);\n";
+    }
+    scene<<"}\n";
     scene.close();if(!scene)throw std::runtime_error("Cannot write Tide preview scene");
 }
 void preview(const Clip& c,const fs::path& source,const PreviewOptions& options) {
     const auto& tide=options.tide;const auto& capture=options.capture;const auto& gif=options.gif;int frames=options.frames;
-    c.validate();
+    c.validate();validate_preview_setup(options);
     std::set<std::string> names;
     for(const auto& joint:c.joints)if(joint.name.empty()||!names.insert(joint.name).second)
         throw std::runtime_error("Skeleton preview needs unique, nonempty bone and ancestor names");

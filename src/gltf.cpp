@@ -26,6 +26,54 @@ bool is_fbx(const fs::path& path) {
     auto ext=path.extension().string();for(auto& ch:ext)ch=static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
     return ext==".fbx";
 }
+MeshBounds mesh_bounds(const fs::path& path) {
+    if(is_fbx(path))return fbx_mesh_bounds(path);
+    auto ext=path.extension().string();for(auto& ch:ext)ch=static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    if(ext!=".glb")throw std::runtime_error("--prop must be a .glb or .fbx mesh");
+    if(fs::file_size(path)>512ULL*1024*1024)throw std::runtime_error("GLB exceeds the 512 MiB input limit");
+    std::ifstream in(path,std::ios::binary);std::vector<char> bytes(static_cast<size_t>(fs::file_size(path)));
+    if(!in.read(bytes.data(),static_cast<std::streamsize>(bytes.size())))throw std::runtime_error("Cannot read prop mesh");
+    cgltf_options opts{};cgltf_data* raw=nullptr;
+    if(cgltf_parse(&opts,bytes.data(),bytes.size(),&raw)!=cgltf_result_success)throw std::runtime_error("Malformed prop GLB");
+    std::unique_ptr<cgltf_data,decltype(&cgltf_free)> data(raw,cgltf_free);
+    if(data->nodes_count>1024)throw std::runtime_error("Too many prop nodes");
+    for(size_t i=0;i<data->buffers_count;++i)if(data->buffers[i].uri)throw std::runtime_error("Prop GLB must embed all buffers");
+    if(cgltf_load_buffers(&opts,data.get(),nullptr)!=cgltf_result_success||cgltf_validate(data.get())!=cgltf_result_success)
+        throw std::runtime_error("Invalid prop GLB buffers");
+    MeshBounds bounds;bool first=true;size_t count=0;
+    auto mesh=[&](const cgltf_mesh* m,const float* t) {
+        for(size_t i=0;i<m->primitives_count;++i)for(size_t a=0;a<m->primitives[i].attributes_count;++a) {
+            const auto& attr=m->primitives[i].attributes[a];if(attr.type!=cgltf_attribute_type_position)continue;
+            if(attr.data->type!=cgltf_type_vec3||attr.data->count>10000000-count)throw std::runtime_error("Invalid or oversized prop positions");
+            count+=attr.data->count;
+            for(size_t v=0;v<attr.data->count;++v) {
+                auto p=read_value(attr.data,v);Vec3 w{t[0]*p[0]+t[4]*p[1]+t[8]*p[2]+t[12],t[1]*p[0]+t[5]*p[1]+t[9]*p[2]+t[13],t[2]*p[0]+t[6]*p[1]+t[10]*p[2]+t[14]};
+                for(float x:{w.x,w.y,w.z})if(!std::isfinite(x)||std::abs(x)>10000)throw std::runtime_error("Prop bounds are nonfinite or out of range");
+                if(first){bounds.low=bounds.high=w;first=false;}
+                bounds.low={std::min(bounds.low.x,w.x),std::min(bounds.low.y,w.y),std::min(bounds.low.z,w.z)};
+                bounds.high={std::max(bounds.high.x,w.x),std::max(bounds.high.y,w.y),std::max(bounds.high.z,w.z)};
+            }
+        }
+    };
+    std::vector<bool> seen(data->nodes_count);
+    std::function<void(const cgltf_node*,const float*,size_t)> visit=[&](const cgltf_node* node,const float* parent,size_t depth) {
+        size_t index=static_cast<size_t>(node-data->nodes);
+        if(depth>128||seen[index])throw std::runtime_error("Prop scene repeats a node or has a cycle");seen[index]=true;
+        float local[16],t[16]{};cgltf_node_transform_local(node,local);
+        for(size_t col=0;col<4;++col)for(size_t row=0;row<4;++row)for(size_t k=0;k<4;++k)
+            t[col*4+row]+=parent[k*4+row]*local[col*4+k];
+        if(node->mesh)mesh(node->mesh,t);
+        for(size_t i=0;i<node->children_count;++i)visit(node->children[i],t,depth+1);
+    };
+    const float identity[16]={1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1};
+    auto* scene=data->scene?data->scene:data->scenes_count?&data->scenes[0]:nullptr;
+    if(scene) {for(size_t i=0;i<scene->nodes_count;++i)visit(scene->nodes[i],identity,0);}
+    else if(data->nodes_count) {for(size_t i=0;i<data->nodes_count;++i)if(!data->nodes[i].parent)visit(&data->nodes[i],identity,0);}
+    else {
+        for(size_t i=0;i<data->meshes_count;++i)mesh(&data->meshes[i],identity);
+    }
+    if(first)throw std::runtime_error("Prop mesh has no positions");return bounds;
+}
 std::vector<std::string> node_names(const fs::path& path) {
     if(is_fbx(path))return fbx_node_names(path);
     if(path.extension()!=".glb")throw std::runtime_error("Input must be a self-contained .glb or .fbx; export glTF to GLB first");
@@ -40,10 +88,10 @@ std::vector<std::string> node_names(const fs::path& path) {
     for(size_t i=0;i<data->nodes_count;++i)if(data->nodes[i].name)names.push_back(data->nodes[i].name);
     return names;
 }
-static Clip read_glb(const fs::path& path,const std::string& selected,bool canonical,bool rest_only) {
+static Clip read_glb(const fs::path& path,const std::string& selected,bool canonical,bool rest_only,const std::vector<std::string>& extra_nodes={}) {
     if(is_fbx(path)) {
         if(canonical)throw std::runtime_error("SOMA clips must be GLB; convert an FBX clip with retarget --to-soma first");
-        return read_fbx(path,selected,rest_only);
+        return read_fbx(path,selected,rest_only,extra_nodes);
     }
     if(path.extension()!=".glb")throw std::runtime_error("Input must be a self-contained .glb or .fbx; export glTF to GLB first");
     if(fs::file_size(path)>512ULL*1024*1024)throw std::runtime_error("GLB exceeds the 512 MiB input limit");
@@ -116,6 +164,15 @@ static Clip read_glb(const fs::path& path,const std::string& selected,bool canon
         if(rest_only&&data->skins_count) {
             for(size_t s=0;s<data->skins_count;++s)for(size_t j=0;j<data->skins[s].joints_count;++j)append(data->skins[s].joints[j]);
         } else for(size_t i=0;i<data->nodes_count;++i)append(&data->nodes[i]);
+        if(rest_only)for(const auto& name:extra_nodes) {
+            cgltf_node* found=nullptr;
+            for(size_t i=0;i<data->nodes_count;++i)if(data->nodes[i].name&&name==data->nodes[i].name) {
+                if(found)throw std::runtime_error("Ambiguous attachment node: "+name);
+                found=&data->nodes[i];
+            }
+            if(!found)throw std::runtime_error("Attachment node not found: "+name);
+            append(found);
+        }
         if(data->asset.extras.data) {
             auto extras=json::parse(data->asset.extras.data);
             if(extras.contains("tideMotion")) {
@@ -195,7 +252,7 @@ static Clip read_glb(const fs::path& path,const std::string& selected,bool canon
     return c;
 }
 Clip load_glb(const fs::path& path,const std::string& selected,bool canonical) { return read_glb(path,selected,canonical,false); }
-Clip load_rig_glb(const fs::path& path) { return read_glb(path,"",false,true); }
+Clip load_rig_glb(const fs::path& path,const std::vector<std::string>& extra_nodes) { return read_glb(path,"",false,true,extra_nodes); }
 void save_glb(const Clip& c,const fs::path& path) {
     c.validate();
     json doc={{"asset",{{"version","2.0"},{"generator","Tide Motion"}}},{"scene",0},{"scenes",json::array()},{"nodes",json::array()},{"bufferViews",json::array()},{"accessors",json::array()}};

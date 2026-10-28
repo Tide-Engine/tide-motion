@@ -58,10 +58,10 @@ Clip mirror_soma77(const Clip&);
 std::vector<Transform> world_pose(const Clip&, std::span<const Transform>);
 std::vector<Transform> sample(const Clip&, float);
 Clip load_glb(const fs::path&, const std::string& animation="", bool canonical=true);
-Clip load_rig_glb(const fs::path&);
+Clip load_rig_glb(const fs::path&, const std::vector<std::string>& extra_nodes={});
 // .fbx through ufbx with Tide's import conventions (Y-up metres); used by the GLB loaders.
 bool is_fbx(const fs::path&);
-Clip read_fbx(const fs::path&, const std::string& animation, bool rest_only);
+Clip read_fbx(const fs::path&, const std::string& animation, bool rest_only, const std::vector<std::string>& extra_nodes={});
 // Every named node of a GLB or FBX file (FBX as Tide imports it), bones with no skin
 // weights included; preview binds a prop to one of them by name.
 std::vector<std::string> node_names(const fs::path&);
@@ -228,7 +228,7 @@ RootTravel root_travel(const Clip&);
 // Frames that show a clip at a glance: first, last and its strongest moments, in order.
 std::vector<size_t> key_frames(const Clip&, size_t count);
 // A procedural SOMA-30 preview body (skinned GLB, no third-party content).
-void save_mannequin(const fs::path&);
+void save_mannequin(const fs::path&, bool arms_only=false);
 // Runs and waits; a nonempty output path receives the child's stdout and stderr.
 int run_process(const std::vector<std::string>& args, const fs::path& output={});
 fs::path model_directory();
@@ -241,6 +241,12 @@ enum class PreviewBody { skeleton, mannequin, character };
 struct PreviewProp {
     fs::path mesh; std::string bone; Vec3 offset{}, rotation{};
 };
+struct PreviewCamera {
+    bool enabled=false;
+    std::string bone="Head", mode="bone";
+    Vec3 offset{0,0.08f,0.12f}, rotation{};
+    float fov=75, near_plane=0.01f;
+};
 struct PreviewOptions {
     std::string tide="tide"; fs::path capture, gif; int frames=0;
     PreviewBody body=PreviewBody::mannequin; fs::path character, texture;
@@ -248,7 +254,20 @@ struct PreviewOptions {
     // A mesh drawn rigidly on a bone of the body (its model matrix without scale),
     // then offset (metres) and turned (Euler degrees, as Tide's quaternion.Euler) in it.
     std::vector<PreviewProp> props;
+    PreviewCamera camera;
 };
+// Setup paths are relative to the JSON file; serialized paths are absolute.
+PreviewOptions load_preview_setup(const fs::path&);
+void save_preview_setup(const PreviewOptions&, const fs::path&);
+void validate_preview_setup(const PreviewOptions&);
+// Bind the drawn rig's unweighted socket nodes and preserve their animated ancestors.
+Clip preview_rig(const Clip&, const PreviewOptions&);
+struct MeshBounds { Vec3 low{}, high{}; };
+MeshBounds mesh_bounds(const fs::path&);
+MeshBounds fbx_mesh_bounds(const fs::path&);
+Transform preview_offset(Vec3 metres, Vec3 euler_degrees);
+struct PreviewExtent { float low=0, high=0, reach=0, ground=0; };
+PreviewExtent preview_extent(const Clip&, const PreviewOptions&);
 void preview(const Clip&, const fs::path& source, const PreviewOptions&);
 // One image (and optionally a GIF) of several SOMA clips on the mannequin, a labelled
 // cell each: key poses in profile and from the front (the GIF plays them together).

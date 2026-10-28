@@ -55,7 +55,7 @@ void append(std::vector<char>& bin,const void* data,size_t size) {
     while(bin.size()%4)bin.push_back(0);
 }
 }
-void save_mannequin(const fs::path& path) {
+void save_mannequin(const fs::path& path,bool arms_only) {
     auto joints=soma();
     Clip rig;rig.joints=joints;for(const auto& j:joints)rig.poses.push_back(j.rest);
     auto world=world_pose(rig,rig.frame(0));
@@ -80,9 +80,12 @@ void save_mannequin(const fs::path& path) {
     for(size_t j=1;j<joints.size();++j) {
         const auto& name=joints[j].name;float r=radius(name);
         if(r<=0)continue;
+        if(arms_only&&!(name.ends_with("Arm")||name.ends_with("Hand")||name.ends_with("ThumbEnd")||name.ends_with("MiddleEnd")))continue;
         auto parent=static_cast<size_t>(joints[j].parent);
         capsule(body,world[parent].p,world[j].p,r,static_cast<uint16_t>(parent),tint(joints[parent].name=="Hips"||joints[parent].name=="Chest"?name:joints[parent].name));
     }
+    // Keep the complete skin/rig below; first-person changes visible geometry only.
+    if(!arms_only) {
     // Toes forward of the ball, the head above the neck.
     for(const char* toe:{"LeftToeBase","RightToeBase"}) {
         size_t t=find(toe);Vec3 foot=world[static_cast<size_t>(joints[t].parent)].p,ball=world[t].p,ahead=normalized(Vec3{ball.x-foot.x,0,ball.z-foot.z});
@@ -92,6 +95,8 @@ void save_mannequin(const fs::path& path) {
     capsule(body,world[head].p+Vec3{0,0.06f,0.01f},world[head].p+Vec3{0,0.12f,0.02f},0.1f,static_cast<uint16_t>(head),tint("Head"));
     // Nose, so the facing is plain from any side.
     capsule(body,world[head].p+Vec3{0,0.08f,0.09f},world[head].p+Vec3{0,0.08f,0.13f},0.025f,static_cast<uint16_t>(head),{0.7f,0.3f,0.3f,1});
+
+    }
 
     std::vector<char> bin;nlohmann::json doc;
     doc["asset"]={{"version","2.0"},{"generator","Tide Motion mannequin"}};

@@ -56,7 +56,23 @@ std::vector<std::string> fbx_node_names(const fs::path& path) {
     for(const ufbx_node* node:scene->nodes)if(!node->is_root)names.push_back(text(node->name));
     return names;
 }
-Clip read_fbx(const fs::path& path,const std::string& selected,bool rest_only) {
+MeshBounds fbx_mesh_bounds(const fs::path& path) {
+    auto scene=load_scene(path);MeshBounds b;bool first=true;size_t count=0;
+    for(const auto* node:scene->nodes)if(node->mesh) {
+        const auto* mesh=node->mesh;
+        if(mesh->num_vertices>10000000-count)throw std::runtime_error("Too many FBX prop vertices");count+=mesh->num_vertices;
+        for(const auto& v:mesh->vertices) {
+            auto w=ufbx_transform_position(&node->geometry_to_world,v);
+            Vec3 p{static_cast<float>(w.x),static_cast<float>(w.y),static_cast<float>(w.z)};
+            for(float x:{p.x,p.y,p.z})if(!std::isfinite(x)||std::abs(x)>10000)throw std::runtime_error("FBX prop bounds are nonfinite or out of range");
+            if(first){b.low=b.high=p;first=false;}
+            b.low={std::min(b.low.x,p.x),std::min(b.low.y,p.y),std::min(b.low.z,p.z)};
+            b.high={std::max(b.high.x,p.x),std::max(b.high.y,p.y),std::max(b.high.z,p.z)};
+        }
+    }
+    if(first)throw std::runtime_error("FBX prop mesh has no positions");return b;
+}
+Clip read_fbx(const fs::path& path,const std::string& selected,bool rest_only,const std::vector<std::string>& extra_nodes) {
     auto scene=load_scene(path);
     Clip c;c.name=path.stem().string();
     // As for GLB: a character's rig is its skin bones and their ancestors; a file
@@ -83,6 +99,15 @@ Clip read_fbx(const fs::path& path,const std::string& selected,bool rest_only) {
     bool skinned=false;
     if(rest_only)for(const ufbx_skin_deformer* skin:scene->skin_deformers)for(const ufbx_skin_cluster* cluster:skin->clusters)if(cluster->bone_node) {append(append,cluster->bone_node);skinned=true;}
     if(!skinned)for(const ufbx_node* node:scene->nodes)if(!node->mesh||!rest_only)append(append,node);
+    if(rest_only)for(const auto& name:extra_nodes) {
+        const ufbx_node* found=nullptr;
+        for(const auto* node:scene->nodes)if(!node->is_root&&text(node->name)==name) {
+            if(found)throw std::runtime_error("Ambiguous attachment node: "+name);
+            found=node;
+        }
+        if(!found)throw std::runtime_error("Attachment node not found: "+name);
+        append(append,found);
+    }
     if(c.joints.empty())throw std::runtime_error("FBX has no skeleton nodes");
     if(rest_only) {
         for(const auto& joint:c.joints)c.poses.push_back(joint.rest);

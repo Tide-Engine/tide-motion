@@ -343,6 +343,15 @@ in profile on the right, following its root over a tiled floor.
   --prop-offset X,Y,Z         Move it within the bone, in metres (default 0)
   --prop-rotation X,Y,Z       Turn it within the bone, Euler degrees (default 0)
                             Prop options after --prop apply until the next --prop
+  --first-person              One camera on --camera-bone (default Head)
+  --camera-bone BONE          Explicit eye/head node on the drawn rig
+  --camera-mode bone|root     Follow bone, or carry its initial view on root
+  --camera-offset X,Y,Z       Eye offset in metres (default 0,0.08,0.12)
+  --camera-rotation X,Y,Z     Bone-local Euler degrees (default 0)
+  --camera-fov DEGREES        Vertical field of view (10..150; default 75)
+  --camera-near METRES        Near clip distance (0.001..1; default 0.01)
+  --setup FILE.json           Load versioned props/camera setup; relative paths
+  --save-setup FILE.json      Save resolved setup; refuses an existing file
   --skeleton                  Draw bones as lines (the default for other rigs
                               when no --character is given)
   --tide PATH                 Tide executable (default: tide on PATH)
@@ -958,7 +967,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     std::string command=args[1],clip_name,from_name,to_name,tide="tide";
     for(size_t i=2;i<args.size();++i)if(args[i]=="--help"||args[i]=="-h") {help(command);return 0;}
     fs::path models,output,capture,gif,target_file,map_file,character_file,texture_file,contacts_file;bool mannequin=false;
-    PreviewProp prop;std::vector<PreviewProp> props;
+    PreviewProp prop;std::vector<PreviewProp> props;PreviewCamera camera;fs::path setup_file,save_setup;
     if(command=="generate"||command=="connect"||command=="pose-sequence"||command=="models"||command=="batch"||command=="dart")models=model_directory();
     double duration=3;uint64_t seed=0;unsigned steps=50,transition=5;int frames=0;
     BricksRequest bricks_request;std::string tokens_text;fs::path contacts_out;float contact_threshold=0.5f;
@@ -1047,6 +1056,15 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         else if(a=="--prop-bone")prop.bone=value();
         else if(a=="--prop-offset")prop.offset=triplet(value(),100,"--prop-offset");
         else if(a=="--prop-rotation")prop.rotation=triplet(value(),3600,"--prop-rotation");
+        else if(a=="--first-person")camera.enabled=true;
+        else if(a=="--camera-bone")camera.bone=value();
+        else if(a=="--camera-mode")camera.mode=value();
+        else if(a=="--camera-offset")camera.offset=triplet(value(),100,"--camera-offset");
+        else if(a=="--camera-rotation")camera.rotation=triplet(value(),3600,"--camera-rotation");
+        else if(a=="--camera-fov")camera.fov=static_cast<float>(number(value(),10,150,"camera fov"));
+        else if(a=="--camera-near")camera.near_plane=static_cast<float>(number(value(),0.001,1,"camera near"));
+        else if(a=="--setup")setup_file=utf8path(value());
+        else if(a=="--save-setup")save_setup=utf8path(value());
         else if(a=="--to-soma")to_soma=true;
         else if(a=="--target")target_file=utf8path(value());
         else if(a=="--map")map_file=utf8path(value());
@@ -1062,7 +1080,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     else if(command=="mirror")allowed={"-o","--output","--clip"};
     else if(command=="retarget")allowed={"-o","--output","--target","--map","--to-soma","--clip"};
     else if(command=="inspect")allowed={"--clip","--skeleton"};
-    else if(command=="preview")allowed={"--clip","--tide","--capture","--gif","--frames","--mannequin","--skeleton","--character","--map","--texture","--prop","--prop-bone","--prop-offset","--prop-rotation"};
+    else if(command=="preview")allowed={"--clip","--tide","--capture","--gif","--frames","--mannequin","--skeleton","--character","--map","--texture","--prop","--prop-bone","--prop-offset","--prop-rotation","--first-person","--camera-bone","--camera-mode","--camera-offset","--camera-rotation","--camera-fov","--camera-near","--setup","--save-setup"};
     else if(command=="cleanup")allowed={"-o","--output","--contacts","--map","--clip"};
     else if(command=="models")allowed={"--models","--accept-licenses"};
     else if(command=="pose-sequence")allowed={"-o","--output","--models","--threads","--contacts-out","--contact-threshold"};
@@ -1103,7 +1121,17 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         if(pos.size()!=1)throw std::runtime_error(command+" takes one GLB or FBX file");
         auto path=utf8path(pos[0]);
         if(command=="preview") {
-            PreviewOptions options;options.tide=tide;options.capture=capture;options.gif=gif;options.frames=frames;
+            PreviewOptions options;
+            if(!setup_file.empty()) {
+                for(const auto& flag:flags)if(flag.starts_with("--prop")||flag.starts_with("--camera")||flag=="--first-person")
+                    throw std::runtime_error("--setup cannot be combined with prop or camera options; edit the setup JSON");
+                options=load_preview_setup(setup_file);props=options.props;
+            } else {
+                for(const auto& flag:flags)if(flag.starts_with("--camera")&&!camera.enabled)
+                    throw std::runtime_error("Camera options go with --first-person");
+                options.camera=camera;
+            }
+            options.tide=tide;options.capture=capture;options.gif=gif;options.frames=frames;
             auto clip=load_glb(path,clip_name,false);
             // SOMA-77 previews as its exact SOMA-30 subset on bodies; --skeleton draws all 77.
             if(is_soma77(clip)&&!skeleton)clip=soma77_to_30(clip);
@@ -1141,6 +1169,13 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
                 options.props=props;
             } else for(const char* flag:{"--prop-bone","--prop-offset","--prop-rotation"})
                 if(std::find(flags.begin(),flags.end(),flag)!=flags.end())throw std::runtime_error(std::string(flag)+" goes with --prop");
+            validate_preview_setup(options);
+            if(options.camera.enabled) {
+                auto rig=preview_rig(clip,options);bool found=false;
+                for(const auto& joint:rig.joints)if(joint.name==options.camera.bone)found=true;
+                if(!found)throw std::runtime_error("Camera bone not found: "+options.camera.bone);
+            }
+            if(!save_setup.empty())save_preview_setup(options,save_setup);
             preview(clip,path,options);
             return 0;
         }
