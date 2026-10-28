@@ -238,13 +238,16 @@ std::string sha256_file(const fs::path&);
 // skeleton draws lines; mannequin a procedural SOMA body (the clip must be SOMA-30);
 // character a skinned GLB/FBX whose rig the clip already animates (retargeted).
 enum class PreviewBody { skeleton, mannequin, character };
+struct PreviewProp {
+    fs::path mesh; std::string bone; Vec3 offset{}, rotation{};
+};
 struct PreviewOptions {
     std::string tide="tide"; fs::path capture, gif; int frames=0;
     PreviewBody body=PreviewBody::mannequin; fs::path character, texture;
     float facing=0; // radians, the first frame's heading (0 faces +Z)
     // A mesh drawn rigidly on a bone of the body (its model matrix without scale),
     // then offset (metres) and turned (Euler degrees, as Tide's quaternion.Euler) in it.
-    fs::path prop; std::string prop_bone; Vec3 prop_offset{}, prop_rotation{};
+    std::vector<PreviewProp> props;
 };
 void preview(const Clip&, const fs::path& source, const PreviewOptions&);
 // One image (and optionally a GIF) of several SOMA clips on the mannequin, a labelled

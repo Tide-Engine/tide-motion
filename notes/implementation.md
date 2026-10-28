@@ -1,5 +1,48 @@
 # Native animation authoring
 
+## Props and first-person research / multiple attachments (2026-10-28)
+
+Audited dev 8d535b7 and primary model papers/release repositories. Findings,
+source links, candidate release status, model/tool distinctions, first-person
+workflow and proposed acceptance measurements are in [props-first-person.md](props-first-person.md).
+Dex2HOI is a released two-object lead; Text2HOI a hands/object lead. Neither was
+run or established as a weapon solution. No new model, dependency, body asset or
+evaluation motion was downloaded, integrated or distributed; existing pins and
+licenses are unchanged. Full-body inference plus camera-aware review is proposed,
+not a validated arms-only generation/export feature.
+
+Implemented repeated preview `--prop MESH --prop-bone BONE` groups, each with
+independent bone-local offset and Euler rotation. A new group resets transforms
+and requires its own bone. Existing single-prop usage remains supported, including
+options before the first prop. Mesh copies and generated scene identifiers are
+indexed, so repeated input paths/names cannot overwrite each other's staging.
+All bones are validated on the drawn rig. Cached prop assets are removed when
+the attachment count decreases, including legacy single-prop filenames. CLI help
+and README document grouping and examples.
+
+Windows x64 ClangCL 18.1.8 Release CPU build and all twelve CTests pass, including
+multi-prop GLB/FBX acceptance through scene creation and missing/invalid second
+bone or mesh refusals. Independent generated-scene checks verify both bone
+bindings and distinct transforms. Hidden seven-frame captures with two, one and
+zero attachments validate compilation, rendering, transform reset and stale-asset
+cleanup. Two-prop front/profile capture visually inspected using self-authored
+box blade/shield test geometry and an existing synthetic rig fixture; this tests
+attachment plumbing, not sword action or grip quality. Captures/assets stay ignored.
+
+Renderer validation uses Tide CLI and native platform rebuilt from engine checkout
+367ae4da2d31913176ae1e2624e1d78a1204f03c at D:/Projects/PurrEngine, privately staged,
+with TIDE_HIDDEN=1, --frames 7 and TideMotionGpuValidation held. Initial staging
+attempts lacked native toolchain files; runtime components were then staged from
+the same checkout's mingw-release build. Full installer stopped at an unrelated
+unbuilt tide-editor target; this is runtime preview validation, not installer QA.
+No engine source or owner installation changes.
+
+Remaining gaps: preview attachments do not condition inference or become GLB object
+tracks; no secondary-hand grip solver, collision/contact guarantee, bow articulation
+or release events. Framing still ignores prop bounds. First-person camera review,
+arms mesh/export preparation, equipment recipes and continuous grip diagnostics
+remain explicit next work; SOMA-77 expansion does not infer finger grips.
+
 ## Native ARDY backend (2026-10-28, supersedes the initial spike limit)
 
 The owner authorized complete implementation and developer-only reference/export

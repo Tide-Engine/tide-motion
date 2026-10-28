@@ -335,13 +335,14 @@ in profile on the right, following its root over a tiled floor.
                               retarget --target does); leave it out for a clip
                               already on the character's rig
   --texture IMAGE.png|.jpg    The character's texture (default: plain clay)
-  --prop MESH.glb|.fbx        Draw a mesh (a weapon) rigidly on --prop-bone
+  --prop MESH.glb|.fbx        Draw a mesh rigidly on --prop-bone; repeat for more props
   --prop-bone BONE            The bone it follows: one of --character's bones
                               (after retargeting), or a SOMA bone such as
                               RightHand on the mannequin. The bone's scale is
                               ignored (Synty bones carry 0.01)
   --prop-offset X,Y,Z         Move it within the bone, in metres (default 0)
   --prop-rotation X,Y,Z       Turn it within the bone, Euler degrees (default 0)
+                            Prop options after --prop apply until the next --prop
   --skeleton                  Draw bones as lines (the default for other rigs
                               when no --character is given)
   --tide PATH                 Tide executable (default: tide on PATH)
@@ -956,8 +957,8 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     if(!command_help(args[1]))throw unknown(args[1]);
     std::string command=args[1],clip_name,from_name,to_name,tide="tide";
     for(size_t i=2;i<args.size();++i)if(args[i]=="--help"||args[i]=="-h") {help(command);return 0;}
-    fs::path models,output,capture,gif,target_file,map_file,character_file,texture_file,contacts_file,prop_file;bool mannequin=false;
-    std::string prop_bone;Vec3 prop_offset{},prop_rotation{};
+    fs::path models,output,capture,gif,target_file,map_file,character_file,texture_file,contacts_file;bool mannequin=false;
+    PreviewProp prop;std::vector<PreviewProp> props;
     if(command=="generate"||command=="connect"||command=="pose-sequence"||command=="models"||command=="batch"||command=="dart")models=model_directory();
     double duration=3;uint64_t seed=0;unsigned steps=50,transition=5;int frames=0;
     BricksRequest bricks_request;std::string tokens_text;fs::path contacts_out;float contact_threshold=0.5f;
@@ -1039,16 +1040,20 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         else if(a=="--mannequin")mannequin=true;
         else if(a=="--character")character_file=utf8path(value());
         else if(a=="--texture")texture_file=utf8path(value());
-        else if(a=="--prop")prop_file=utf8path(value());
-        else if(a=="--prop-bone")prop_bone=value();
-        else if(a=="--prop-offset")prop_offset=triplet(value(),100,"--prop-offset");
-        else if(a=="--prop-rotation")prop_rotation=triplet(value(),3600,"--prop-rotation");
+        else if(a=="--prop") {
+            if(!prop.mesh.empty()) {props.push_back(prop);prop={};}
+            prop.mesh=utf8path(value());
+        }
+        else if(a=="--prop-bone")prop.bone=value();
+        else if(a=="--prop-offset")prop.offset=triplet(value(),100,"--prop-offset");
+        else if(a=="--prop-rotation")prop.rotation=triplet(value(),3600,"--prop-rotation");
         else if(a=="--to-soma")to_soma=true;
         else if(a=="--target")target_file=utf8path(value());
         else if(a=="--map")map_file=utf8path(value());
         else if(a.starts_with('-'))throw std::runtime_error("Unknown option: "+a);
         else pos.push_back(a);
     }
+    if(!prop.mesh.empty())props.push_back(prop);
     std::set<std::string> allowed;
     if(command=="generate")allowed={"--models","-o","--output","--duration","--seed","--steps","--then","--transition","--start-pose","--end-pose","--end-at","--keyframe","--effector","--path","--placement","--follow","--fit-poses","--footsteps","--attempts","--no-correction",
         "--correction","--rig","--dense-path","--pose-map",
@@ -1122,17 +1127,18 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
                 std::cerr<<"Not a SOMA-30 clip: drawing its skeleton (give --character MODEL to see it on a body).\n";
                 options.body=PreviewBody::skeleton;
             }
-            if(!prop_file.empty()) {
+            if(!props.empty()) {
                 if(options.body==PreviewBody::skeleton)throw std::runtime_error("--prop is drawn on a body; use --mannequin or --character");
-                if(prop_bone.empty())throw std::runtime_error("--prop needs --prop-bone BONE (a bone of --character, or a SOMA bone such as RightHand on the mannequin)");
-                // The prop follows a bone of the body that is drawn: any node of the character
-                // (Tide binds by name; Synty's Prop_R has no skin weights), or a SOMA joint.
+                // Resolve names on the drawn rig, including nodes without skin weights.
                 std::vector<std::string> bones;
                 if(options.body==PreviewBody::character)bones=node_names(character_file);
                 else for(const auto& joint:clip.joints)bones.push_back(joint.name);
-                if(std::find(bones.begin(),bones.end(),prop_bone)==bones.end())
-                    throw std::runtime_error("--prop-bone '"+prop_bone+"' is not a bone of "+(options.body==PreviewBody::character?character_file.string():std::string("the SOMA mannequin")));
-                options.prop=prop_file;options.prop_bone=prop_bone;options.prop_offset=prop_offset;options.prop_rotation=prop_rotation;
+                for(const auto& attachment:props) {
+                    if(attachment.bone.empty())throw std::runtime_error("--prop needs --prop-bone BONE (a bone of --character, or a SOMA bone such as RightHand on the mannequin)");
+                    if(std::find(bones.begin(),bones.end(),attachment.bone)==bones.end())
+                        throw std::runtime_error("--prop-bone '"+attachment.bone+"' is not a bone of "+(options.body==PreviewBody::character?character_file.string():std::string("the SOMA mannequin")));
+                }
+                options.props=props;
             } else for(const char* flag:{"--prop-bone","--prop-offset","--prop-rotation"})
                 if(std::find(flags.begin(),flags.end(),flag)!=flags.end())throw std::runtime_error(std::string(flag)+" goes with --prop");
             preview(clip,path,options);

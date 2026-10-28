@@ -157,12 +157,13 @@ static void body_scene(const Clip& c,const fs::path& root,const PreviewOptions& 
             fs::copy_file(options.texture,root/texture,fs::copy_options::overwrite_existing);
         }
     }
-    std::string prop;
-    if(!options.prop.empty()) {
-        auto ext=options.prop.extension().string();for(auto& ch:ext)ch=static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    std::vector<std::string> props;
+    for(size_t i=0;i<options.props.size();++i) {
+        const auto& attachment=options.props[i];
+        auto ext=attachment.mesh.extension().string();for(auto& ch:ext)ch=static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
         if(ext!=".glb"&&ext!=".fbx")throw std::runtime_error("--prop must be a .glb or .fbx mesh");
-        prop="prop"+ext;
-        fs::copy_file(options.prop,root/prop,fs::copy_options::overwrite_existing);
+        props.push_back("prop"+std::to_string(i)+ext);
+        fs::copy_file(attachment.mesh,root/props.back(),fs::copy_options::overwrite_existing);
     }
     // Framing from the whole clip (a get-up starts lying down): where its feet are, its
     // height above them and how far it reaches out from its root.
@@ -189,7 +190,7 @@ asset SkinnedMesh<Corner> body = ")"<<model<<R"(";
 asset Animation motion = "motion.glb";
 )";
     if(!texture.empty())scene<<"asset Texture skin = \""<<texture<<"\";\n";
-    if(!prop.empty())scene<<"asset Mesh<Corner> prop = \""<<prop<<"\";\n";
+    for(size_t i=0;i<props.size();++i)scene<<"asset Mesh<Corner> prop"<<i<<" = \""<<props[i]<<"\";\n";
     scene<<"const float HEIGHT = "<<num(height)<<";\nconst float VIEW = "<<num(view)<<";\nconst float FLOOR = "<<num(low)<<";\n";
     scene<<R"(const float TILE = HEIGHT * 0.22;
 const float SPREAD = VIEW * 0.66;
@@ -212,7 +213,7 @@ local scene Main { }
 )";
     // A prop is drawn in plain light steel on its bone's model matrix without the rig's
     // scale (Synty bones carry 0.01), then offset and turned within that bone.
-    if(!prop.empty()) {
+    if(!props.empty()) {
         scene<<R"(
 frag Steel(Corner corner, out Color color, Instance instance)
 {
@@ -227,12 +228,19 @@ float4x4 Unscaled(float4x4 m)
     return float4x4(float4(Math.Normalize(m.c0.xyz), 0), float4(Math.Normalize(m.c1.xyz), 0), float4(Math.Normalize(m.c2.xyz), 0), m.c3);
 }
 )";
-        const auto& o=options.prop_offset;const auto& r=options.prop_rotation;
-        scene<<"\nconst float4x4 HELD = float4x4.TRS(float3("<<num(o.x)<<", "<<num(o.y)<<", "<<num(o.z)<<"), quaternion.Euler("
+        for(size_t i=0;i<options.props.size();++i) {
+            const auto& o=options.props[i].offset;const auto& r=options.props[i].rotation;
+            scene<<"\nconst float4x4 HELD"<<i<<" = float4x4.TRS(float3("<<num(o.x)<<", "<<num(o.y)<<", "<<num(o.z)<<"), quaternion.Euler("
              <<num(r.x)<<"deg, "<<num(r.y)<<"deg, "<<num(r.z)<<"deg), float3(1));\n";
+        }
     }
     scene<<"\n// One copy of the body at a place on screen, turned about its own centre.\n";
-    scene<<(prop.empty()?"void Panel(Pose pose, float3 centre, float3 at, float turn)\n":"void Panel(Pose pose, Bone grip, float3 centre, float3 at, float turn)\n");
+    std::string grip_parameters,grip_arguments;
+    for(size_t i=0;i<props.size();++i) {
+        grip_parameters+="Bone grip"+std::to_string(i)+", ";
+        grip_arguments+="grip"+std::to_string(i)+", ";
+    }
+    scene<<"void Panel(Pose pose, "<<grip_parameters<<"float3 centre, float3 at, float turn)\n";
     scene<<R"({
     var spin = quaternion.Euler(0, turn, 0);
     var place = Math.Mul(float4x4.TRS(at, spin, float3(1)), float4x4.Translate(float3(-centre.x, 0, -centre.z)));
@@ -249,7 +257,7 @@ float4x4 Unscaled(float4x4 m)
     }
 )";
     scene<<(texture.empty()?"    Draw.SkinnedMesh(body, place, pose, Lit);\n":"    Draw.SkinnedMesh(body, place, pose, skin, Lit);\n");
-    if(!prop.empty())scene<<"    Draw.Mesh(prop, Math.Mul(Math.Mul(place, Unscaled(pose.Model(grip))), HELD), Steel);\n";
+    for(size_t i=0;i<props.size();++i)scene<<"    Draw.Mesh(prop"<<i<<", Math.Mul(Math.Mul(place, Unscaled(pose.Model(grip"<<i<<"))), HELD"<<i<<"), Steel);\n";
     scene<<"}\n";
     scene<<R"(
 view Preview(mut PreviewClock clock)
@@ -261,7 +269,7 @@ view Preview(mut PreviewClock clock)
 )";
     scene<<"    pose.Sample(motion, seconds, Playback."<<(once?"Clamp":"Loop")<<");\n";
     scene<<"    body.skeleton.TryGetByName("<<nlohmann::json(c.joints[c.motion_root].name).dump()<<", out var centreBone);\n";
-    if(!prop.empty())scene<<"    body.skeleton.TryGetByName("<<nlohmann::json(options.prop_bone).dump()<<", out var grip);\n";
+    for(size_t i=0;i<props.size();++i)scene<<"    body.skeleton.TryGetByName("<<nlohmann::json(options.props[i].bone).dump()<<", out var grip"<<i<<");\n";
     scene<<R"(    var centre = Math.Transform(pose.Model(centreBone), float3(0));
     Draw.Clear(Color(0.17, 0.18, 0.21));
     Draw.SetCamera(float3(0, FLOOR + HEIGHT * 0.72, -VIEW * 2.7), quaternion.Euler(6deg, 0, 0), 30);
@@ -269,9 +277,9 @@ view Preview(mut PreviewClock clock)
     // Turned so the first frame faces the camera on the left and shows its right side,
     // facing screen right, on the right (the camera looks along +z).
     float facing=options.facing*180/std::numbers::pi_v<float>;
-    const std::string grip=prop.empty()?"":"grip, ";
-    scene<<"    Panel(pose, "<<grip<<"centre, float3(-SPREAD, 0, 0), "<<num(180-facing)<<"deg);\n";
-    scene<<"    Panel(pose, "<<grip<<"centre, float3(SPREAD, 0, 0), "<<num(90-facing)<<"deg);\n}\n";
+
+    scene<<"    Panel(pose, "<<grip_arguments<<"centre, float3(-SPREAD, 0, 0), "<<num(180-facing)<<"deg);\n";
+    scene<<"    Panel(pose, "<<grip_arguments<<"centre, float3(SPREAD, 0, 0), "<<num(90-facing)<<"deg);\n}\n";
     scene.close();if(!scene)throw std::runtime_error("Cannot write Tide preview scene");
 }
 void preview(const Clip& c,const fs::path& source,const PreviewOptions& options) {
@@ -296,7 +304,9 @@ void preview(const Clip& c,const fs::path& source,const PreviewOptions& options)
     // Files of an earlier preview of the same clip with another body.
     for(const auto& entry:fs::directory_iterator(root)) {
         auto stem=entry.path().stem().string();
-        if(entry.is_regular_file()&&(stem=="character"||stem=="skin"||stem=="prop"))fs::remove(entry.path());
+        const bool prop_asset=stem=="prop"||(stem.starts_with("prop")&&stem.size()>4&&
+            std::all_of(stem.begin()+4,stem.end(),[](unsigned char ch){return std::isdigit(ch);}));
+        if(entry.is_regular_file()&&(stem=="character"||stem=="skin"||prop_asset))fs::remove(entry.path());
     }
     if(options.body!=PreviewBody::skeleton)body_scene(c,root,options,once);
     else {

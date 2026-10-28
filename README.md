@@ -495,6 +495,23 @@ tide-motion preview cut.glb --character PolygonSyntyCharacter.fbx --map examples
   --texture T_Polygon_Dummy_01.png --prop SM_Wep_Sword_01.fbx --prop-bone Prop_R --gif cut.gif
 ```
 
+Repeat `--prop` to preview several attachments, for example sword and shield:
+
+```sh
+tide-motion preview cut.glb --mannequin \
+  --prop sword.glb --prop-bone RightHand --prop-rotation 0,90,0 \
+  --prop shield.glb --prop-bone LeftHand --prop-offset 0,0.1,0 \
+  --capture equipment.png --frames 31
+```
+
+Each `--prop` starts a new attachment. Its following bone, offset and rotation
+options apply to that attachment until the next `--prop`; offsets and rotations
+start at zero for each new attachment. Supply a bone for every prop. These are
+preview attachments: they do not condition generation, solve two-hand grips,
+or add object tracks to the exported animation. Prop size is not included in
+camera framing. See [the prop and first-person investigation](notes/props-first-person.md)
+for model candidates, current limits and the proposed authoring workflow.
+
 Captures use Tide's ordinary bounded capture mode. `--gif OUT.gif` records the
 clip exactly once, from its first frame to its last, at 30 fps and 960 by 540
 (headless, so it works with `TIDE_HIDDEN`); it needs Tide 0.5.0-nightly.45 or

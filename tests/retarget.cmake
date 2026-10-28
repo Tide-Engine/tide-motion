@@ -72,6 +72,11 @@ refuses("drawn on a body" preview "${work}/source.glb" --skeleton --prop "${work
 refuses("goes with --prop" preview "${work}/source.glb" --prop-offset "0,0,0" --capture "${work}/p.png")
 refuses("Use --prop-rotation X,Y,Z" preview "${work}/source.glb" --prop "${work}/target.glb" --prop-bone RightHand --prop-rotation "0,90" --capture "${work}/p.png")
 refuses("glb or .fbx mesh" preview "${work}/source.glb" --prop "${work}/bones.json" --prop-bone RightHand --capture "${work}/p.png" --tide "${CMAKE_COMMAND}")
+# Each repeated prop has its own bone/transform; no bone leaks into the next group.
+refuses("Tide preview failed" preview "${work}/source.glb" --prop "${work}/target.glb" --prop-bone RightHand --prop-offset "0,0.1,0" --prop-rotation "0,90,0" --prop "${work}/target.fbx" --prop-bone LeftHand --prop-offset "0.2,0,0" --capture "${work}/p.png" --tide "${CMAKE_COMMAND}")
+refuses("needs --prop-bone" preview "${work}/source.glb" --prop "${work}/target.glb" --prop-bone RightHand --prop "${work}/target.glb" --capture "${work}/p.png")
+refuses("is not a bone of" preview "${work}/source.glb" --prop "${work}/target.glb" --prop-bone RightHand --prop "${work}/target.glb" --prop-bone MissingHand --capture "${work}/p.png")
+refuses("glb or .fbx mesh" preview "${work}/source.glb" --prop "${work}/target.glb" --prop-bone RightHand --prop "${work}/bones.json" --prop-bone LeftHand --capture "${work}/p.png" --tide "${CMAKE_COMMAND}")
 message(STATUS "Retarget inspect, batch, reverse, FBX, preview and output contracts pass")
 
 # Constraint poses on a mapped custom rig are retargeted to SOMA with --pose-map before
