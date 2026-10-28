@@ -13,15 +13,15 @@ x64 builds include DirectML motion-network acceleration.
 Omitting `--device` uses `auto`: GPU first, then CPU fallback. Text embedding
 remains on CPU; `--device cpu` forces CPU.
 
-MoMask is another opt-in native backend: `generate --backend momask` and
-`inpaint` edit selected ranges of canonical SOMA clips. Supply its prepared ONNX
-weights manually; they are neither bundled nor automatically downloaded, and
-their commercial license scope remains unresolved. See [MoMask setup and tested
-limits](notes/momask-local.md). It supports variants/contact sheets, thread controls,
-in-place/SOMA-77 export and optional Windows DirectML GPU inference (`--device gpu`;
-CPU remains its default). [Supported controls and model limits](notes/momask-capabilities.md)
-explain why Kimodo spatial constraints and ARDY long-form history are different
-model capabilities. Kimodo remains the default.
+MoMask is another opt-in native backend with text generation, prompt sequences,
+source-context continuation (`extend`), range inpainting, pose/path/effector tools,
+candidate selection and loops. Supply its prepared ONNX weights manually; they
+are neither bundled nor automatically downloaded, and their commercial license
+scope remains unresolved. See [setup](notes/momask-local.md) and the
+[tested controls, examples and measured limits](notes/momask-capabilities.md).
+CPU remains its default; Windows DirectML GPU is optional. Spatial targets use
+explicit native postprocessing; these controls do not add learned Kimodo or ARDY
+conditioning inputs to the model. Kimodo remains the default.
 
 The models use canonical SOMA-30 human animations. A reusable bone-mapping file
 retargets between SOMA and your humanoid rig, offline and without another model.

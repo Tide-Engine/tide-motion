@@ -76,30 +76,8 @@ reachability judgments. No findings is not a quality pass. No assets are changed
 See notes/advisory-review.md for settings, coverage and feedback contracts.
 )";
     if(command=="equipment")return equipment_help();
-    if(command=="momask"||command=="inpaint")return R"(tide-motion generate "PROMPT" --backend momask -o OUT.glb [--duration 2] [--seed 0]
-tide-motion inpaint "PROMPT" --source SOMA.glb --begin FRAME --end FRAME -o EDIT.glb
-tide-motion models import-momask BUNDLE_DIRECTORY [--models CACHE]
-tide-motion models check momask [--models CACHE]
-
-MoMask runs natively after you manually supply its prepared ONNX
-bundle in CACHE/momask. It is never downloaded by models install/all.
-ASCII prompts only. Native 20 Hz motion converts to canonical SOMA-30 at 30 Hz.
-Generation duration .2..9.8 seconds rounds down to 4 native samples/token.
-Controls: --steps 2..1000 (18), --guidance 0..10 (4), --residual-guidance 0..10
-(generate 5 / inpaint 2), --temperature (0,10] (1), --topkr [0,1) (.9), --seed.
-Shared controls: --device cpu|auto|gpu (default cpu), --threads 1..1024 (4),
---variants 1..64, --variants-gif, --tide PATH, --rig soma30|soma77, --in-place.
-Windows GPU uses DirectML motion networks; CLIP text stays CPU. Auto falls back
-to CPU; gpu is strict. In-place is generation-only to preserve edited sources.
-Inpaint uses source frames [begin,end), at least 12 frames, in a source no longer
-than 293 frames. Outside poses are kept; endpoints are corrected inside the range.
-SOMA-77 input keeps its extra-joint tracks; generation adds static relaxed hands,
-not predicted fingers. Inpaint preserves the input's rig by default.
---models CACHE follows TIDE_MOTION_MODELS or the OS cache when omitted.
-Kimodo spatial constraints/ARDY history controls are not accepted. Weight rights remain unresolved;
-manual import does not grant commercial rights. See notes/momask-local.md.
-)";
-    if(command=="dart")return R"(tide-motion dart PLAN.json -o OUT.glb [--models DIR] [--threads N] [--device auto|gpu|cpu]
+    if(command=="momask"||command=="inpaint"||command=="extend")return momask_help();
+    if(command=="dart")return R"(tide-motion dart PLAN.json -o OUT.glb [--models DIR] [--threads N]
 
 Native offline DART free-text timelines, source continuation, goals and inbetweening.
 Install explicitly with models install dart --accept-licenses. Canonical SOMA, 30 Hz.
@@ -128,7 +106,7 @@ Generates a SOMA-30 clip from text (30 fps).
 
   --backend kimodo|ardy|momask Backend (default Kimodo); MoMask weights are manual-only
                               MoMask controls/limits: tide-motion help momask
-  --history FILE.glb          ARDY imported SOMA history (last up to 240 frames)
+  --history FILE.glb          Imported SOMA context for ARDY or MoMask
   --history-frames N          ARDY visible history, 4..240, multiple of four
                               ARDY uses 1..10 steps (default 10), switches --then
                               prompts on 60-frame chunk boundaries, without blending.
@@ -138,7 +116,8 @@ Generates a SOMA-30 clip from text (30 fps).
 
       --model v1.1|v1.2      Smooth-root SOMA-RP checkpoint (default v1.1)
   -o, --output FILE.glb       New output (a FILE.glb.json recipe is written beside it)
-  --duration SECONDS          Prompt length: Kimodo 0.2..10, ARDY 0.2..600 (default 3)
+  --duration SECONDS          Prompt length: Kimodo 0.2..10, ARDY/MoMask 0.2..600
+                              Default: Kimodo/ARDY 3, MoMask 2; see help momask
   --then "PROMPT"             Continue with another prompt (up to 16 in total); a
                               --duration after it sets that prompt's length
   --transition FRAMES         Frames blended between prompts, 1..60 (default 5)
@@ -335,7 +314,7 @@ metres); examples/synty-polygon.json maps Synty POLYGON characters.
 )";
     if(command=="batch")return R"(tide-motion batch JOBS.json [--models DIR]
 
-Runs ordered generate, inpaint, connect, pose-sequence, dart, retarget, equipment, cleanup and mirror actions, loading each model
+Runs ordered generate, inpaint, extend, connect, pose-sequence, dart, retarget, equipment, cleanup and mirror actions, loading each model
 once.
 The whole manifest and every output path are checked before anything runs.
 Paths are relative to the manifest. README.md lists every action field.
@@ -440,6 +419,7 @@ void help(std::string_view command={}) {
       [--device auto|gpu|cpu] [--threads N]
   tide-motion generate "PROMPT" --backend momask -o CLIP.glb [--duration 2] [--seed 0]
   tide-motion inpaint "PROMPT" --source SOMA.glb --begin F --end F -o EDIT.glb
+  tide-motion extend "PROMPT" --source SOMA.glb --duration SECONDS -o LONGER.glb
   tide-motion models import-momask BUNDLE_DIRECTORY [--models DIR]
   tide-motion connect FROM.glb TO.glb -o BRIDGE.glb [--tokens N|MIN..MAX] [--joined]
       [--offset X Y Z] [--from-clip NAME] [--to-clip NAME] [--threads N]
@@ -701,25 +681,52 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
         std::set<std::string> keys{"action","output"};
         std::vector<std::string> argv{"tide-motion",type};
         unsigned variants=1;bool sheet_gif=false;
-        bool momask_action=type=="inpaint"||(type=="generate"&&action.value("backend",std::string("kimodo"))=="momask");
+        bool momask_action=type=="inpaint"||type=="extend"||(type=="generate"&&action.value("backend",std::string("kimodo"))=="momask");
         bool deferred_source=false;
         if(momask_action) {
             if(action.value("backend",std::string("momask"))!="momask")throw std::runtime_error("inpaint backend must be momask");
-            keys.insert({"backend","prompt","duration","seed","steps","guidance","residualGuidance","temperature","topkr","source","begin","end","variants","variantsGif","tide","threads","device","rig","inPlace"});
-            argv.insert(argv.end(),{action.at("prompt").get<std::string>(),"--backend","momask"});
+            keys.insert({"backend","prompt","prompts","duration","seed","steps","guidance","residualGuidance","temperature","topkr","source","begin","end","ranges","variants","variantsGif","tide","threads","device","rig","inPlace","sampling","residualLayers","residualTemperature","residualTopkr","unconditional","history","historyFrames","chunkFrames","startPose","endPose","keyframes","effectors","path","endAt","poseMap","placement","follow","correction","correctionFrames","densePath","pathMargin","fitPoses","footsteps","attempts","loop","contactsOut","contextOverlapTokens","preserveContextResiduals","preserveRoot","editMode"});
+            if(action.contains("prompts")) {
+                if(action.contains("prompt")||action.contains("duration"))throw std::runtime_error("Use prompts or prompt/duration, not both");
+                const auto& prompts=action["prompts"];if(!prompts.is_array()||prompts.empty()||prompts.size()>16)throw std::runtime_error("MoMask prompts must contain 1..16 segments");
+                for(size_t i=0;i<prompts.size();++i){const auto& part=prompts[i];if(!part.is_object())throw std::runtime_error("MoMask prompt segment must be an object");for(const auto& item:part.items())if(item.key()!="text"&&item.key()!="prompt"&&item.key()!="duration")throw std::runtime_error("Unknown MoMask segment field");if(part.contains("text")&&part.contains("prompt"))throw std::runtime_error("Use prompt or text for a segment, not both");if(i)argv.push_back("--then");argv.push_back(part.at(part.contains("prompt")?"prompt":"text").get<std::string>());if(part.contains("duration")){if(!part["duration"].is_number())throw std::runtime_error("Segment duration must be numeric");argv.insert(argv.end(),{"--duration",part["duration"].dump()});}}
+            } else argv.push_back(action.at("prompt").get<std::string>());
+            argv.insert(argv.end(),{"--backend","momask"});
             if(action.contains("source")) {
                 auto source=path(action["source"]);deferred_source=outputs.contains(source);
                 if(!fs::exists(source)&&!deferred_source)throw std::runtime_error("MoMask source does not exist and is not an earlier batch output");
                 argv.insert(argv.end(),{"--source",source.string()});
             }
-            for(auto pair:{std::pair{"guidance","--guidance"},std::pair{"residualGuidance","--residual-guidance"},std::pair{"temperature","--temperature"},std::pair{"topkr","--topkr"},std::pair{"begin","--begin"},std::pair{"end","--end"}})if(action.contains(pair.first)) {
+            if(action.contains("history")){auto history=path(action["history"]);bool deferred=outputs.contains(history);if(!fs::exists(history)&&!deferred)throw std::runtime_error("MoMask history is not an existing file or earlier output");deferred_source|=deferred;argv.insert(argv.end(),{"--history",history.string()});}
+            if(action.contains("ranges")){const auto& ranges=action["ranges"];if(!ranges.is_array()||ranges.empty()||ranges.size()>1000)throw std::runtime_error("MoMask ranges must contain 1..1000 pairs");for(const auto& range:ranges){if(!range.is_array()||range.size()!=2||!range[0].is_number()||!range[1].is_number())throw std::runtime_error("MoMask range must be [begin,end]");argv.insert(argv.end(),{"--range",range[0].dump(),range[1].dump()});}}
+            for(auto pair:{std::pair{"guidance","--guidance"},std::pair{"residualGuidance","--residual-guidance"},std::pair{"temperature","--temperature"},std::pair{"topkr","--topkr"},std::pair{"begin","--begin"},std::pair{"end","--end"},std::pair{"residualLayers","--residual-layers"},std::pair{"residualTemperature","--residual-temperature"},std::pair{"residualTopkr","--residual-topkr"},std::pair{"historyFrames","--history-frames"},std::pair{"chunkFrames","--chunk-frames"},std::pair{"contextOverlapTokens","--context-overlap-tokens"}})if(action.contains(pair.first)) {
                 if(!action[pair.first].is_number())throw std::runtime_error(std::string(pair.first)+" must be numeric");
                 argv.insert(argv.end(),{pair.second,action[pair.first].dump()});
             }
             if(action.contains("variants")) {if(!action["variants"].is_number())throw std::runtime_error("variants must be numeric");variants=static_cast<unsigned>(integer(action["variants"].dump(),1,64,"variants"));argv.insert(argv.end(),{"--variants",std::to_string(variants)});}
             if(action.value("variantsGif",false)){sheet_gif=true;argv.push_back("--variants-gif");}
             if(action.value("inPlace",false))argv.push_back("--in-place");
-            for(auto pair:{std::pair{"device","--device"},std::pair{"rig","--rig"},std::pair{"tide","--tide"}})if(action.contains(pair.first))argv.insert(argv.end(),{pair.second,action[pair.first].get<std::string>()});
+            if(action.value("unconditional",false))argv.push_back("--unconditional");
+            if(action.value("preserveContextResiduals",false))argv.push_back("--preserve-context-residuals");
+            if(action.value("preserveRoot",false))argv.push_back("--preserve-root");
+            for(auto pair:{std::pair{"device","--device"},std::pair{"rig","--rig"},std::pair{"tide","--tide"},std::pair{"sampling","--sampling"},std::pair{"editMode","--edit-mode"}})if(action.contains(pair.first))argv.insert(argv.end(),{pair.second,action[pair.first].get<std::string>()});
+            auto numeric=[](const nlohmann::json& value){if(!value.is_number())throw std::runtime_error("MoMask constraint value must be numeric");return value.dump();};
+            auto reference=[&](const nlohmann::json& value,const char* source_frame){
+                std::string text;if(value.is_string())text=value.get<std::string>();else {if(!value.is_object())throw std::runtime_error("MoMask pose is a path or file/frame object");for(const auto& field:value.items())if(field.key()!="file"&&field.key()!=source_frame&&field.key()!="frame"&&field.key()!="effectors")throw std::runtime_error("Unknown MoMask pose field");text=value.at("file").get<std::string>();if(value.contains(source_frame))text+="@"+numeric(value.at(source_frame));}
+                auto ref=pose_ref(text);auto file=path(ref.file);bool deferred=outputs.contains(file);if(!fs::exists(file)&&!deferred)throw std::runtime_error("MoMask pose file is not an earlier output or existing file");deferred_source|=deferred;return file.string()+(ref.frame?"@"+std::to_string(*ref.frame):"");
+            };
+            for(auto pair:{std::pair{"startPose","--start-pose"},std::pair{"endPose","--end-pose"}})if(action.contains(pair.first))argv.insert(argv.end(),{pair.second,reference(action[pair.first],"frame")});
+            for(const char* key:{"keyframes","effectors","path"})if(action.contains(key)&&(!action[key].is_array()||action[key].empty()))throw std::runtime_error(std::string(key)+" must be a nonempty array");
+            if(action.contains("keyframes"))for(const auto& item:action["keyframes"])argv.insert(argv.end(),{"--keyframe",numeric(item.at("frame")),reference(item,"sourceFrame")});
+            if(action.contains("effectors"))for(const auto& item:action["effectors"]){std::string parts;if(item.at("effectors").is_array()){for(const auto& part:item["effectors"]){if(!parts.empty())parts+=',';parts+=part.get<std::string>();}}else parts=item["effectors"].get<std::string>();argv.insert(argv.end(),{"--effector",parts,numeric(item.at("frame")),reference(item,"sourceFrame")});}
+            if(action.contains("path"))for(const auto& item:action["path"]){for(const auto& field:item.items())if(field.key()!="x"&&field.key()!="z"&&field.key()!="yaw"&&field.key()!="frame")throw std::runtime_error("Unknown MoMask path field");std::string point=numeric(item.at("x"))+","+numeric(item.at("z"));if(item.contains("yaw"))point+=","+numeric(item.at("yaw"));point+="@"+numeric(item.at("frame"));argv.insert(argv.end(),{"--path",point});}
+            if(action.contains("endAt")){const auto& point=action["endAt"];if(!point.is_array()||point.size()<2||point.size()>3)throw std::runtime_error("MoMask endAt is [x,z,yaw?]");std::string text;for(const auto& v:point){if(!text.empty())text+=',';text+=numeric(v);}argv.insert(argv.end(),{"--end-at",text});}
+            for(auto pair:{std::pair{"placement","--placement"},std::pair{"follow","--follow"},std::pair{"correction","--correction"}})if(action.contains(pair.first))argv.insert(argv.end(),{pair.second,action[pair.first].get<std::string>()});
+            for(auto pair:{std::pair{"correctionFrames","--correction-frames"},std::pair{"pathMargin","--path-margin"},std::pair{"footsteps","--footsteps"},std::pair{"attempts","--attempts"}})if(action.contains(pair.first))argv.insert(argv.end(),{pair.second,numeric(action[pair.first])});
+            if(action.value("densePath",false))argv.push_back("--dense-path");
+            if(action.value("fitPoses",false))argv.push_back("--fit-poses");
+            if(action.value("loop",false))argv.push_back("--loop");
+            if(action.contains("poseMap"))argv.insert(argv.end(),{"--pose-map",path(action["poseMap"]).string()});
         } else if(type=="dart") {
             keys.insert({"plan","threads","device","batchSize"});auto plan=path(action.at("plan"));auto p=load_dart_plan(plan,true);
             for(const auto& input:{p.history_file,p.source_file,p.optimization?p.optimization->target_file:fs::path{}})if(!input.empty()&&!fs::exists(input)){auto parent=input;bool known=outputs.contains(parent);if(parent.extension()==".json"){parent.replace_extension();known=known||outputs.contains(parent);}if(!known)throw std::runtime_error("DART input does not exist and is not an earlier batch output: "+input.string());}
@@ -881,7 +888,7 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
             if(action.contains("clip"))argv.insert(argv.end(),{"--clip",action["clip"].get<std::string>()});
             keys.insert({"source","target","map","toSoma","clip"});
         }
-        else throw std::runtime_error("Action must be generate, inpaint, connect, pose-sequence, dart, retarget, equipment, cleanup or mirror");
+        else throw std::runtime_error("Action must be generate, inpaint, extend, connect, pose-sequence, dart, retarget, equipment, cleanup or mirror");
         for(const auto& item:action.items())if(!keys.contains(item.key()))throw std::runtime_error("Unknown action field: "+item.key());
         auto output=path(action.at("output"));
         if(output.extension()!=".glb")throw std::runtime_error("Output must be a .glb path: "+output.string());
@@ -901,9 +908,9 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
         if(type=="equipment"&&action.contains("bodyOutput")) {
             auto body=path(action["bodyOutput"]);if(body.extension()!=".glb")throw std::runtime_error("Equipment bodyOutput must be .glb");written.push_back(body);
         }
-        for(const auto& file:written)if(fs::exists(file)||fs::exists(file.string()+".part")||fs::exists(file.string()+".json")||!outputs.insert(file).second)throw std::runtime_error("Output must be a new, distinct path: "+file.string());
+        for(const auto& file:written){if(fs::exists(file)||fs::exists(file.string()+".part")||fs::exists(file.string()+".json")||!outputs.insert(file).second)throw std::runtime_error("Output must be a new, distinct path: "+file.string());if(file.extension()==".glb"&&!outputs.insert(fs::path(file.string()+".json")).second)throw std::runtime_error("Output recipe must have a distinct path: "+file.string());}
         argv.insert(argv.end(),{"-o",output.string()});
-        if(type=="generate"||type=="inpaint"||type=="connect"||type=="pose-sequence"||type=="dart")argv.insert(argv.end(),{"--models",models.string()});
+        if(type=="generate"||type=="inpaint"||type=="extend"||type=="connect"||type=="pose-sequence"||type=="dart")argv.insert(argv.end(),{"--models",models.string()});
         if(action.contains("tokens")&&action["tokens"].is_array()) {
             const auto& range=action["tokens"];
             if(range.size()!=2||!range[0].is_number()||!range[1].is_number())throw std::runtime_error("tokens is an integer or [min, max]");
@@ -919,7 +926,7 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
         for(const char* key:{"duration","seed","steps","tokens","threads"})if(action.contains(key)&&!action[key].is_array()) {
             if(!action[key].is_number())throw std::runtime_error(std::string(key)+" must be numeric");
             auto text=action[key].dump();
-            if(std::string(key)=="duration")number(text,0.2,action.value("backend",std::string("kimodo"))=="ardy"?600:10,key);
+            if(std::string(key)=="duration")number(text,0.2,(action.value("backend",std::string("kimodo"))=="ardy"||momask_action)?600:10,key);
             else if(std::string(key)=="tokens")(void)parse_bricks_tokens(text);
             else if(std::string(key)=="steps")integer(text,1,1000,key);
             else if(std::string(key)=="threads")integer(text,1,1024,key);
@@ -998,7 +1005,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     if(args.size()>1) {
         bool selected=false;
         if(args[1]=="generate")for(size_t i=2;i+1<args.size();++i)if(args[i]=="--backend"&&args[i+1]=="momask")selected=true;
-        if(selected||args[1]=="inpaint"||args[1]=="momask")return run_momask(args,context);
+        if(selected||args[1]=="inpaint"||args[1]=="extend"||args[1]=="momask")return run_momask(args,context);
     }
     if(args.size()<2||args[1]=="--help"||args[1]=="-h") { help();return 0; }
     auto unknown=[](const std::string& name){return std::runtime_error("Unknown command: "+name+"; tide-motion --help lists the commands");};

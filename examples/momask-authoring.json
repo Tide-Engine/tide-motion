@@ -1,0 +1,29 @@
+{
+  "actions": [
+    {
+      "action": "generate", "backend": "momask",
+      "prompts": [
+        {"prompt": "A person walks forward.", "duration": 4},
+        {"prompt": "A person waves with the right hand.", "duration": 4}
+      ],
+      "seed": 7, "output": "sequence.glb"
+    },
+    {
+      "action": "extend", "source": "sequence.glb",
+      "prompt": "A person turns left while walking.",
+      "duration": 3, "seed": 3, "output": "extended.glb"
+    },
+    {
+      "action": "inpaint", "source": "extended.glb",
+      "prompt": "A person walks forward and waves.",
+      "ranges": [[30, 90], [150, 210]],
+      "preserveRoot": true, "seed": 4, "output": "edited.glb"
+    },
+    {
+      "action": "generate", "backend": "momask",
+      "prompt": "A person walks forward.",
+      "path": [{"x": 0, "z": 0, "frame": 0}, {"x": 1, "z": 2, "frame": 88}],
+      "densePath": true, "duration": 3, "seed": 7, "output": "path.glb"
+    }
+  ]
+}

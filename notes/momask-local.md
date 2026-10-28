@@ -46,7 +46,7 @@ non-humanoid retargeting is introduced. English prompts are examples, not hard
 semantic constraints. Feet can slide/penetrate the floor; contact IK remains a
 separate existing optional Tide Motion operation, not part of this model.
 
-Controls: duration .2..9.8 seconds (generation only), seed 0..4294967295,
+Controls: duration .2..600 seconds (generation only), seed 0..4294967295,
 steps 2..1000 (18 default), guidance 0..10 (4), residual-guidance 0..10
 (generation 5 / editing 2), temperature (0,10] (1), topkr [0,1) (.9).
 Motion lengths floor to four native **20 Hz** samples/token. Conversion samples
@@ -83,7 +83,9 @@ may also be outputs of earlier actions in the same batch; their clip validation
 is deferred until produced. One model context verifies files once and reuses all
 five ORT sessions across interleaved actions. A failed job stops and keeps completed
 outputs. Device/threads/variants/rig/inPlace fields are supported too. This does
-not add Kimodo spatial constraint inputs or ARDY long-form history to MoMask.
+not add learned Kimodo spatial inputs or ARDY autoregressive inputs to MoMask;
+current token-context and postprocessing controls are listed in the capability
+document.
 
 Recipes record the actual bundle hash, rights status, prompt, seed, sampler/RNG
 version, effective controls, CLIP token IDs, base/final RVQ token IDs, source

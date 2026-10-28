@@ -15,9 +15,9 @@ std::vector<unsigned char> read(const fs::path& path,size_t size) {
     return bytes;
 }
 int main(int argc,char** argv) try {
-    if(argc!=2)throw std::runtime_error("Usage: momask-gpu-tests PRIVATE_EXPORT_DIRECTORY");
+    if(argc!=2&&argc!=3)throw std::runtime_error("Usage: momask-gpu-tests PRIVATE_FIXTURE_DIRECTORY [PRIVATE_MODEL_DIRECTORY]");
     auto root=utf8path(argv[1]);json report;std::ifstream(root/"report.json")>>report;
-    MomaskGpu gpu(root,4);size_t cases=0;
+    MomaskGpu gpu(argc==3?utf8path(argv[2]):root,4);size_t cases=0;
     for(const auto& [name,component]:report.at("components").items()) {
         if(name=="text")continue; // CLIP remains the already-validated CPU path.
         for(const auto& test:component.at("cases")) {

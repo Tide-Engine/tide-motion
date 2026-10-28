@@ -2,6 +2,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+const char* momask_help();
 class MomaskContext {
     struct Impl;
     std::unique_ptr<Impl> impl;

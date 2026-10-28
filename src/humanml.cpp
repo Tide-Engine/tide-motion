@@ -12,6 +12,7 @@ namespace {
 constexpr int parents[22]={-1,0,0,0,1,2,3,4,5,6,7,8,9,9,9,12,13,14,16,17,18,19};
 constexpr int primary[22]={3,4,5,6,7,8,9,10,11,12,-1,-1,15,16,17,-1,18,19,20,21,-1,-1};
 constexpr size_t mapping[22]={0,22,26,1,23,27,2,24,28,3,25,29,5,10,16,6,11,17,12,18,13,19};
+constexpr Vec3 raw_offsets[22]={{0,0,0},{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,-1,0},{0,1,0},{0,-1,0},{0,-1,0},{0,1,0},{0,0,1},{0,0,1},{0,1,0},{1,0,0},{-1,0,0},{0,0,1},{0,-1,0},{0,-1,0},{0,-1,0},{0,-1,0},{0,-1,0},{0,-1,0}};
 void check(std::span<const Row> rows) {
     if(rows.empty()||rows.size()>18000)throw std::runtime_error("Invalid HumanML frame count");
     for(const auto& row:rows)for(float v:row)if(!std::isfinite(v))throw std::runtime_error("Nonfinite HumanML feature");
@@ -94,12 +95,12 @@ std::vector<Positions> rotation_fk(std::span<const Row> rows,const Positions& of
     }
     return result;
 }
-Encoded from_soma(const Clip& clip) {
+Encoded from_soma(const Clip& clip,const Reference* reference) {
     require_soma(clip);if(clip.fps!=30)throw std::runtime_error("MoMask source must be canonical 30 Hz SOMA");
     size_t count=(((clip.frames()-1)*2+2)/3+1+3)/4*4;
     if(count<4||count>196)throw std::runtime_error("MoMask source must fit 196 samples at 20 Hz");
-    Encoded result;result.origin=clip.frame(0)[0].p;result.origin.y=0;
-    result.heading=kimodo_heading(clip,clip.frame(0));Quat alignment=yaw(-result.heading);
+    Encoded result;result.origin=reference?reference->origin:clip.frame(0)[0].p;result.origin.y=0;
+    result.heading=reference?reference->heading:kimodo_heading(clip,clip.frame(0));Quat alignment=yaw(-result.heading);
     std::vector<Positions> world(count+1);std::vector<float> headings(count+1);
     for(size_t f=0;f<=count;++f) {
         auto pose=sample(clip,static_cast<float>(f)/20);auto w=world_pose(clip,pose);
@@ -108,7 +109,6 @@ Encoded from_soma(const Clip& clip) {
         if(f) {while(headings[f]-headings[f-1]>std::numbers::pi_v<float>)headings[f]-=2*std::numbers::pi_v<float>;
                while(headings[f]-headings[f-1]<-std::numbers::pi_v<float>)headings[f]+=2*std::numbers::pi_v<float>;}
     }
-    constexpr Vec3 raw[22]={{0,0,0},{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,-1,0},{0,1,0},{0,-1,0},{0,-1,0},{0,1,0},{0,0,1},{0,0,1},{0,1,0},{1,0,0},{-1,0,0},{0,0,1},{0,-1,0},{0,-1,0},{0,-1,0},{0,-1,0},{0,-1,0},{0,-1,0}};
     for(size_t f=0;f<count;++f) {
         Row r{};Quat q=yaw(-headings[f]),next=yaw(-headings[f+1]);
         r[0]=(headings[f]-headings[f+1])/2;Vec3 velocity=rotate(next,world[f+1][0]-world[f][0]);r[1]=velocity.x;r[2]=velocity.z;r[3]=world[f][0].y;
@@ -116,7 +116,7 @@ Encoded from_soma(const Clip& clip) {
         auto put=[&](size_t i,Vec3 v){r[i]=v.x;r[i+1]=v.y;r[i+2]=v.z;};
         for(size_t j=1;j<22;++j) {
             Vec3 p=world[f][j];p.x-=world[f][0].x;p.z-=world[f][0].z;put(4+(j-1)*3,rotate(q,p));
-            edges[j]=from_to(raw[j],world[f][j]-world[f][static_cast<size_t>(parents[j])]);
+            edges[j]=from_to(raw_offsets[j],world[f][j]-world[f][static_cast<size_t>(parents[j])]);
             Quat parent=(j==13||j==14)?q:edges[static_cast<size_t>(parents[j])];Quat local=normalized(inverse(parent)*edges[j]);
             put(67+(j-1)*6,rotate(local,{1,0,0}));put(70+(j-1)*6,rotate(local,{0,1,0}));
         }
@@ -144,10 +144,21 @@ Clip to_soma(std::span<const Row> rows) {
                 auto child=static_cast<size_t>(primary[h]);
                 Vec3 base=reference[mapping[child]].p-reference[s].p;
                 Vec3 direction=points[f][child]-points[f][static_cast<size_t>(h)];
-                // The source's incoming-edge frame contains roll information;
-                // use its Y axis as a hint, with an explicit degenerate fallback.
-                Vec3 hint=rotate(edges[f][child],{0,1,0});
-                world[s]=normalized(frame(direction,hint)*inverse(frame(base,{0,1,0})));
+                // Pick an axis perpendicular to the source bone. Using Y for
+                // a Y-directed limb magnifies decoder RIC/6D disagreement into
+                // arbitrary 90/180 degree roll changes between nearby frames.
+                Vec3 axis=std::abs(raw_offsets[child].y)>.5f?Vec3{1,0,0}:Vec3{0,1,0};
+                Vec3 reference_hint=rotate(from_to(raw_offsets[child],base),axis);
+                Vec3 hint=rotate(edges[f][child],axis);
+                // A central spine bone alone cannot determine torso yaw.
+                // Its explicitly mapped left/right collars supply that plane.
+                if(h==3||h==6||h==9||h==12) {
+                    Vec3 across=points[f][13]-points[f][14];
+                    if(dot(cross(direction,across),cross(direction,across))>1e-10f) {
+                        hint=across;reference_hint=reference[mapping[13]].p-reference[mapping[14]].p;
+                    }
+                }
+                world[s]=normalized(frame(direction,hint)*inverse(frame(base,reference_hint)));
             } else world[s]=parent; // unpredicted leaves/helpers retain local rest
             local.q=normalized(inverse(parent)*world[s]);native.poses.push_back(local);
         }

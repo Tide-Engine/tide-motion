@@ -70,6 +70,20 @@ int main(int argc,char** argv) {
         expect(near(normalized(w[24].p-w[23].p),normalized(expected[24].p-expected[23].p)),"articulated knee direction");
         for(size_t f=0;f<canonical.frames();++f)for(size_t j=1;j<30;++j)
             expect(near(canonical.frame(f)[j].p,canonical.joints[j].rest.p),"canonical lengths fixed");
+        // Independent continuity invariant: tiny decoder disagreement between
+        // RIC and the rotation columns must not produce a large bone-roll flip.
+        Clip neutral;neutral.joints=soma();for(size_t f=0;f<11;++f)for(const auto& joint:neutral.joints)neutral.poses.push_back(joint.rest);
+        auto neutral_features=h::from_soma(neutral).rows;auto perturbed=neutral_features;
+        for(size_t f=0;f<perturbed.size();++f)for(size_t i=67;i<193;++i)perturbed[f][i]+=static_cast<float>((static_cast<int>(f*13+i*7)%17)-8)*1e-5f;
+        auto stable=h::to_soma(neutral_features),noisy=h::to_soma(perturbed);
+        for(size_t f=0;f<stable.frames();++f)for(size_t j=0;j<30;++j){auto a=stable.frame(f)[j].q,b=noisy.frame(f)[j].q;float d=std::abs(a.x*b.x+a.y*b.y+a.z*b.z+a.w*b.w);expect(d>.9999f,"small feature noise caused a bone-roll discontinuity");}
+        // Separate known-token fragments must share the window's heading frame.
+        // Independent sampling at +6 canonical frames is +4 native samples.
+        Clip moving;moving.joints=soma();for(size_t f=0;f<35;++f){for(const auto& joint:moving.joints)moving.poses.push_back(joint.rest);moving.frame(f)[0].p={.03f*static_cast<float>(f),1,.01f*static_cast<float>(f)};moving.frame(f)[0].q=yaw(.02f*static_cast<float>(f));}
+        auto whole=h::from_soma(moving);h::Reference shared{whole.origin,whole.heading};
+        Clip fragment=moving;fragment.poses.assign(moving.poses.begin()+6*30,moving.poses.end());
+        auto fragment_rows=h::from_soma(fragment,&shared).rows;
+        for(size_t f=0;f<16;++f)for(size_t i=0;i<h::features;++i)expect(std::abs(fragment_rows[f][i]-whole.rows[f+4][i])<2e-5f,"observed fragment common-reference features differ");
         auto edited=canonical;edited.frame(3)[0].p.x+=0.02f;
         auto spliced=h::splice(canonical,edited,2,5);
         for(size_t f=0;f<canonical.frames();++f)for(size_t j=0;j<30;++j) {

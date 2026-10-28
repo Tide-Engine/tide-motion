@@ -1,0 +1,257 @@
+{
+  "actions": [
+    {
+      "backend": "momask",
+      "duration": 3,
+      "output": "baseline.glb",
+      "prompt": "A person walks forward.",
+      "action": "generate",
+      "seed": 7
+    },
+    {
+      "backend": "momask",
+      "duration": 3,
+      "rig": "soma77",
+      "output": "idle77.glb",
+      "prompt": "A person stands still in a relaxed pose.",
+      "action": "generate",
+      "seed": 2
+    },
+    {
+      "output": "wave77.glb",
+      "seed": 3,
+      "end": 66,
+      "prompt": "A person waves with the right hand.",
+      "action": "inpaint",
+      "source": "idle77.glb",
+      "begin": 18
+    },
+    {
+      "output": "poses.glb",
+      "prompt": "A person kicks forward with the right leg.",
+      "backend": "momask",
+      "attempts": 4,
+      "seed": 1,
+      "duration": 3,
+      "startPose": "idle77.glb@0",
+      "fitPoses": true,
+      "action": "generate",
+      "endPose": "idle77.glb@0"
+    },
+    {
+      "output": "keyframe.glb",
+      "prompt": "A person walks forward and raises the right hand.",
+      "backend": "momask",
+      "keyframes": [
+        {
+          "frame": 44,
+          "file": "wave77.glb",
+          "sourceFrame": 40
+        }
+      ],
+      "seed": 2,
+      "duration": 3,
+      "startPose": "idle77.glb@0",
+      "endAt": [
+        1,
+        2,
+        60
+      ],
+      "action": "generate",
+      "endPose": "idle77.glb@0",
+      "follow": "ends"
+    },
+    {
+      "prompt": "A person walks forward.",
+      "densePath": true,
+      "duration": 3,
+      "seed": 7,
+      "output": "path.glb",
+      "path": [
+        {
+          "frame": 0,
+          "x": 0,
+          "z": 0
+        },
+        {
+          "frame": 44,
+          "x": 0.5,
+          "z": 1
+        },
+        {
+          "frame": 88,
+          "x": 1,
+          "z": 2
+        }
+      ],
+      "action": "generate",
+      "backend": "momask"
+    },
+    {
+      "prompt": "A person raises the right hand.",
+      "startPose": "idle77.glb@0",
+      "effectors": [
+        {
+          "frame": 44,
+          "effectors": "right-hand",
+          "file": "wave77.glb",
+          "sourceFrame": 40
+        }
+      ],
+      "duration": 3,
+      "seed": 2,
+      "output": "effector.glb",
+      "action": "generate",
+      "backend": "momask"
+    },
+    {
+      "prompt": "A person walks forward.",
+      "contactsOut": "contacts.json",
+      "duration": 3,
+      "seed": 7,
+      "output": "corrected.glb",
+      "correction": "motion",
+      "action": "generate",
+      "backend": "momask"
+    },
+    {
+      "prompt": "A person walks forward.",
+      "action": "generate",
+      "seed": 7,
+      "output": "loop.glb",
+      "backend": "momask",
+      "duration": 3,
+      "loop": true,
+      "inPlace": true
+    },
+    {
+      "attempts": 3,
+      "prompt": "A person stands still in a relaxed pose.",
+      "duration": 3,
+      "seed": 0,
+      "output": "selected.glb",
+      "footsteps": 0,
+      "action": "generate",
+      "backend": "momask"
+    },
+    {
+      "backend": "momask",
+      "prompts": [
+        {
+          "prompt": "A person walks forward.",
+          "duration": 4
+        },
+        {
+          "text": "A person waves with the right hand.",
+          "duration": 4
+        }
+      ],
+      "seed": 7,
+      "action": "generate",
+      "output": "timeline.glb"
+    },
+    {
+      "backend": "momask",
+      "history": "timeline.glb",
+      "duration": 3,
+      "output": "history.glb",
+      "prompt": "A person turns left while walking.",
+      "action": "generate",
+      "seed": 7
+    },
+    {
+      "duration": 3,
+      "preserveContextResiduals": true,
+      "output": "extend77.glb",
+      "prompt": "A person waves with the right hand.",
+      "action": "extend",
+      "source": "idle77.glb",
+      "seed": 3
+    },
+    {
+      "backend": "momask",
+      "duration": 30,
+      "output": "long.glb",
+      "prompt": "A person walks forward.",
+      "action": "generate",
+      "seed": 7
+    },
+    {
+      "ranges": [
+        [
+          320,
+          400
+        ],
+        [
+          610,
+          700
+        ]
+      ],
+      "output": "multi.glb",
+      "prompt": "A person walks forward and waves.",
+      "action": "inpaint",
+      "source": "long.glb",
+      "seed": 4
+    },
+    {
+      "output": "continuous.glb",
+      "seed": 4,
+      "end": 740,
+      "prompt": "A person walks forward and waves.",
+      "action": "inpaint",
+      "source": "long.glb",
+      "begin": 180
+    },
+    {
+      "editMode": "anchored",
+      "prompt": "A person walks forward and waves.",
+      "end": 740,
+      "source": "long.glb",
+      "begin": 180,
+      "seed": 4,
+      "output": "anchored.glb",
+      "action": "inpaint"
+    },
+    {
+      "prompt": "A person waves with the right hand.",
+      "end": 740,
+      "source": "long.glb",
+      "begin": 180,
+      "seed": 4,
+      "output": "root-locked.glb",
+      "preserveRoot": true,
+      "action": "inpaint"
+    },
+    {
+      "output": "gumbel.glb",
+      "residualTopkr": 0.8,
+      "prompt": "A person walks forward.",
+      "backend": "momask",
+      "seed": 7,
+      "duration": 3,
+      "residualLayers": 2,
+      "residualTemperature": 0.8,
+      "action": "generate",
+      "sampling": "gumbel"
+    },
+    {
+      "unconditional": true,
+      "output": "greedy.glb",
+      "prompt": "A person walks forward.",
+      "backend": "momask",
+      "seed": 7,
+      "duration": 2,
+      "residualLayers": 0,
+      "action": "generate",
+      "sampling": "greedy"
+    },
+    {
+      "action": "generate",
+      "backend": "momask",
+      "prompt": "A person stands still.",
+      "duration": 0.2,
+      "seed": 7,
+      "output": "single-token.glb"
+    }
+  ]
+}

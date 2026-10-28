@@ -250,7 +250,7 @@ install(FILES notes/implementation.md notes/ardy-native.md notes/ardy-feasibilit
 install(FILES notes/soma-rp-comparison.md DESTINATION notes COMPONENT runtime)
 install(FILES notes/dart-backend.md notes/dart-controls.md notes/dart-feasibility.md DESTINATION notes COMPONENT runtime)
 install(FILES notes/dart-models.json DESTINATION notes COMPONENT runtime)
-install(FILES notes/advisory-review.md DESTINATION notes COMPONENT runtime)
+install(FILES notes/advisory-review.md notes/equipment-authoring.md DESTINATION notes COMPONENT runtime)
 install(DIRECTORY examples/ DESTINATION examples COMPONENT runtime)
 set(CMAKE_INSTALL_SYSTEM_RUNTIME_DESTINATION bin)
 set(CMAKE_INSTALL_SYSTEM_RUNTIME_COMPONENT runtime)

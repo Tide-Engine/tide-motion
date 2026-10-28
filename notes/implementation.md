@@ -3226,3 +3226,176 @@ strict GPU refusal and actual CPU fallback with Windows-only PATH. Models and
 the owner's installed tool are untouched. No additional CI dispatch or engine
 source changes. GPU timings/memory above use the final shared-device code;
 the integrated code changes no inference arithmetic after that measurement.
+
+
+## MoMask full native authoring controls (2026-10-28)
+
+Owner requested the complete useful tool set and continued native implementation,
+including privately supplied weights after the separate rights audit. Implemented
+ordinary CLI/batch continuation, append (`extend`), up to 16 changing prompts,
+.2..600 s generation, long and disjoint-range inpainting, full-body pose-token
+context, mapped pose references, placement/follow/end-at, paths/headings/dense path,
+hand/foot effectors, fit/footfall seed search, loops, contact-plan export and sampler
+variants. See [momask-capabilities.md](momask-capabilities.md) and the new executed
+`tests/momask-authoring.json`; `examples/momask-authoring.json` is a smaller own-prompt
+workflow. Existing backends, model assets, dependency revisions and defaults stay
+unchanged. No engine/CLI source changes, checkpoint/evaluation-data publication,
+model download, hosted inference or user Python dependency.
+
+Every neural window remains <=49 RVQ tokens /196 native 20 Hz samples. Long output
+uses bounded observed-prefix token continuation and independent per-window RNG
+streams, appending only real decoded frames. Context overlap is 0..4 tokens
+(default 1); residual context may optionally stay fixed. Prompt segments and history
+produce exact rounded 30 Hz output frame counts, unlike unchanged short-generation
+token rounding. `extend` preserves the complete source prefix; source SOMA-77 keeps
+every original extra track and holds its last extra pose in the new tail. Output
+including prefix is <=18000 frames. New SOMA-77 still has static relaxed extra joints,
+not new finger predictions. No automatic rig identification/skinning/nonhumanoid
+claim is added.
+
+Continuous long editing uses generated prefix context with native lookahead,
+then independently encodes original suffix context in the final window. The
+alternative anchored mode retains source poses at internal boundaries. Real
+prefix/suffix/pose observations share an explicit heading reference; missing motion
+is masked, not interpolated into a placeholder clip. Root boundary alignment,
+linear endpoint drift correction and configurable local pose fades are explicit
+postprocessing. Outside range and endpoint poses are restored exactly before
+serialization. `preserve-root` additionally restores every source root transform
+on body-only edits; conflicting pose/path targets refuse. Short single-range
+editing retains its existing complete-window model path. Strict outside/prefix
+contracts are restored after spatial correction, including source SOMA-77 tracks.
+
+Full-body poses supply observed whole-body RVQ tokens. Exact pose placement/root
+warps, path yaw/translation and effector IK use the existing native correction
+implementation. No Kimodo learned constraint input or ARDY autoregressive input is
+asserted. None leaves anchors approximate and refuses paths/effectors; edit/prefix
+boundaries are always restored. Candidate fit ranks pre-correction error, footsteps
+filters existing geometric travelling-footfall measurements. Search uses independent
+seeds up to64; no matching candidate writes no asset. Loop performs a real second
+endpoint-token inference, then explicit in-place/closure correction. It guarantees
+tested endpoint transforms, not contact or derivative continuity. Decoded contact
+channels drive optional MotionCorrection or qualifying heel-plan export, never
+fabricated contacts; no qualifying interval means no plan file. Existing cleanup
+work remains separate. Static and existing mapped pose inputs preflight even when
+an earlier batch output defers source timeline geometry. Output, recipe and contact
+plan collisions are reserved across actions. Equal model/device/thread jobs reuse
+sessions; auto GPU execution failure restarts the whole current search on CPU.
+
+New sampling controls are categorical/Gumbel/greedy base selection, residual levels
+0..5, independent residual temperature/top-k threshold and unconditional text zeroing.
+All recipes retain controls, observations, token masks, actual codes, window prompts,
+RNG streams, before/after constraint errors and both requested/smoothed path errors.
+A newly exercised logical one-token residual exposed an upstream mask-construction
+bug: zeros_like(mask[:,:2]) only creates one prefix at length1. Native residual steps
+use one real plus one masked padding slot, then retain the first logits. Independent
+PyTorch/ORT/native GPU tests validate this shape; no graph/weight/pin changes.
+
+All-frame quality measurements caught a pre-existing HumanML-to-SOMA roll bug:
+Y roll hints were parallel to Y-directed bones, amplifying small RIC/6D decoder
+inconsistency into ~119-degree adjacent twists. Representation version2 chooses a
+perpendicular raw-bone basis and uses mapped collars for central torso yaw. An
+independent tiny-feature-perturbation invariant, shared-reference fragment test,
+analytic FK and RIC/normalization roundtrips pass. Default walk model tokens and
+root translations remain identical, but saved rotations intentionally change:
+maximum adjacent local turn drops to11.54 degrees. Earlier sparse-pose validation
+missed that defect; earlier statements of plausible poses did not prove continuous
+quality. The fix does not erase model-induced or correction-induced limb turns.
+
+Windows ClangCL18 Release and GCC warnings-as-errors syntax checks pass. All twelve
+model-free integrated CTests passed; affected HumanML/MoMask tests pass again after
+the final fixes. A real21-action native suite passes on CPU and DirectML GPU, with
+own prompts/source clips only. CPU stress adds a600 s /18000-frame asset in56.923 s
+native sampling/conversion. Complete CPU stress batch elapsed71.16 s, sampled peak
+working set630,239,232 bytes. GPU suite elapsed64.96 s, sampled peak724,979,712 bytes.
+Single local timing observations, excluding session construction per asset:
+3 s walk CPU .151 s/GPU .342 s; 8 s timeline .825/4.718; 30 s continuation
+2.772/16.281; long [180,740) edit1.972/9.809. Dynamic-shape compile and concurrent
+machine activity prevent general performance claims; CPU stays the default.
+
+Independent developer-only official-tokenizer/ORT replay matches all native token
+choices for sampler modes, reduced/zero residual, unconditional, pose anchors,
+preserved residual context, continuation streams, long editing, prompt changes,
+one-token generation and both loop passes. An additional12 real1/2/3-token
+PyTorch-reference cases pass unchanged CPU bounds1e-4+1e-3*abs(reference) and native
+GPU bounds .002+.002*abs(reference). RVQ encoder codes match exactly. GPU max absolute
+errors masked/residual1.19e-5, decoder .0001297; small-case GPU-local process memory
+peak326,729,728 bytes. Previous4/7/49 cases remain applicable; no neural arithmetic
+or asset change affects those shapes. All GPU work holds TideMotionGpuValidation;
+all test TEMP/TMP paths are isolated.
+
+Independent GLB tracks/world-FK checks pass every outside/end/root-locked transform,
+SOMA-77 extra frame and extension prefix. Largest preserved component error after
+quaternion hemisphere matching5.96e-8 CPU /8.94e-8 GPU. A separate authored varying
+index-finger fixture passes GPU inpaint and6 s extension checks. A mapped custom
+humanoid GLB pose also passes native generation and independent target-FK checks.
+Full-body target errors <3.6e-7 m on the main cases, hand target residual .01267 m.
+Dense-path max error .04004 m to smoothed points, .05087 m to originally requested
+waypoints; both are reported, no exact path claim. Tested loop endpoint transforms
+match, root peak speed .6064 m/s. Measured local adjacent turns still reach26.13
+continuous-long edit,42.96 extension,68.01 short multi-range and71.32 anchored edit.
+Those are real quality limitations, not solved by endpoint equality. Feet may slide
+or penetrate; no universal semantic/quality ranking against Kimodo is established.
+
+A 1920x2178 eight-asset contact sheet was captured with three hidden frames and
+inspected: walk, kick, keyframes, path, hand target, loop, timeline and continuous
+edit sampled poses look plausible. Tide CLI/native platform were rebuilt/staged
+from the same engine checkout367ae4da2d31913176ae1e2624e1d78a1204f03c. Full component
+staging encountered the existing unbuilt tide-editor target, so the required native
+runtime/toolchain component was staged separately from that checkout's mingw-release
+build. This is bounded preview validation, not engine installer QA. Sparse images
+do not certify every frame. Models/fixtures/captures stay ignored and private.
+
+Checkpoint commercial scope is still unestablished. The code MIT notice does not
+supply an author grant for the exact RVQ/masked/residual weights/statistics; dataset
+training restrictions alone also do not conclusively decide separate model/output
+rights. No new grant is inferred from the owner's private experiment or a mirror
+badge. Exact pins/notices and concrete missing-grant questions remain unchanged in
+momask.md, momask-private-inputs.json and momask-private-bundle.json. This adds a
+usable private manual-weight tool set, not commercially cleared model distribution.
+
+Integrated onto origin/dev f08cb0e, retaining current DART GPU batching, native
+advisory review/calibration, equipment export/grip/bow work and all ARDY/Kimodo
+contracts. Resolved shared help/batch/output-reservation and appended-note conflicts
+by preserving both implementations. Combined Vulkan/DirectML Release build passes
+all eighteen CTests, including equipment/review and the expanded MoMask preflight.
+No model graph, conversion/sampler arithmetic or neural asset pin changed during
+integration. The current source-only evidence and assets were validated before
+packaging; no extra CI dispatch or PR is used.
+
+Final packaged native checks also pass: the full21-action authoring suite with
+Windows-only PATH, real GPU generate/mirror/inpaint with one reused model set,
+strict missing-GPU-runtime refusal and actual auto CPU inference. Independent
+exported asset/FK checks remain passing after integration. Native archive upgrade,
+reinstall, preservation, locking, rollback and refusal tests pass. The runtime ZIP
+contains no models, motion assets or Python files. Included the concurrent equipment
+user guide in runtime packaging after finding its CLI link otherwise lacked the
+installed document; no equipment code changed. Developer reference scripts remain
+outside runtime packages.
+
+Native local-archive upgrade refreshed the owner's ordinary PATH installation at
+%LOCALAPPDATA%/TideMotion. All 12 model-file length/timestamp records are unchanged;
+manual MoMask bundle verification passes. Installed executable matches the combined
+validated build, SHA-256 3eb5dbba031bf8ca1e549daa3baa273d0296fb88eeaea8e544d0d9ab46da7496.
+Installed guide/examples contain the new controls; weights and developer tooling
+remain separate. This deployment preserves concurrent backends and settings.
+
+A concurrent push rejected the first non-force dev update. Rebased again onto
+338c4e1, preserving DART's new native text/source/gradient controls, source/normalizer
+pins, notices and graph declarations. Rebuilt the combined Vulkan/DirectML tool;
+all eighteen CTests pass again. MoMask neural arithmetic and generated transforms
+are unchanged by that integration. A fresh five-action Windows-only-PATH run passes
+prompt sequence -> append -> disjoint root-locked edit, path with a60-degree heading
+and full-pose context. Independent exported FK/preservation checks pass. Added pose/
+mapping SHA provenance and effective placement/follow/path controls to recipes;
+path records now also retain requested yaw and independently checked heading error.
+No benchmark is rerun for those metadata-only additions or unrelated DART arithmetic.
+
+Latest combined package again passes real native GPU/session reuse, strict refusal
+and CPU fallback checks. Final ordinary installation matches the validated binary,
+SHA-256 a3e07b7e7541b2bb3d0d85b33b2a662756dc3b35f8f3d9fd8bf6505d045ce67a. All twelve original model length/timestamp records remain unchanged;
+six additional Dex2HOI cache files appeared during concurrent work and are retained
+untouched. The initial exact-count assertion correctly detected those additions;
+verification was corrected to check preservation of the original records without
+rejecting unrelated new files. MoMask's exact private bundle verification and new
+installed CLI help pass. Package includes only native runtime/docs/notices/examples,
+with no model, motion or developer Python payloads. No model rights status changed.
