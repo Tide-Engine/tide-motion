@@ -277,6 +277,29 @@ int main(int argc,char** argv) try {
         }
         std::cout<<"Exported placed endpoints verified\n";return 0;
     }
+    if(argc==3&&std::string(argv[1])=="--feet") {
+        // Per frame: left/right ankle and toe heights and horizontal speeds (m, m/s), then hips XYZ.
+        auto clip=load_glb(argv[2]);std::array<size_t,4> ids{};
+        const char* names[]={"LeftFoot","LeftToeBase","RightFoot","RightToeBase"};
+        for(size_t k=0;k<4;++k){auto it=std::find_if(clip.joints.begin(),clip.joints.end(),[&](const Joint& j){return j.name==names[k];});check(it!=clip.joints.end(),"Foot joint");ids[k]=static_cast<size_t>(it-clip.joints.begin());}
+        std::vector<Transform> prev;
+        for(size_t f=0;f<clip.frames();++f) {
+            auto w=world_pose(clip,clip.frame(f));std::cout<<f;
+            for(size_t k=0;k<4;++k) {
+                auto p=w[ids[k]].p;float v=0;if(!prev.empty()){auto q=prev[ids[k]].p;v=std::sqrt((p.x-q.x)*(p.x-q.x)+(p.z-q.z)*(p.z-q.z))*30;}
+                std::cout<<" "<<p.y<<" "<<v;
+            }
+            std::cout<<" "<<w[0].p.x<<" "<<w[0].p.y<<" "<<w[0].p.z<<"\n";prev=w;
+        }
+        return 0;
+    }
+    if(argc==3&&std::string(argv[1])=="--end-speed") {
+        // Hips ground speed over the last three intervals and the frame count.
+        auto clip=load_glb(argv[2]);check(clip.frames()>=4,"End speed needs four frames");
+        auto a=clip.frame(clip.frames()-4)[0].p,b=clip.frame(clip.frames()-1)[0].p;
+        float dx=b.x-a.x,dz=b.z-a.z;
+        std::cout<<"frames "<<clip.frames()<<" endSpeed "<<std::sqrt(dx*dx+dz*dz)*10<<"\n";return 0;
+    }
     if(argc==4&&std::string(argv[1])=="--verify-sequence") {
         auto plan=load_pose_sequence(argv[2]);auto output=load_glb(argv[3]);
         size_t frame=0;
@@ -288,9 +311,20 @@ int main(int argc,char** argv) try {
             }
         };
         verify(plan.start.frame(3));
-        for(size_t i=0;i<plan.targets.size();++i) {frame+=4*plan.tokens[i]-7;verify(plan.targets[i].frame(0));}
+        // Arrivals come from the effective recipe: the model chooses within token ranges.
+        nlohmann::json recipe;{std::ifstream in(std::string(argv[3])+".json");in>>recipe;}
+        const auto& targets=recipe.at("authoring").at("targets");check(targets.size()==plan.targets.size(),"Recipe target count");
+        size_t guides=0;
+        for(size_t i=0;i<plan.targets.size();++i) {
+            const auto& t=targets[i];int chosen=t.at("chosenTokens"),early=t.at("early");
+            const auto& r=plan.targets[i].request;check(chosen>=r.min_tokens&&chosen<=r.max_tokens,"Chosen tokens within allowed range");
+            check(t.at("startFrame").get<size_t>()==frame,"Segment starts where the previous ended");
+            frame+=static_cast<size_t>(4*chosen-7-early);check(t.at("endFrame").get<size_t>()==frame,"Recorded arrival frame");
+            if(early)++guides;else verify(plan.targets[i].window.frame(0));
+        }
         check(output.frames()==frame+1,"Exported exact sequence timing");
-        std::cout<<"Verified all endpoint poses and arrival frames: "<<output.frames()<<" frames\n";return 0;
+        check(recipe.at("predictedFootContacts").at("frames").size()==output.frames(),"Predicted contacts cover every frame");
+        std::cout<<"Verified "<<plan.targets.size()-guides<<" exact endpoint poses, "<<guides<<" guide targets and arrival frames: "<<output.frames()<<" frames\n";return 0;
     }
     Clip c;c.joints=soma();
     for(int f=0;f<8;++f)for(size_t j=0;j<30;++j) { auto t=c.joints[j].rest;if(j==0)t.p={static_cast<float>(f)/30,1,0};c.poses.push_back(t); }
@@ -311,16 +345,35 @@ int main(int argc,char** argv) try {
     auto plan=load_pose_sequence(sequence_file);
     check(std::abs(plan.start.frame(3)[0].p.x-4)<1e-6f&&std::abs(plan.start.frame(3)[0].p.y-2)<1e-6f,"Absolute root placement");
     check(std::abs(plan.start.frame(0)[0].p.z+2.9f)<1e-5f,"Context samples precede anchor and rotate travel");
-    check(std::abs(plan.targets[0].frame(3)[0].p.z+3.1f)<1e-5f,"Target samples follow anchor and rotate travel");
+    check(std::abs(plan.targets[0].window.frame(3)[0].p.z+3.1f)<1e-5f,"Target samples follow anchor and rotate travel");
     check(std::abs(kimodo_heading(plan.start,plan.start.frame(3))-1.5707963f)<1e-4f,"Absolute facing");
     for(size_t j=1;j<30;++j)check(same(plan.start.frame(3)[j].q,c.frame(3)[j].q),"Placement preserves local body rotations");
     check(plan.recipe["targets"][0]["endFrame"]==17&&plan.recipe["targets"][1]["endFrame"]==34,"Exact trimmed timing accumulates intervals");
+    check(plan.targets[0].request.target_poses==4&&plan.targets[0].early==0,"Target defaults: four poses, no early transition");
+    {
+        auto variant=doc;variant["targets"][0]["tokens"]={6,12};variant["targets"][0]["poses"]=1;variant["targets"][0]["early"]=10;
+        {std::ofstream out(sequence_file);out<<variant.dump();}
+        auto ranged=load_pose_sequence(sequence_file);
+        check(ranged.targets[0].request.min_tokens==6&&ranged.targets[0].request.max_tokens==12&&ranged.targets[0].request.target_poses==1&&ranged.targets[0].early==10,"Token range, poses and early parsed");
+        check(!ranged.recipe["targets"][0].contains("endFrame")&&!ranged.recipe["targets"][1].contains("endFrame"),"Ranged timing waits for the model");
+        auto refused=[&](nlohmann::json d,const char* what) {
+            {std::ofstream out(sequence_file);out<<d.dump();}
+            bool r=false;try{(void)load_pose_sequence(sequence_file);}catch(const std::exception&){r=true;}check(r,what);
+        };
+        auto bad=doc;bad["targets"][1]["early"]=4;refused(bad,"Final target early refused");
+        bad=doc;bad["targets"][0]["early"]=15;refused(bad,"Early leaving under four frames refused");
+        bad=doc;bad["targets"][0]["poses"]=0;refused(bad,"Zero target poses refused");
+        bad=doc;bad["targets"][0]["poses"]=2;bad["targets"][0]["hold"]=true;refused(bad,"hold with poses refused");
+        bad=doc;bad["targets"][0]["tokens"]={12,8};refused(bad,"Inverted token range refused");
+        bad=doc;bad["targets"][0]["tokens"]={6,17};refused(bad,"Token range above 16 refused");
+        write_sequence();
+    }
     doc["targets"][0]["hold"]=true;doc["start"]["frame"]=-1;write_sequence();plan=load_pose_sequence(sequence_file);
     check(plan.recipe["start"]["frame"]==7,"Negative source frame resolves");
     {std::ofstream out(sequence_file);out<<plan.recipe.dump();}
     auto reloaded=load_pose_sequence(sequence_file);
     check(reloaded.recipe==plan.recipe,"Effective authoring recipe can be reused");
-    check(plan.targets[0].frame(0)[0].p.z==plan.targets[0].frame(3)[0].p.z,"Held pose repeats four guides");
+    check(plan.targets[0].window.frame(0)[0].p.z==plan.targets[0].window.frame(3)[0].p.z,"Held pose repeats four guides");
     Clip assembled;assembled.joints=soma();assembled.poses.assign(plan.start.frame(3).begin(),plan.start.frame(3).end());
     Clip fake;fake.joints=soma();for(int f=0;f<18;++f)fake.poses.insert(fake.poses.end(),assembled.frame(0).begin(),assembled.frame(0).end());
     fake.frame(17)[0].p.x=5;append_pose_bridge(assembled,fake);
@@ -335,6 +388,27 @@ int main(int argc,char** argv) try {
     std::array<std::vector<Transform>,8> guides;
     for(size_t f=0;f<8;++f)guides[f]={c.frame(f).begin(),c.frame(f).end()};
     auto in=encode_bricks(c,guides,8);check(in.allowed[2]==1&&in.allowed[0]==0,"Duration mask");
+    {
+        auto d=encode_bricks(c,guides,0);
+        for(int i=0;i<11;++i)check(d.allowed[static_cast<size_t>(i)]==(i+6>=8&&i+6<=14),"Default token range 8..14");
+        auto r=parse_bricks_tokens("7..11");check(r.min_tokens==7&&r.max_tokens==11,"Token range parsed");
+        auto ranged=encode_bricks(c,guides,r);
+        for(int i=0;i<11;++i)check(ranged.allowed[static_cast<size_t>(i)]==(i+6>=7&&i+6<=11),"Token range mask");
+        check(parse_bricks_tokens("9").min_tokens==9&&parse_bricks_tokens("9").max_tokens==9,"Fixed token count parsed");
+        for(const char* text:{"5","17","12..8","8..","..8","8.5","x"}) {
+            bool r2=false;try{(void)parse_bricks_tokens(text);}catch(const std::exception&){r2=true;}check(r2,"Invalid token range refused");
+        }
+        // Upstream write_motionbricks_conditions_kernel for each target pose count.
+        for(int n=1;n<=4;++n) {
+            BricksRequest req;req.target_poses=n;auto m=encode_bricks(c,guides,req);
+            for(int f=0;f<8;++f) {
+                bool given=f<4+n;
+                check(m.has_root[static_cast<size_t>(f)]==given&&m.has_pose[static_cast<size_t>(f)]==given,"Target pose mask");
+                check(m.has_local_root[static_cast<size_t>(f)]==(given&&f!=3&&f!=3+n),"Root derivative mask");
+            }
+        }
+        bool r3=false;try{BricksRequest req;req.target_poses=5;(void)encode_bricks(c,guides,req);}catch(const std::exception&){r3=true;}check(r3,"Five target poses refused");
+    }
     check(in.has_root[3]==1&&in.has_local_root[3]==0&&in.has_local_root[7]==0,"Conditioning masks");
     check(std::abs(in.root[3*5])<1e-5f&&std::abs(in.root[3*5+2])<1e-5f,"Context ground alignment");
     check(std::abs(in.root[3*5+3])<1e-5f&&std::abs(in.root[3*5+4]-1)<1e-5f,"Context faces +X after alignment");
@@ -349,6 +423,38 @@ int main(int argc,char** argv) try {
     for(size_t f=0;f<64;++f)for(size_t j=0;j<30;++j) {features[f*366+92+j*6]=1;features[f*366+92+j*6+4]=1;}
     auto bridge=decode_bricks(c,in,features,8,guides[3],guides[4]);
     check(bridge.frames()==26,"Boundary frame trimming");
+    {
+        // Encoded model-space rotations decode back to the same SOMA-30 pose: a raw
+        // prediction repeating the last context frame needs no seam correction.
+        auto posed=c;
+        for(size_t f=0;f<posed.frames();++f) {posed.frame(f)[22].q=normalized(Quat{0.3f,0.1f,-0.2f,0.9f});posed.frame(f)[11].q=normalized(Quat{-0.1f,0.4f,0.2f,0.85f});posed.frame(f)[1].q=yaw(0.4f);}
+        std::array<std::vector<Transform>,8> g;for(size_t f=0;f<8;++f)g[f]={posed.frame(f).begin(),posed.frame(f).end()};
+        auto pin=encode_bricks(posed,g,8);std::vector<float> raw(64*366);
+        for(size_t f=0;f<64;++f) {
+            std::copy_n(pin.root.data()+3*5,3,raw.data()+f*366);
+            std::copy_n(pin.pose.data()+3*267,267,raw.data()+f*366+5);
+        }
+        SeamCorrection seam;(void)decode_bricks(posed,pin,raw,8,g[3],g[3],&seam);
+        check(seam.joint_degrees[0]<0.01f&&seam.joint_degrees[1]<0.01f,"Model-space rotations roundtrip");
+        auto d=seam.root[0];check(dot(d,d)<1e-10f,"Model-space root roundtrip");
+        // The model's frames are BVH bone frames, not world-aligned: Spine1's bone lies along local +X.
+        check(std::abs(pin.pose[87+1*6+1]-1)<0.01f,"Rest Spine1 model x axis points up");
+    }
+    {
+        // Contacts are the last four features of each untrimmed frame, clamped.
+        auto withContacts=features;
+        for(size_t f=0;f<64;++f) {
+            float left=f>=5&&f<=9?1.4f:0.2f,right=f>=12&&f<=13?0.9f:-0.3f;
+            withContacts[f*366+362]=left;withContacts[f*366+363]=0.7f;withContacts[f*366+364]=right;withContacts[f*366+365]=0.1f;
+        }
+        auto contacts=decode_bricks_contacts(withContacts,8);
+        check(contacts.size()==26,"One contact row per trimmed frame");
+        check(contacts[2][0]==1&&contacts[0][0]==0.2f&&contacts[0][2]==0&&contacts[0][1]==0.7f,"Contacts trimmed, ordered and clamped");
+        auto planted=planted_contacts(contacts,0.5f,100);
+        // Left heel raw 5..9 -> trimmed 2..6; right heel 12..13 is only two frames.
+        check(planted.size()==1&&planted[0].foot==0&&planted[0].start==102&&planted[0].end==106,"Planted heel intervals of three frames, offset");
+        bool r4=false;try{auto bad=withContacts;bad[10*366+364]=NAN;(void)decode_bricks_contacts(bad,8);}catch(const std::exception&){r4=true;}check(r4,"Nonfinite contacts rejected");
+    }
     check(bridge.frame(0)[0].p.x==guides[3][0].p.x&&bridge.frame(25)[0].p.x==guides[4][0].p.x,"Exact endpoint positions");
     check(join(c,bridge,c).frames()==c.frames()*2+bridge.frames()-2,"Joined seam frames");
     const std::vector<size_t> source_pins{0,3,7},target_pins{0,2,7};

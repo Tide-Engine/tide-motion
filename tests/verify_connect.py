@@ -16,7 +16,8 @@ def pins(path, count):
     out.update(c['frame'] for c in recipe.get('constraints', []))
     if recipe.get('command') == 'pose-sequence':
         out.add(0)
-        out.update(t['endFrame'] for t in recipe['authoring']['targets'])
+        # Early (guide) targets are passed near, not reached exactly.
+        out.update(t['endFrame'] for t in recipe['authoring']['targets'] if not t.get('early', 0))
     assert all(isinstance(f, int) and 0 <= f < count for f in out)
     return out
 

@@ -157,7 +157,15 @@ Generates a MotionBricks transition from the end of one SOMA clip to the start
 of another.
 
   -o, --output FILE.glb       New output
-  --tokens N                  Transition length in tokens, 6..16 (default: model)
+  --tokens N|MIN..MAX         Allowed transition length in tokens, 6..16; the
+                              model picks within a range (default: 8..14)
+  --target-poses N            Target frames that condition the model, 1..4:
+                              1 stops at the target pose, 2 adds its velocity,
+                              3-4 acceleration (default: 4)
+  --contacts-out PLAN.json    Write the model's predicted planted-heel intervals
+                              as a cleanup contact plan (frames of the output)
+  --contact-threshold T       Heel contact confidence for --contacts-out, 0..1
+                              (default: 0.5)
   --joined                    Export source, bridge and target as one animation
   --offset X Y Z              Move the target clip before connecting (metres)
   --from-clip NAME            Animation to use from a multi-animation FROM.glb
@@ -169,18 +177,24 @@ Bridge endpoints are protected from later cleanup. --joined also carries authore
 source/target protected frames with the correct offsets after seam omission.
 )";
     if(command=="pose-sequence")return R"(tide-motion pose-sequence POSES.json -o CLIP.glb [--models DIR] [--threads N]
+    [--contacts-out PLAN.json] [--contact-threshold T]
 
 Native MotionBricks offline authoring through 1..128 explicit SOMA pose targets.
 Poses use schema tide-motion-pose-sequence-1, start and targets. Each pose has
 file, optional clip/frame/hold, required position [root X,Y,Z metres] and yaw
-(degrees, 0 faces +Z, 90 +X). Each target requires tokens 6..16; it adds
-4*tokens-7 intervals at 30 Hz. Start defaults to the last source frame, targets
+(degrees, 0 faces +Z, 90 +X). Each target requires tokens 6..16 or [min, max]
+(the model picks); it adds 4*tokens-7-early intervals at 30 Hz. Optional poses
+1..4 (default 4) sets how many target frames condition the model: 1 stops there.
+Optional early N (not on the final target) hands over to the next target N frames
+before arrival, so that target is a guide passed near, not reached exactly.
+Start defaults to the last source frame, targets
 to the first. Negative frame indices count from the end. Windows sample the last
 four context / first four target samples, clamped at clip ends; hold:true repeats
 the selected pose. Later contexts use the last four generated samples.
 Paths are relative to POSES.json. All source clips must exist before the run
 (including in batch). Output is ordinary GLB plus an effective JSON recipe.
-No scene understanding, contacts, IK, arbitrary timing or velocity seam guarantee.
+--contacts-out writes predicted planted-heel intervals as a cleanup plan.
+No scene understanding, IK, arbitrary timing or velocity seam guarantee.
 See examples/pose-sequence.json and README.md.
 )";
     if(command=="cleanup")return R"(tide-motion cleanup CLIP.glb|.fbx --contacts PLAN.json -o CLEAN.glb [--map BONES.json] [--clip NAME]
@@ -290,7 +304,7 @@ void help(std::string_view command={}) {
       [--keyframe FRAME FILE.glb[@F]]... [--effector PARTS FRAME FILE.glb[@F]]...
       [--path X,Z[,YAW]@FRAME]... [--correction-frames 10] [--in-place]
       [--device auto|gpu|cpu] [--threads N]
-  tide-motion connect FROM.glb TO.glb -o BRIDGE.glb [--tokens 6..16] [--joined]
+  tide-motion connect FROM.glb TO.glb -o BRIDGE.glb [--tokens N|MIN..MAX] [--joined]
       [--offset X Y Z] [--from-clip NAME] [--to-clip NAME] [--threads N]
   tide-motion pose-sequence POSES.json -o CLIP.glb [--threads N]
   tide-motion cleanup CLIP.glb --contacts PLAN.json -o CLEAN.glb [--map BONES.json]
@@ -362,7 +376,8 @@ std::vector<size_t> protected_recipe_frames(const nlohmann::json& recipe,size_t 
     }
     if(recipe.value("command",std::string{})=="pose-sequence") {
         add(0);
-        for(const auto& target:recipe.at("authoring").at("targets"))add(target.at("endFrame"));
+        // Early (guide) targets are passed near, not reached exactly.
+        for(const auto& target:recipe.at("authoring").at("targets"))if(target.value("early",0)==0)add(target.at("endFrame"));
     }
     std::sort(out.begin(),out.end());out.erase(std::unique(out.begin(),out.end()),out.end());return out;
 }
@@ -583,10 +598,10 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
                 argv.insert(argv.end(),{"--path",text});
             }
         }
-        else if(type=="connect") { argv.push_back(path(action.at("from")).string());argv.push_back(path(action.at("to")).string());keys.insert({"from","to","tokens","joined","offset","fromClip","toClip","threads"}); }
+        else if(type=="connect") { argv.push_back(path(action.at("from")).string());argv.push_back(path(action.at("to")).string());keys.insert({"from","to","tokens","targetPoses","contactsOut","contactThreshold","joined","offset","fromClip","toClip","threads"}); }
         else if(type=="pose-sequence") {
             auto poses=path(action.at("recipe"));(void)load_pose_sequence(poses);
-            argv.push_back(poses.string());keys.insert({"recipe","threads"});
+            argv.push_back(poses.string());keys.insert({"recipe","threads","contactsOut","contactThreshold"});
         }
         else if(type=="cleanup") {
             keys.insert({"source","clip","contacts","map"});argv.push_back(path(action.at("source")).string());
@@ -623,14 +638,31 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
             for(unsigned v=0;v<variants;++v)written.push_back(variant_path(output,first_seed+v));
             written.push_back(variants_path(output,".png"));if(sheet_gif)written.push_back(variants_path(output,".gif"));
         } else written.push_back(output);
+        if(action.contains("contactsOut")) {
+            auto plan=path(action["contactsOut"]);
+            if(plan.extension()!=".json")throw std::runtime_error("contactsOut must be a .json path");
+            written.push_back(plan);argv.insert(argv.end(),{"--contacts-out",plan.string()});
+        }
         for(const auto& file:written)if(fs::exists(file)||fs::exists(file.string()+".part")||fs::exists(file.string()+".json")||!outputs.insert(file).second)throw std::runtime_error("Output must be a new, distinct path: "+file.string());
         argv.insert(argv.end(),{"-o",output.string()});
         if(type=="generate"||type=="connect"||type=="pose-sequence")argv.insert(argv.end(),{"--models",models.string()});
-        for(const char* key:{"duration","seed","steps","tokens","threads"})if(action.contains(key)) {
+        if(action.contains("tokens")&&action["tokens"].is_array()) {
+            const auto& range=action["tokens"];
+            if(range.size()!=2||!range[0].is_number()||!range[1].is_number())throw std::runtime_error("tokens is an integer or [min, max]");
+            auto text=range[0].dump()+".."+range[1].dump();(void)parse_bricks_tokens(text);
+            argv.insert(argv.end(),{"--tokens",text});
+        }
+        for(const char* key:{"targetPoses","contactThreshold"})if(action.contains(key)) {
+            if(!action[key].is_number())throw std::runtime_error(std::string(key)+" must be numeric");
+            auto text=action[key].dump();
+            if(std::string(key)=="targetPoses") {integer(text,1,4,key);argv.insert(argv.end(),{"--target-poses",text});}
+            else {number(text,0,1,key);argv.insert(argv.end(),{"--contact-threshold",text});}
+        }
+        for(const char* key:{"duration","seed","steps","tokens","threads"})if(action.contains(key)&&!action[key].is_array()) {
             if(!action[key].is_number())throw std::runtime_error(std::string(key)+" must be numeric");
             auto text=action[key].dump();
             if(std::string(key)=="duration")number(text,0.2,action.value("backend",std::string("kimodo"))=="ardy"?600:10,key);
-            else if(std::string(key)=="tokens")integer(text,6,16,key);
+            else if(std::string(key)=="tokens")(void)parse_bricks_tokens(text);
             else if(std::string(key)=="steps")integer(text,1,1000,key);
             else if(std::string(key)=="threads")integer(text,1,1024,key);
             else integer(text,0,4294967295.0,key);
@@ -673,7 +705,8 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     for(size_t i=2;i<args.size();++i)if(args[i]=="--help"||args[i]=="-h") {help(command);return 0;}
     fs::path models,output,capture,gif,target_file,map_file,character_file,texture_file,contacts_file;bool mannequin=false;
     if(command=="generate"||command=="connect"||command=="pose-sequence"||command=="models"||command=="batch")models=model_directory();
-    double duration=3;uint64_t seed=0;unsigned steps=50,transition=5;int frames=0,tokens=0;
+    double duration=3;uint64_t seed=0;unsigned steps=50,transition=5;int frames=0;
+    BricksRequest bricks_request;std::string tokens_text;fs::path contacts_out;float contact_threshold=0.5f;
     bool accept=false,joined=false,skeleton=false,to_soma=false,correct=true;Vec3 offset{};
     Placement placement=Placement::automatic;std::string placement_name="auto";
     unsigned variants=1,threads=0;int correction_frames=10;bool variants_gif=false,in_place=false;
@@ -728,7 +761,10 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         else if(a=="--steps")steps=static_cast<unsigned>(integer(value(),1,1000,"steps"));
         else if(a=="--seed")seed=static_cast<uint64_t>(integer(value(),0,4294967295.0,"seed"));
         else if(a=="--frames")frames=static_cast<int>(integer(value(),1,18000,"frames"));
-        else if(a=="--tokens")tokens=static_cast<int>(integer(value(),6,16,"tokens"));
+        else if(a=="--tokens") {tokens_text=value();auto r=parse_bricks_tokens(tokens_text);bricks_request.min_tokens=r.min_tokens;bricks_request.max_tokens=r.max_tokens;}
+        else if(a=="--target-poses")bricks_request.target_poses=static_cast<int>(integer(value(),1,4,"target poses"));
+        else if(a=="--contacts-out")contacts_out=utf8path(value());
+        else if(a=="--contact-threshold")contact_threshold=static_cast<float>(number(value(),0,1,"contact threshold"));
         else if(a=="--offset") {offset.x=static_cast<float>(number(value(),-10000,10000,"offset"));offset.y=static_cast<float>(number(value(),-10000,10000,"offset"));offset.z=static_cast<float>(number(value(),-10000,10000,"offset"));}
         else if(a=="--contacts")contacts_file=utf8path(value());
         else if(a=="--clip")clip_name=value();
@@ -751,14 +787,14 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     std::set<std::string> allowed;
     if(command=="generate")allowed={"--models","-o","--output","--duration","--seed","--steps","--then","--transition","--start-pose","--end-pose","--end-at","--keyframe","--effector","--path","--placement","--fit-poses","--footsteps","--attempts","--no-correction",
         "--correction-frames","--in-place","--variants","--variants-gif","--tide","--guidance","--constraint-guidance","--device","--threads","--model","--backend","--history","--history-frames"};
-    else if(command=="connect")allowed={"--models","-o","--output","--tokens","--joined","--offset","--from-clip","--to-clip","--threads"};
+    else if(command=="connect")allowed={"--models","-o","--output","--tokens","--target-poses","--contacts-out","--contact-threshold","--joined","--offset","--from-clip","--to-clip","--threads"};
     else if(command=="mirror")allowed={"-o","--output","--clip"};
     else if(command=="retarget")allowed={"-o","--output","--target","--map","--to-soma","--clip"};
     else if(command=="inspect")allowed={"--clip","--skeleton"};
     else if(command=="preview")allowed={"--clip","--tide","--capture","--gif","--frames","--mannequin","--skeleton","--character","--map","--texture"};
     else if(command=="cleanup")allowed={"-o","--output","--contacts","--map","--clip"};
     else if(command=="models")allowed={"--models","--accept-licenses"};
-    else if(command=="pose-sequence")allowed={"-o","--output","--models","--threads"};
+    else if(command=="pose-sequence")allowed={"-o","--output","--models","--threads","--contacts-out","--contact-threshold"};
     else if(command=="batch")allowed={"--models"};
     for(const auto& flag:flags)if(!allowed.contains(flag))throw std::runtime_error(command+" does not take "+flag);
     if(command=="batch") {
@@ -842,6 +878,25 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         if(fs::exists(file)||fs::exists(file.string()+".part")||fs::exists(file.string()+".json"))throw std::runtime_error("Output, partial output or recipe already exists: "+file.string());
     };
     if(variants<2)refuse_existing(output);
+    if(!contacts_out.empty()) {
+        if(contacts_out.extension()!=".json")throw std::runtime_error("--contacts-out must be a .json path");
+        if(fs::exists(contacts_out)||fs::absolute(contacts_out)==fs::absolute(output.string()+".json"))throw std::runtime_error("Contact plan must be a new path, not the output recipe: "+contacts_out.string());
+    }
+    // Model-predicted contacts, recorded in the recipe and optionally as a cleanup plan.
+    auto contact_record=[&](const FootContacts& predicted,size_t offset,nlohmann::json& recipe) {
+        auto planted=planted_contacts(predicted,contact_threshold,offset);
+        nlohmann::json frames=nlohmann::json::array(),intervals=nlohmann::json::array();
+        for(const auto& c:predicted)frames.push_back({std::round(c[0]*1000)/1000,std::round(c[1]*1000)/1000,std::round(c[2]*1000)/1000,std::round(c[3]*1000)/1000});
+        for(const auto& c:planted)intervals.push_back({{"foot",c.foot?"right-foot":"left-foot"},{"start",c.start},{"end",c.end}});
+        recipe["predictedFootContacts"]={{"order",{"left-heel","left-toe","right-heel","right-toe"}},{"firstFrame",offset},{"frames",frames},
+            {"threshold",contact_threshold},{"plantedHeels",intervals}};
+        if(contacts_out.empty())return;
+        if(planted.empty()) {std::cerr<<"No predicted planted heel lasts three frames; no contact plan written\n";recipe["predictedFootContacts"]["plan"]=nullptr;return;}
+        std::ofstream plan(contacts_out);plan<<nlohmann::json{{"contacts",intervals}}.dump(2)<<"\n";plan.close();
+        if(!plan)throw std::runtime_error("Could not write the contact plan: "+contacts_out.string());
+        recipe["predictedFootContacts"]["plan"]=contacts_out.string();
+        std::cout<<"Saved "<<contacts_out.string()<<" ("<<planted.size()<<" predicted contacts)\n";
+    };
     if(command=="pose-sequence") {
         if(pos.size()!=1)throw std::runtime_error("pose-sequence takes one JSON recipe");
         auto plan=load_pose_sequence(utf8path(pos[0]));
@@ -849,20 +904,21 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
             if(!context->bricks)check_models(models,"bricks");
             context->bricks=std::make_unique<BricksModel>(models/"motionbricks.onnx",threads);context->bricks_threads=threads;
         }
-        auto made=generate_pose_sequence(plan,*context->bricks);made.name=output.stem().string();
+        auto authored=generate_pose_sequence(plan,*context->bricks);auto& made=authored.clip;made.name=output.stem().string();
         save_glb(made,output);
-        nlohmann::json recipe={{"tool","tide-motion"},{"version",MOTION_VERSION},{"command",command},{"authoring",plan.recipe},{"threads",threads},{"fps",30},{"frames",made.frames()},
+        nlohmann::json recipe={{"tool","tide-motion"},{"version",MOTION_VERSION},{"command",command},{"authoring",authored.recipe},{"threads",threads},{"fps",30},{"frames",made.frames()},
             {"motionbricksRevision","54fc563aeaaf819a753d72cc9fdc6713989cdd43"}};
+        contact_record(authored.contacts,0,recipe);
         std::ofstream metadata(output.string()+".json");metadata<<recipe.dump(2)<<"\n";metadata.close();
         if(!metadata)throw std::runtime_error("Animation saved but could not write its recipe");
         std::cout<<"Saved "<<output.string()<<" ("<<made.frames()<<" frames)\n";return 0;
     }
-    Clip clip;
+    Clip clip;Bridge bridge;size_t contact_offset=0;
     nlohmann::json retarget_recipe,generate_recipe,mirror_recipe;
     std::vector<size_t> connect_pins;
     // Store generation settings alongside the asset; no need to rerun inference at build time.
     auto recipe_for=[&](const Clip& made,uint64_t used_seed) {
-        return nlohmann::json{{"tool","tide-motion"},{"version",MOTION_VERSION},{"command",command},{"inputs",pos},{"rig","soma30"},{"fps",30},{"frames",made.frames()},{"requestedDuration",duration},{"seed",used_seed},{"steps",steps},{"tokens",tokens},{"joined",joined},{"offset",{offset.x,offset.y,offset.z}},
+        return nlohmann::json{{"tool","tide-motion"},{"version",MOTION_VERSION},{"command",command},{"inputs",pos},{"rig","soma30"},{"fps",30},{"frames",made.frames()},{"requestedDuration",duration},{"seed",used_seed},{"steps",steps},{"tokens",tokens_text.empty()?nlohmann::json(nullptr):nlohmann::json(tokens_text)},{"joined",joined},{"offset",{offset.x,offset.y,offset.z}},
             {"fromClip",from_name},{"toClip",to_name},{"kimodoNativeRevision","ed8a931aedb132f768190f6931c365855caba74c"},{"motionbricksRevision","54fc563aeaaf819a753d72cc9fdc6713989cdd43"}};
     };
     auto finish=[](const Clip& made,const fs::path& path,const nlohmann::json& recipe) {
@@ -1152,12 +1208,21 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
             if(!context->bricks)check_models(models,"bricks");
             context->bricks=std::make_unique<BricksModel>(models/"motionbricks.onnx",threads);context->bricks_threads=threads;
         }
-        clip=context->bricks->generate(a,b,tokens);
+        bridge=context->bricks->generate(a,b,bricks_request);clip=bridge.clip;
         connect_pins=connected_protected_frames(a.frames(),clip.frames(),b.frames(),source_pins,target_pins,joined);
-        if(joined)clip=join(a,clip,b);
+        if(joined) {clip=join(a,clip,b);contact_offset=a.frames()-1;}
     }
     auto recipe=recipe_for(clip,seed);
-    if(command=="connect") {recipe["threads"]=threads;recipe["protectedFrames"]=connect_pins;}
+    if(command=="connect") {
+        recipe["threads"]=threads;recipe["protectedFrames"]=connect_pins;
+        recipe["allowedTokens"]={bricks_request.min_tokens,bricks_request.max_tokens};
+        recipe["chosenTokens"]=bridge.tokens;recipe["targetPoses"]=bricks_request.target_poses;
+        recipe["bridgeFrames"]={contact_offset,contact_offset+bridge.clip.frames()-1};
+        const auto& rc=bridge.correction;
+        recipe["seamCorrection"]={{"rootMetres",{{rc.root[0].x,rc.root[0].y,rc.root[0].z},{rc.root[1].x,rc.root[1].y,rc.root[1].z}}},
+            {"maxJointDegrees",{rc.joint_degrees[0],rc.joint_degrees[1]}},{"maxJoint",{bridge.clip.joints[rc.joint[0]].name,bridge.clip.joints[rc.joint[1]].name}}};
+        contact_record(bridge.contacts,contact_offset,recipe);
+    }
     if(command=="retarget")recipe=std::move(retarget_recipe);
     if(command=="mirror"||command=="cleanup")recipe=std::move(mirror_recipe);
     finish(clip,output,recipe);return 0;

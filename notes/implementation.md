@@ -1599,3 +1599,113 @@ Retained 28ab94d's checkpoint-by-action guidance after the final docs-only rebas
 The selection example and new opt-in inference runner explicitly choose v1.1,
 matching the actual measured backward-stumble runs and current AGENTS.md. The
 C++ tree is identical to the final passing eight-test build.
+## MotionBricks controls and SOMA joint-frame fix (2026-10-28)
+
+Owner request: use the full capability of the NVIDIA models. Upstream read at the
+unchanged pin NVlabs/motionbricks 54fc563aeaaf819a753d72cc9fdc6713989cdd43
+(docs/onnx_inference.md, inbetweener.md, runtime_api.md, soma_model.md,
+model/kernels.py, model/generation.py, model/soma/kernels.py, engine.py,
+animation/foot_contacts.py) in ignored .research/upstream. No model, dependency
+or ONNX Runtime revision changed. Kimodo gaps are handled in a separate thread.
+
+**Joint-frame bug (fixed).** MotionBricks SOMA model space uses the BONES-SEED BVH
+joint frames: bones lie along local +X (Spine1 offset 5.0 cm along X), so zero
+rotation is not a standing pose. Canonical SOMA-30 (Kimodo) uses world-aligned
+standard T-pose frames. Tide sent and decoded global 6D rotations without
+converting, so the model received rotations off by roughly 90-120 degrees per
+joint. Evidence from a dumped raw tensor (local debug build, not committed): raw
+frames meant to reproduce the context differed by up to 123 degrees on every body
+joint, and hip joints sat above the hips. Endpoint correction hid this at the
+seams by blending up to 150 degrees (LeftLeg) through the bridge. Bridges then
+showed tucked legs, with both ankles 0.3-0.55 m off the ground mid-transition.
+Fix: Kimodo's own from_standard_tpose, G_bvh = G_std * offset, using the per-joint
+offsets in nv-tlabs/kimodo e1c219c99b4b94ba48be1fb6a1cbc64ecee4c954
+kimodo/assets/skeletons/somaskel77/standard_t_pose_global_offsets_rots.p
+(Apache-2.0, notice already in licenses/NVIDIA-KIMODO-SOURCE.txt). The raw float32
+storage was read without unpickling; the SOMA-30 entries are compiled into
+bricks.cpp as quaternions. Verification: Kimodo's somaskel77 bvh_joints reproduce
+the MotionBricks SOMA BVH rest skeleton (Neutral_walk_forward_002__A057.bvh header
+from git LFS, read only, ignored scratch, never copied) for all 77 joints with
+0.0 cm difference. Encode applies the offset to every global rotation; decode
+removes it. Positions, heading, alignment and endpoint correction are unchanged.
+After the fix, with the same inputs, raw context frames match within millimetres
+at the hip joints. Remaining raw differences above 13 degrees are only on hands
+and hand end joints (up to 64 degrees). Those leaves carry Kimodo rotations that
+move no other joint. Earlier GLBs from connect/pose-sequence should be regenerated.
+
+**Controls added** (upstream names in brackets):
+- Token ranges [allowed token counts]: `--tokens N|MIN..MAX`, batch/pose-sequence
+  `tokens` integer or [min,max]; default stays 8..14. Recipes record allowedTokens
+  and the model's chosenTokens. Pose-sequence timing is computed after generation
+  (fixed counts still fill it at load, as before).
+- Target pose count [Poses to Use / num_poses_to_use]: `--target-poses 1..4`,
+  batch targetPoses, pose-sequence target `poses`. Masks follow
+  write_motionbricks_conditions_kernel; unused slots repeat the last given pose
+  (pad_token_poses_kernel). `poses` and legacy `hold` are exclusive.
+- Early transitions [Transition Early By]: pose-sequence non-final target `early`
+  frames. The bridge is cut there and its last four played frames become the next
+  context, as in the Inbetweener. At least four frames play, so early <=
+  4*min tokens-10. Guide arrivals are not exact and are excluded from protected
+  frames (main.cpp and tests/verify_connect.py).
+- Predicted foot contacts: the last four output features per frame (left heel/toe,
+  right heel/toe; clamped 0..1 as upstream). Recipes always record
+  predictedFootContacts. `--contacts-out PLAN.json` / contactsOut write planted-heel
+  runs (>= --contact-threshold, default 0.5 as upstream's renderer, >= 3 frames)
+  as an ordinary cleanup plan. Heel is used because cleanup anchors the ankle.
+  Nothing is cleaned automatically.
+- seamCorrection in connect recipes: raw hips miss per seam and largest joint
+  correction in degrees. This diagnostic exposed the frame bug above.
+
+Model-free tests: default/range/fixed token masks and parsing refusals, masks for
+1..4 target poses, five poses refused, contacts trimmed/ordered/clamped/nonfinite
+refused, planted-run extraction and offset, encode->decode round trip with zero
+seam correction, Spine1 model x axis up at rest, pose-sequence parsing of
+ranges/poses/early and refusals (final early, too early, poses 0, hold+poses,
+inverted or out-of-range tokens), timing waits for the model with ranges. CLI
+tests: option refusals, contacts-out path rules (.json only, not the recipe),
+batch refusals and plan-path collisions, accepted options reaching model
+verification. Windows x64 ClangCL 18 Release: all CTests pass (eight after
+rebasing onto the native ARDY and footfall-selection work; the runner below was
+repeated with that integrated build and passes).
+
+Real native ONNX CPU inference (8 threads, TideMotionGpuValidation held), using
+user-generated Kimodo idle/walk clips (walk moves about 2 m forward). The target
+was the walk clip offset 3 m, so its start lies about 1 m past the source's end.
+Measurements are hips ground speed over the last three intervals and seam numbers
+from the recipe:
+- Before the fix: tucked legs (lowest foot 0.2-0.38 m mid-bridge), seam joint
+  corrections 150-171 degrees, and no heel run reached 0.5 for 3 frames.
+- After the fix: lowest foot 0.00-0.03 m above the floor for the whole bridge,
+  raw hips miss at most 2.6 cm, worst seam joint about 80 degrees, only on
+  RightHandThumbEnd.
+- Poses to Use: into the walking target, 1 target pose arrives at 0.12 m/s,
+  against 0.96 m/s (2 poses) and 0.95 m/s (4 poses), so 1 stops as documented
+  (0.004 m/s into idle). Before the fix 1 pose also stopped (0.14 m/s against
+  1.16-1.21).
+- Predicted contacts against measured foot speed: Pearson r -0.65 to -0.82 per
+  heel/toe. Flagged feet move 0.09-0.26 m/s, unflagged 0.7-2.2 m/s. Each bridge
+  yields 3 planted-heel intervals.
+- tests/pose-inference.ps1 (extended: guided example
+  examples/pose-sequence-guides.json with ranges/poses/early and contactsOut,
+  walk->walk ranges, poses 1 vs 4 with asserted arrival speeds, raw hips seam miss
+  < 10 cm, cleanup with both predicted plans) passes with one ONNX session for
+  six actions. The guided sequence verifies 2 exact endpoints, 1 guide and its
+  timing. Cleanup of a predicted walk plan applied one interval and skipped two
+  (drift-increased, joint-step-increased). Those spans already moved about
+  0.004 m/frame.
+- tests/cleanup-inference.ps1 (connect pins plus cleanup, independent Python
+  verifier) passes.
+- Bounded TIDE_HIDDEN=1 captures (60 frames) of the guided sequence and the joined
+  walk show upright mid-stride poses with planted feet. They used Tide built from
+  D:/Projects/PurrEngine 28b61e4db1cb2549fcc9f6bc6d9c6034022f3d9c, staged privately
+  (copied into this task's ignored .research). That staging predates tide run
+  --record, so preview --gif was refused and not used. No engine change.
+
+Gaps: batched N>1 requests (upstream supports N; Tide runs one request at a time,
+and that is only a speed matter on CPU); upstream IK Pins (TargetPoseIKCorrector;
+Tide's explicit cleanup is the alternative); Smart Primitive and scene editors
+(object interaction placement); runtime blend-space steering; FP16 model variant
+(no CPU benefit). In these runs the model picked the longest allowed count (15-16
+tokens) for a 1 m gap. Tide does not override the model's choice. Hand and leaf
+rotations still disagree at seams as noted. Predicted contacts are model output,
+not ground truth, and are not tested on non-walk motions. Linux/macOS untested.

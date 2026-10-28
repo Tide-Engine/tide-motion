@@ -258,9 +258,35 @@ does not turn the target or choose a path. A target left behind the source can
 legitimately generate a turn back toward it. Inspect the motion before using it.
 No foot-contact cleanup, obstacle avoidance or physical validation is guaranteed.
 
-The model normally chooses 8–14 tokens. `--tokens 6..16` fixes the token count.
-After trimming boundary frames there are `4*tokens - 6` frames at 30 Hz. Output
-duration is `(frames - 1)/30` seconds.
+The model chooses the length: 8–14 tokens by default. `--tokens N` (6..16) fixes
+it, and `--tokens MIN..MAX` lets the model pick within that range (wide ranges let
+it fit the distance and motion). After trimming boundary frames there are
+`4*tokens - 6` frames at 30 Hz. Output duration is `(frames - 1)/30` seconds. The
+recipe records `allowedTokens` and the model's `chosenTokens`.
+
+`--target-poses N` (1..4, default 4) is upstream's *Poses to Use*: how many of the
+target clip's first four frames condition the model. 1 gives only the destination
+pose, so the character arrives and stops there; 2 adds its velocity; 3–4 add
+acceleration and momentum. The source side always uses four context frames.
+
+**Predicted foot contacts.** MotionBricks also predicts per-frame heel and toe
+contact confidence. The recipe records them as `predictedFootContacts` (left heel,
+left toe, right heel, right toe; 0..1) with the planted-heel intervals.
+`--contacts-out PLAN.json` writes those intervals (heel confidence at or above
+`--contact-threshold`, default 0.5, for at least three frames) as an ordinary
+[cleanup](#optional-foot-contact-cleanup) contact plan in output frame numbers;
+with `--joined` the plan covers only the bridge. Review the plan, then run
+`cleanup` explicitly; nothing is cleaned automatically. These are the model's
+predictions, not a contact detector for arbitrary clips, and they can be wrong.
+Batch fields: `tokens` (integer or `[min, max]`), `targetPoses`, `contactsOut`,
+`contactThreshold`.
+
+The recipe's `seamCorrection` records how far the raw prediction missed each seam
+before endpoint correction (hips metres, largest joint degrees). Large values mean
+the model disagreed with its inputs, so inspect that transition closely.
+Transitions and pose sequences made before this release sent MotionBricks rotations
+in the wrong joint frames, producing tucked legs and large hidden seam corrections.
+Regenerate them.
 
 MotionBricks inputs must use the canonical SOMA names, hierarchy and proportions, with no
 scale tracks, matrix nodes or animated extra nodes. LINEAR and STEP GLB tracks
@@ -540,20 +566,35 @@ are rotated about that sample; local body rotations and lengths stay intact.
 A start uses the four samples ending there, a target the four samples starting
 there; sampling clamps at clip ends. `hold:true` instead repeats the chosen pose
 four times to request zero guide velocity. It does not insert a timed hold.
+A target's optional `poses` (1..4, default 4) is upstream's *Poses to Use*: `1`
+conditions on the single selected pose, which the model treats as a stop; `2`
+adds its velocity; `3`–`4` acceleration. `poses` and `hold` are exclusive.
 
-Each target requires integer `tokens` 6..16. With Tide's existing three-sample
-boundary trimming it adds **4*tokens-7 intervals** at 30 Hz: 8 tokens arrives 25
-frames (0.833 s) later, 10 tokens 33 frames (1.1 s) later. Arrival frames accumulate
-from frame 0; no resampling to arbitrary seconds is performed. All targets are
-reached exactly after the existing endpoint correction. One copy of each seam is
-exported. Later generations use the last four generated samples as context.
+Each target requires `tokens`: an integer 6..16, or `[min, max]` to let the model
+choose. With Tide's existing three-sample boundary trimming a target adds
+**4*tokens-7 intervals** at 30 Hz: 8 tokens arrives 25 frames (0.833 s) later,
+10 tokens 33 frames (1.1 s) later. Arrival frames accumulate from frame 0; no
+resampling to arbitrary seconds is performed. Targets are reached exactly after
+the existing endpoint correction. One copy of each seam is exported. Later
+generations use the last four generated samples as context.
+
+Optional `early` (frames, not on the final target) is upstream's *Transition
+Early By*: the next target takes over that many frames before this one would be
+reached, so it subtracts `early` intervals and the target becomes a **guide** the
+character heads toward and passes near rather than an exact pose. Use guides to
+steer and place the character before a precise target. At least four frames of
+each bridge must play, so `early` is at most `4*min tokens - 10`. Guide arrivals
+are not protected frames for a later `cleanup`.
 The output contains only the selected start and generated motion, without source
 clip lead-ins or target clip tails.
 
 The adjacent `.glb.json` records `authoring`: a reusable schema object with
 absolute paths, resolved frames, effective positions/yaws/hold settings and token
-counts, plus computed startFrame/endFrame/seconds on targets. Extract `authoring`
-to a JSON file to edit and rerun; computed timing fields are recomputed on load.
+counts, plus the model's chosenTokens and computed startFrame/endFrame/seconds on
+targets. Extract `authoring` to a JSON file to edit and rerun; computed fields are
+recomputed. Predicted foot contacts for every output frame are recorded as for
+connect, and `--contacts-out PLAN.json` (batch `contactsOut`, `contactThreshold`)
+writes them as a cleanup plan.
 Model revision, tool version, thread setting and final frame count are recorded
 beside it. Sources must remain available; recipes do not embed motion data.
 
@@ -569,10 +610,10 @@ GLB limits. Failure keeps completed batch assets.
 Design references are the pinned upstream [Inbetweener](https://github.com/NVlabs/motionbricks/blob/54fc563aeaaf819a753d72cc9fdc6713989cdd43/docs/inbetweener.md)
 and [Smart Primitive Editor](https://github.com/NVlabs/motionbricks/blob/54fc563aeaaf819a753d72cc9fdc6713989cdd43/docs/smart_primitive_editor.md):
 ordered pose windows and explicitly placed interaction targets. This feature has
-no objects, collision detection, scene/contact understanding, automatic placement,
-pivots, early transitions, IK or foot cleanup. Pose continuity is exact; velocity,
-acceleration, foot planting and plausible motion between distant/contradictory
-poses are not guaranteed. Inspect the generated GLB in a bounded Tide preview.
+no objects, collision detection, scene understanding, automatic placement,
+pivots, upstream IK pins or automatic foot cleanup. Pose continuity is exact at
+non-guide targets; velocity, acceleration, foot planting and plausible motion
+between distant/contradictory poses are not guaranteed. Inspect the generated GLB in a bounded Tide preview.
 
 ## Optional foot contact cleanup
 

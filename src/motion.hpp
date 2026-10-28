@@ -122,9 +122,29 @@ struct BricksInputs {
     std::array<int32_t,11> allowed{};
     Transform alignment;
 };
+// Upstream MotionBricksInferenceConfig/num_poses_to_use: the model chooses a token
+// count in min..max (6..16, default 8..14). target_poses 1..4 of the target window
+// condition the model: 1 sets a stop pose, 2 adds velocity, 3-4 acceleration.
+struct BricksRequest { int min_tokens=8, max_tokens=14, target_poses=4; };
+// 0 is the model default 8..14; N fixes N tokens.
+BricksRequest bricks_tokens(int tokens);
+// "N" or "MIN..MAX".
+BricksRequest parse_bricks_tokens(const std::string&);
+BricksInputs encode_bricks(const Clip&, const std::array<std::vector<Transform>,8>&, const BricksRequest&);
 BricksInputs encode_bricks(const Clip&, const std::array<std::vector<Transform>,8>&, int tokens=0);
+// How far the raw prediction missed the start and end seams before endpoint
+// correction: hips position deltas and the largest joint rotation change (degrees).
+struct SeamCorrection { std::array<Vec3,2> root{}; std::array<float,2> joint_degrees{}; std::array<size_t,2> joint{}; };
 Clip decode_bricks(const Clip&, const BricksInputs&, std::span<const float>, int tokens,
-    std::span<const Transform> start, std::span<const Transform> end);
+    std::span<const Transform> start, std::span<const Transform> end, SeamCorrection* correction=nullptr);
+// Predicted contacts per trimmed bridge frame: left heel, left toe, right heel,
+// right toe, each clamped to 0..1 (upstream decode_motionbricks_output_kernel).
+using FootContacts = std::vector<std::array<float,4>>;
+FootContacts decode_bricks_contacts(std::span<const float>, int tokens);
+struct Bridge { Clip clip; FootContacts contacts; int tokens=0; SeamCorrection correction; };
+// Heel runs at or above threshold lasting at least three frames, as explicit cleanup
+// intervals (the ankle is the cleanup anchor; toe-only contact lets the ankle rise).
+std::vector<FootContact> planted_contacts(const FootContacts&, float threshold=0.5f, size_t offset=0);
 Clip connect(const Clip&, const Clip&, const fs::path& model, int tokens=0);
 class BricksModel {
     struct Impl;
@@ -134,6 +154,7 @@ public:
     explicit BricksModel(const fs::path&, unsigned threads=0);
     ~BricksModel();
     Clip generate(const Clip&, const Clip&, int tokens=0);
+    Bridge generate(const Clip&, const Clip&, const BricksRequest&);
 };
 Clip join(const Clip&, const Clip& bridge, const Clip&);
 // Maps inherited pins through the same endpoint omission as join(); always pins bridge ends.
