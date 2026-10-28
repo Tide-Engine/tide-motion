@@ -725,3 +725,111 @@ also pass with the integrated executable. A repeat via the opt-in inference
 runner correctly refused while another thread held TideMotionGpuValidation;
 no conflicting inference was started. Real inference evidence above is from the
 successful earlier mutex-protected run, with author.cpp/bricks.cpp unchanged.
+
+## Explicit native contact IK (2026-10-28)
+
+Investigated nv-tlabs/kimodo MotionCorrection at the pinned upstream revision
+`e1c219c99b4b94ba48be1fb6a1cbc64ecee4c954` (read-only checkout in ignored
+.research/kimodo). Its CMakeLists defines motion_correction_cpp_base but requires
+Python3 Interpreter/Development and pybind11 unconditionally, fetches Eigen 3.4.0,
+and adds /arch:AVX or -msse4.1/-mavx. More than build flags need adapting: Math/SIMD.h
+includes immintrin.h and uses __m128 throughout. TrajectoryCorrector.cpp solves
+Eigen sparse trajectory systems; InverseKinematics.cpp implements geometric
+TwoBoneIk. The source is Apache-2.0 with NVIDIA notices. Existing source/model
+licenses remain in licenses; no upstream files, Eigen, bindings or weights were
+added. This is not a port of its trajectory solver or evidence of numerical parity.
+
+Chosen equivalent for a deliberately smaller supported scope: independently written
+scalar C++ geometric two-bone IK in src/cleanup.cpp (tide-two-bone-v1). Uses the
+cosine rule and current knee plane, with a deterministic fallback plane at straight
+knees, world-to-local rotation correction and preserved world ankle orientation.
+It adds no runtime/library dependency, architecture flags, Python or service.
+Existing dependency pins are unchanged. The scalar implementation has no x86
+intrinsics; ARM64/Linux/macOS have not been built locally in this change.
+
+`cleanup SOURCE.glb|.fbx --contacts PLAN.json -o OUT.glb [--map BONES.json]
+[--clip NAME]` is a model-free, optional separate postprocess. Batch `cleanup`
+fields are source, contacts, output, optional map/clip. Put it after generate,
+connect or retarget. Their existing defaults and inference remain unchanged.
+A strict <=64 KiB plan has 1..1000 explicit inclusive contacts
+{foot: left-foot|right-foot, start, end}, each at least three frames, zero-based,
+0..17999; same-foot overlaps refused. Each anchor is its first ankle position,
+with no ground estimation/projection or automatic contact classification.
+fadeFrames 0..60 defaults to 3, maxCorrection metres (0,0.5] defaults to 0.1.
+The latter rejects a whole interval whose ankle travels farther than that from
+its anchor. Raised cosine target fades at interval edges/protected poses leave
+end frames unchanged with nonzero fade. If solving increases interval mean
+horizontal ankle movement by >1e-7 m/frame, restore its entire original chain.
+Skipped intervals are saved and reported (correction-bound/drift-increased).
+This bounds displacement, not joint angles; max local angular change is reported.
+
+SOMA-30 or explicitly mapped humanoids only. Requires two distinct direct
+thigh/calf/ankle chains beneath the motion root; intermediate helpers there are
+refused (helpers elsewhere can remain). FK respects ancestor uniform scales.
+Every local translation, root rotation/path and world ankle orientation is kept.
+Unreachable targets leave reported error rather than stretching/moving the root.
+protectedFrames holds exact whole poses. Constraint frames from the adjacent
+source recipe are protected automatically and retained for repeated cleanup;
+external clips and retargeted clips whose constraint metadata was not transferred
+need explicit protectedFrames. No assumption that an ankle is a sole or toe.
+Recipes include effective intervals/settings/mapping, solver version, source
+recipe, protected frames, mean horizontal step before/after (m/frame), max anchor
+residual (m), max local joint correction (degrees), samples and skip reason.
+Metrics include fades/protected samples; residual is distance to the anchor,
+not ground clearance. Bone lengths are preserved; this does not enforce anatomical
+joint limits, collisions, pelvis balance or distribute twist. Toe articulation
+remains as authored. Explicit contacts must exclude kicks, flight and pivots.
+Generation's --effector and --path targets remain measured, not solved by this
+postprocess; no general full-body trajectory optimiser or hand IK is claimed.
+
+Validation: Windows x64 ClangCL 18.1.8 Release, warnings as errors for project
+code, all six CTests pass. New native independent planar geometry contracts check
+analytically known ankle targets, double support, length/root/translation/world
+ankle rotation invariants, protected poses, interval boundaries, correction-bound
+skip, increased-drift rollback, centimetre ancestor scale, unreachable targets,
+bad intervals and GLB roundtrip. CLI tests exercise cleanup/batch with no models,
+quoted paths, source recipe protection/reporting, overwrite refusal, numeric
+refusal and full plan preflight before an earlier inference action can run.
+
+Real asset validation reused existing native generated assets, with no new
+inference, GPU timings or weights. Optional developer-only
+`python tests/verify_cleanup.py BEFORE.glb AFTER.glb LEFT_ANKLE RIGHT_ANKLE`
+independently decodes dense Tide GLB tracks and implements FK (including scales),
+asserts reported drift, unchanged translations/Hips, preserved world ankle
+orientation, protected pose equality and bone lengths. Python is not used by
+cleanup, inference, the runtime, build or the six CTests. Native
+`cleanup-tests BEFORE.glb AFTER.glb` additionally checks root, all local
+translations and bone lengths after export.
+
+Real idle: D:/Projects/tide-motion/.research/inference-dae12e915f8d42b6919e3777c94a5828/idle.glb
+(60 frames, seed 1, 50 steps), both feet explicitly planted 0..59, default fades
+and correction bound. Mean ankle horizontal movement left/right, mm/frame:
+0.273/0.261 -> 0.062/0.153. Max anchor residual including fades 4.46/8.27 mm;
+max local correction 2.10/1.85 degrees. The same clip retargeted with
+examples/synty-polygon.json onto scratch PolygonSyntyCharacter.fbx:
+0.301/0.332 -> 0.078/0.231 mm/frame; residual 6.67/13.14 mm, correction
+4.06/2.50 degrees. Native checks: world root/local translation error zero;
+max world bone-length change <2.4e-7 m. Independent FK checks <1.4e-7 m.
+These are modest low-drift idle examples, not broad locomotion-quality evidence.
+
+Real parry-swing-return (75 frames, contacts both feet 0..15): original exact
+constraints at 0 and 74 stay within 2e-6 per exported component, zero recorded
+constraint errors preserved. Left ankle mean 0.787 -> 0.672 mm/frame. Right would
+increase from 1.326 to 1.397 due to the fade/reach limits: now restored to 1.326
+and reported drift-increased. Real fix-kick.seed3 (75 frames), deliberately
+mislabelled left-foot 5..60: exceeds the 10 cm bound (1.681 m anchor distance),
+skipped with zero joint correction; mean 33.154 mm/frame unchanged. Protected
+frame 15 unchanged. This demonstrates refusal of that mislabelled kick, not an
+automatic airborne detector. Validation plans/assets/captures remain ignored in
+.research/validation; no third-party character or derived motion is distributed.
+
+Visual validation: rebuilt CLI/engine and MinGW engine/platform from
+D:/Projects/PurrEngine at 28b61e4db, staged privately under .research/engine (no
+engine source edits). Packaging install stopped on the unrelated unbuilt editor,
+after staging required CLI/engine/platform files; the native CLI was restored
+after the MinGW staging pass. TIDE_HIDDEN=1, 30-frame mannequin and 60-frame Synty
+captures at 960x540 succeeded and were visually inspected: feet at the floor,
+no inverted knees/limbs or broken skin binding in those sampled poses. The idle's
+forward lean remains. This is limited sampled visual inspection, not a guarantee
+of temporal quality or full foot locking. No GPU inference ran, so no GPU mutex
+was needed; future inference validation must hold TideMotionGpuValidation.

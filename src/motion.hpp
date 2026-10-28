@@ -57,6 +57,21 @@ struct RetargetMapping {
     std::map<std::string,Quat> reference_rotations;
     float root_scale=0, heading_degrees=0, ground_offset=0;
 };
+struct FootContact { unsigned foot=0; size_t start=0,end=0; };
+struct CleanupPlan {
+    std::vector<FootContact> contacts;
+    std::vector<size_t> protected_frames;
+    unsigned fade_frames=3;
+    float max_correction=0.1f;
+};
+struct ContactReport {
+    size_t samples=0; bool skipped=false; std::string skip_reason;
+    float drift_before=0,drift_after=0,residual_max=0,rotation_max=0;
+};
+CleanupPlan load_cleanup_plan(const fs::path&);
+// Explicit contact intervals only. Keeps all translations, root and world foot orientation.
+// Custom rigs require a mapping and direct thigh/calf/foot chains; helper chains refused.
+std::vector<ContactReport> cleanup_contacts(Clip&,const CleanupPlan&,const RetargetMapping* =nullptr);
 struct RetargetResult { Clip clip; float scale=1, heading_degrees=0; bool discarded_translations=false; };
 RetargetMapping load_mapping(const fs::path&);
 RetargetResult retarget(const Clip& source, const Clip& target, const RetargetMapping&, bool to_soma=false);

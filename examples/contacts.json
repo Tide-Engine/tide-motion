@@ -1,0 +1,9 @@
+{
+  "contacts": [
+    { "foot": "left-foot", "start": 0, "end": 29 },
+    { "foot": "right-foot", "start": 0, "end": 29 }
+  ],
+  "protectedFrames": [],
+  "fadeFrames": 3,
+  "maxCorrection": 0.1
+}

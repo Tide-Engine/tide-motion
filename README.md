@@ -557,3 +557,63 @@ no objects, collision detection, scene/contact understanding, automatic placemen
 pivots, early transitions, IK or foot cleanup. Pose continuity is exact; velocity,
 acceleration, foot planting and plausible motion between distant/contradictory
 poses are not guaranteed. Inspect the generated GLB in a bounded Tide preview.
+
+## Optional foot contact cleanup
+
+`cleanup` applies native two-bone foot IK to an existing generated or retargeted
+clip. Generation and retarget defaults stay unchanged; no model is loaded.
+
+```powershell
+tide-motion cleanup idle.glb --contacts contacts.json -o idle-clean.glb
+# A custom rig needs its explicit SOMA mapping:
+tide-motion cleanup character-idle.glb --map examples/synty-polygon.json --contacts contacts.json -o character-clean.glb
+```
+
+Copy `examples/contacts.json` and edit the **inclusive, zero-based** frame intervals
+for actual planted feet. Each interval anchors the ankle to its first sample in
+world space. There is no automatic contact or ground detection. Do not label a
+kick, airborne motion, a deliberate sliding step or a foot pivot as a contact.
+Only SOMA-30 and mapped direct thigh/calf/ankle chains are supported; intermediate
+helpers in those chains are refused. Mapping does not identify bones automatically.
+
+`fadeFrames` is 0..60 (default 3), a raised cosine fade at either interval edge
+and near protected poses; 0 applies the lock immediately. `maxCorrection` is the
+maximum distance in metres from the first ankle sample, in (0,0.5] (default 0.1).
+An interval exceeding it is skipped entirely. A solved interval whose mean
+horizontal drift increases by more than 0.1 micrometres per frame is also rolled
+back in full (`skipReason`: `correction-bound` or `drift-increased`). Same-foot intervals cannot overlap;
+both feet may be planted simultaneously. Each interval needs at least three frames.
+This limit bounds ankle displacement, not the joint angle. Review the reported
+joint corrections, especially on nearly straight knees.
+
+Root motion and all local translations stay unchanged. Foot world orientation is
+kept; toes can still articulate. No ground projection, pelvis adjustment, joint
+limits, collision solver or sole/toe locking is performed. An unreachable ankle
+has residual error rather than stretching its bones or moving the root. Fades,
+protected poses and unreachable targets can leave drift or increase movement near
+an interval boundary. These are explicit editing controls, not a quality guarantee.
+
+Every constraint frame in an adjacent source `.glb.json` recipe is protected
+exactly and retained for subsequent cleanup. For externally authored clips or
+constraints lost through other conversions (including retarget), put their frame
+indices in `protectedFrames`. All joints at those frames remain unchanged.
+Generated effector/path targets are still measured by generation; this command
+does not solve those targets or change their existing defaults.
+
+The output recipe records `tide-two-bone-v1`, the effective settings, explicit
+intervals, protected frames, mapping (if used), source recipe, skipped intervals,
+mean horizontal ankle movement per frame before/after (metres), maximum distance
+from the anchor after cleanup, and maximum local joint rotation correction
+(degrees). Metrics include fades and protected frames. A saved asset can contain
+skipped intervals; inspect its recipe.
+
+Batch action (paths relative to the manifest; the plan and mapping are preflighted
+before any model loads):
+
+```json
+{"actions":[{"action":"cleanup","source":"idle.glb","contacts":"contacts.json","output":"idle-clean.glb"}]}
+```
+
+Add `map` and/or `clip` for a mapped rig or named animation. Place this action after
+`generate`, `connect` or `retarget` to postprocess that action's output. Each output
+remains an ordinary GLB skeleton and animation, without mesh or skin changes.

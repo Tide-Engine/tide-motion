@@ -165,6 +165,21 @@ Paths are relative to POSES.json. All source clips must exist before the run
 No scene understanding, contacts, IK, arbitrary timing or velocity seam guarantee.
 See examples/pose-sequence.json and README.md.
 )";
+    if(command=="cleanup")return R"(tide-motion cleanup CLIP.glb|.fbx --contacts PLAN.json -o CLEAN.glb [--map BONES.json] [--clip NAME]
+
+Optional native foot contact IK; no model is loaded. PLAN explicitly declares
+inclusive left-foot/right-foot intervals (at least three frames), protectedFrames,
+fadeFrames (0..60, default 3), maxCorrection (metres, (0,0.5], default 0.1).
+Each foot anchors to its first interval sample. Intervals exceeding maxCorrection
+are skipped in full and reported. Intervals with increased mean drift are restored.
+No contact detection or ground projection.
+SOMA-30 or explicitly mapped direct thigh/calf/foot chains only.
+Translations, root motion and world foot orientation are kept. Authored constraint
+frames in an adjacent Tide recipe are protected automatically; use protectedFrames
+for clips without that recipe. Do not label kicks/airborne frames as contacts.
+Recipes report horizontal mean drift per frame before/after, max anchor residual
+(including fades/protected frames), max joint correction and skipped intervals.
+)";
     if(command=="mirror")return R"(tide-motion mirror CLIP.glb -o MIRRORED.glb [--clip NAME]
 
 Swaps left and right in a SOMA-30 clip and reflects it across the character's
@@ -189,7 +204,7 @@ metres); examples/synty-polygon.json maps Synty POLYGON characters.
 )";
     if(command=="batch")return R"(tide-motion batch JOBS.json [--models DIR]
 
-Runs ordered generate, connect, pose-sequence, retarget and mirror actions, loading each model
+Runs ordered generate, connect, pose-sequence, retarget, cleanup and mirror actions, loading each model
 once.
 The whole manifest and every output path are checked before anything runs.
 Paths are relative to the manifest. README.md lists every action field.
@@ -252,6 +267,7 @@ void help(std::string_view command={}) {
   tide-motion connect FROM.glb TO.glb -o BRIDGE.glb [--tokens 6..16] [--joined]
       [--offset X Y Z] [--from-clip NAME] [--to-clip NAME] [--threads N]
   tide-motion pose-sequence POSES.json -o CLIP.glb [--threads N]
+  tide-motion cleanup CLIP.glb --contacts PLAN.json -o CLEAN.glb [--map BONES.json]
   tide-motion mirror CLIP.glb -o MIRRORED.glb [--clip NAME]
   tide-motion retarget SOURCE.glb --target CHARACTER.glb|.fbx --map BONES.json -o CLIP.glb
   tide-motion retarget SOURCE.glb|.fbx --to-soma --map BONES.json -o SOMA.glb [--clip NAME]
@@ -483,6 +499,13 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
             auto poses=path(action.at("recipe"));(void)load_pose_sequence(poses);
             argv.push_back(poses.string());keys.insert({"recipe","threads"});
         }
+        else if(type=="cleanup") {
+            keys.insert({"source","clip","contacts","map"});argv.push_back(path(action.at("source")).string());
+            auto plan=path(action.at("contacts"));load_cleanup_plan(plan);
+            argv.insert(argv.end(),{"--contacts",plan.string()});
+            if(action.contains("map")) {auto m=path(action["map"]);load_mapping(m);argv.insert(argv.end(),{"--map",m.string()});}
+            if(action.contains("clip"))argv.insert(argv.end(),{"--clip",action["clip"].get<std::string>()});
+        }
         else if(type=="mirror") {
             argv.push_back(path(action.at("source")).string());keys.insert({"source","clip"});
             if(action.contains("clip"))argv.insert(argv.end(),{"--clip",action["clip"].get<std::string>()});
@@ -499,7 +522,7 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
             if(action.contains("clip"))argv.insert(argv.end(),{"--clip",action["clip"].get<std::string>()});
             keys.insert({"source","target","map","toSoma","clip"});
         }
-        else throw std::runtime_error("Action must be generate, connect, pose-sequence, retarget or mirror");
+        else throw std::runtime_error("Action must be generate, connect, pose-sequence, retarget, cleanup or mirror");
         for(const auto& item:action.items())if(!keys.contains(item.key()))throw std::runtime_error("Unknown action field: "+item.key());
         auto output=path(action.at("output"));
         if(output.extension()!=".glb")throw std::runtime_error("Output must be a .glb path: "+output.string());
@@ -559,7 +582,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     if(!command_help(args[1]))throw unknown(args[1]);
     std::string command=args[1],clip_name,from_name,to_name,tide="tide";
     for(size_t i=2;i<args.size();++i)if(args[i]=="--help"||args[i]=="-h") {help(command);return 0;}
-    fs::path models,output,capture,gif,target_file,map_file,character_file,texture_file;bool mannequin=false;
+    fs::path models,output,capture,gif,target_file,map_file,character_file,texture_file,contacts_file;bool mannequin=false;
     if(command=="generate"||command=="connect"||command=="pose-sequence"||command=="models"||command=="batch")models=model_directory();
     double duration=3;uint64_t seed=0;unsigned steps=50,transition=5;int frames=0,tokens=0;
     bool accept=false,joined=false,skeleton=false,to_soma=false,correct=true;Vec3 offset{};
@@ -609,6 +632,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         else if(a=="--frames")frames=static_cast<int>(integer(value(),1,18000,"frames"));
         else if(a=="--tokens")tokens=static_cast<int>(integer(value(),6,16,"tokens"));
         else if(a=="--offset") {offset.x=static_cast<float>(number(value(),-10000,10000,"offset"));offset.y=static_cast<float>(number(value(),-10000,10000,"offset"));offset.z=static_cast<float>(number(value(),-10000,10000,"offset"));}
+        else if(a=="--contacts")contacts_file=utf8path(value());
         else if(a=="--clip")clip_name=value();
         else if(a=="--from-clip")from_name=value();
         else if(a=="--to-clip")to_name=value();
@@ -634,6 +658,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     else if(command=="retarget")allowed={"-o","--output","--target","--map","--to-soma","--clip"};
     else if(command=="inspect")allowed={"--clip","--skeleton"};
     else if(command=="preview")allowed={"--clip","--tide","--capture","--gif","--frames","--mannequin","--skeleton","--character","--map","--texture"};
+    else if(command=="cleanup")allowed={"-o","--output","--contacts","--map","--clip"};
     else if(command=="models")allowed={"--models","--accept-licenses"};
     else if(command=="pose-sequence")allowed={"-o","--output","--models","--threads"};
     else if(command=="batch")allowed={"--models"};
@@ -727,7 +752,35 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         if(!metadata)throw std::runtime_error("Animation saved but could not write its recipe");
         std::cout<<"Saved "<<path.string()<<" ("<<made.frames()<<" frames, "<<made.duration()<<" seconds)\n";
     };
-    if(command=="mirror") {
+    if(command=="cleanup") {
+        if(pos.size()!=1||contacts_file.empty())throw std::runtime_error("cleanup needs one source and --contacts PLAN.json");
+        auto plan=load_cleanup_plan(contacts_file);
+        clip=load_glb(utf8path(pos[0]),clip_name,false);
+        std::optional<RetargetMapping> mapping;if(!map_file.empty())mapping=load_mapping(map_file);
+        auto sidecar=utf8path(pos[0]+".json");
+        nlohmann::json source_recipe;
+        if(fs::exists(sidecar)) {
+            if(fs::file_size(sidecar)>1024*1024)throw std::runtime_error("Source recipe exceeds 1 MiB");
+            std::ifstream input(sidecar);input>>source_recipe;
+            if(source_recipe.contains("constraints"))for(const auto& constraint:source_recipe.at("constraints")) {
+                const auto& frame=constraint.at("frame");
+                if(!frame.is_number_unsigned()&&!frame.is_number_integer())throw std::runtime_error("Invalid source constraint frame");
+                if(frame.get<double>()<0||frame.get<double>()>=static_cast<double>(clip.frames()))throw std::runtime_error("Source constraint frame outside clip");
+                plan.protected_frames.push_back(frame.get<size_t>());
+            }
+        }
+        auto reports=cleanup_contacts(clip,plan,mapping?&*mapping:nullptr);
+        mirror_recipe={{"tool","tide-motion"},{"version",MOTION_VERSION},{"command","cleanup"},{"source",pos[0]},{"clip",clip_name},
+            {"fps",clip.fps},{"frames",clip.frames()},{"solver","tide-two-bone-v1"},{"fadeFrames",plan.fade_frames},{"maxCorrectionMetres",plan.max_correction},{"protectedFrames",plan.protected_frames},
+            {"sourceRecipe",source_recipe},{"rootMotionPreserved",true},{"contacts",nlohmann::json::array()}};
+        if(source_recipe.contains("constraints"))mirror_recipe["constraints"]=source_recipe["constraints"];
+        if(mapping) {std::ifstream input(map_file);nlohmann::json m;input>>m;mirror_recipe["mapping"]=m;}
+        for(size_t i=0;i<reports.size();++i) {
+            const auto& r=reports[i];const auto& contact=plan.contacts[i];
+            mirror_recipe["contacts"].push_back({{"foot",contact.foot?"right-foot":"left-foot"},{"start",contact.start},{"end",contact.end},{"samples",r.samples},{"skipped",r.skipped},{"skipReason",r.skip_reason},
+                {"horizontalMeanStepBeforeMetres",r.drift_before},{"horizontalMeanStepAfterMetres",r.drift_after},{"anchorResidualMaxMetres",r.residual_max},{"jointCorrectionMaxDegrees",r.rotation_max}});
+        }
+    } else if(command=="mirror") {
         if(pos.size()!=1)throw std::runtime_error("mirror takes one SOMA-30 .glb clip");
         clip=load_glb(utf8path(pos[0]),clip_name,true);
         mirror_soma(clip);
@@ -876,7 +929,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     auto recipe=recipe_for(clip,seed);
     if(command=="connect")recipe["threads"]=threads;
     if(command=="retarget")recipe=std::move(retarget_recipe);
-    if(command=="mirror")recipe=std::move(mirror_recipe);
+    if(command=="mirror"||command=="cleanup")recipe=std::move(mirror_recipe);
     finish(clip,output,recipe);return 0;
 }
 }
