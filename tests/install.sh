@@ -11,7 +11,7 @@ echo keep > "$root/models/keep.txt"
 sh "$repo/install.sh" "$archive" "$root"
 sh "$repo/install.sh" "$archive" "$root"
 [ "$(cat "$root/models/keep.txt")" = keep ]
-for item in examples/jobs.json notes/implementation.md LICENSE; do [ -f "$root/$item" ]; done
+for item in examples/jobs.json notes/implementation.md README.md PROMPTING.md LICENSE; do [ -f "$root/$item" ]; done
 env -u LD_LIBRARY_PATH -u DYLD_LIBRARY_PATH "$root/bin/tide-motion" --version
 "$root/bin/tide-motion" --help >/dev/null
 # Corrupt checksums and escaping links must fail before replacing the executable.

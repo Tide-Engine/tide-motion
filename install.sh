@@ -47,7 +47,7 @@ if [ ! -f "$payload/bin/tide-motion" ]; then
     [ "$#" -eq 1 ] && [ -d "$1" ] || fail 'Incomplete Tide Motion package'
     payload=$1
 fi
-for required in bin/tide-motion licenses/META-LLAMA-3.txt examples/jobs.json notes/implementation.md README.md LICENSE; do
+for required in bin/tide-motion licenses/META-LLAMA-3.txt examples/jobs.json notes/implementation.md README.md PROMPTING.md LICENSE; do
     [ -f "$payload/$required" ] || fail "Incomplete Tide Motion package: $required"
 done
 "$payload/bin/tide-motion" --version
@@ -56,7 +56,7 @@ if ! mv "$payload/bin" "$root/bin"; then
     if [ -d "$backup" ]; then mv "$backup" "$root/bin"; fi
     fail 'Could not replace the executable'
 fi
-for item in licenses examples notes README.md LICENSE; do
+for item in licenses examples notes README.md PROMPTING.md LICENSE; do
     cp -R "$payload/$item" "$root/"
 done
 echo "Installed Tide Motion in $root"

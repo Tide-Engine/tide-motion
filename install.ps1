@@ -62,8 +62,9 @@ try {
     foreach ($folder in @('licenses', 'examples', 'notes')) {
         Copy-Item -LiteralPath (Join-Path $payload $folder) -Destination $installRoot -Recurse -Force
     }
-    Copy-Item -LiteralPath (Join-Path $payload 'README.md') -Destination $installRoot -Force
-    Copy-Item -LiteralPath (Join-Path $payload 'LICENSE') -Destination $installRoot -Force
+    foreach ($file in @('README.md', 'PROMPTING.md', 'LICENSE')) {
+        Copy-Item -LiteralPath (Join-Path $payload $file) -Destination $installRoot -Force
+    }
     if ($AddToPath) {
         [string]$userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
         if (!(($userPath -split ';') -contains $binPath)) {
