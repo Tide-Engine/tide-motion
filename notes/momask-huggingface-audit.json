@@ -1,0 +1,105 @@
+{
+  "reviewed": "2026-10-28",
+  "search": "https://huggingface.co/api/models?search=momask&full=true&limit=100",
+  "scope": "Six current name-matching model repositories and author-linked Space. Search absence is not proof of universal absence.",
+  "officialSpace": {
+    "id": "MeYourHint/MoMask",
+    "revision": "4b0323058afeb8d4443d5b370a9e35fd9537222b",
+    "finding": "Unchanged official application source; separate Drive archive download; no additional checkpoint-specific terms.",
+    "reviewedFiles": [
+      {
+        "path": "LICENSE",
+        "url": "https://huggingface.co/spaces/MeYourHint/MoMask/raw/4b0323058afeb8d4443d5b370a9e35fd9537222b/LICENSE",
+        "sha256": "89d4bed7dc369fecd1788de4be01931740fa96558aa0a4edc0d254d7850bf4a7"
+      },
+      {
+        "path": "README.md",
+        "url": "https://huggingface.co/spaces/MeYourHint/MoMask/raw/4b0323058afeb8d4443d5b370a9e35fd9537222b/README.md",
+        "sha256": "9fb62cb0950d2ca819aa3dcdef63ebfade5cbf60d69e4dda44765663c5ad3283"
+      },
+      {
+        "path": "prepare/download_models_demo.sh",
+        "url": "https://huggingface.co/spaces/MeYourHint/MoMask/raw/4b0323058afeb8d4443d5b370a9e35fd9537222b/prepare/download_models_demo.sh",
+        "sha256": "bdffee8facd8cd14db3f952de4ce7e7524bf37d1524beac4125a773350c8305d"
+      }
+    ]
+  },
+  "models": [
+    {
+      "id": "camenduru/MoMask",
+      "revision": "349c4f5ffdb6dbf9861f1f25fb45e91215c4b5ae",
+      "licenseMetadata": null,
+      "finding": "Archive mirror; no card or license file in this model repository.",
+      "reviewedFiles": []
+    },
+    {
+      "id": "andrewatef/MoMask-test",
+      "revision": "0d3211eb221f612f2a626ee1445fb88e5cec5917",
+      "licenseMetadata": null,
+      "finding": "Copied application/code license and README; no explicit checkpoint-specific grant.",
+      "reviewedFiles": [
+        {
+          "path": "LICENSE",
+          "url": "https://huggingface.co/andrewatef/MoMask-test/raw/0d3211eb221f612f2a626ee1445fb88e5cec5917/LICENSE",
+          "sha256": "89d4bed7dc369fecd1788de4be01931740fa96558aa0a4edc0d254d7850bf4a7"
+        },
+        {
+          "path": "README.md",
+          "url": "https://huggingface.co/andrewatef/MoMask-test/raw/0d3211eb221f612f2a626ee1445fb88e5cec5917/README.md",
+          "sha256": "d3349d23bc840ad639c52ed99f39bfe2412381ffb476938badcaf44e5408fd48"
+        }
+      ]
+    },
+    {
+      "id": "geedog/momask-codes-models",
+      "revision": "75d34d1ab9d705d895ff4897c454fdc35775dfaa",
+      "licenseMetadata": null,
+      "finding": "Compatible checkpoint mirror with original Chuan Guo MIT software LICENSE; upstream authorization or explicit original-checkpoint scope not established.",
+      "reviewedFiles": [
+        {
+          "path": "LICENSE",
+          "url": "https://huggingface.co/geedog/momask-codes-models/raw/75d34d1ab9d705d895ff4897c454fdc35775dfaa/LICENSE",
+          "sha256": "89d4bed7dc369fecd1788de4be01931740fa96558aa0a4edc0d254d7850bf4a7"
+        }
+      ]
+    },
+    {
+      "id": "Signvrse/signvrse-momask-rvqvae",
+      "revision": "06395b416a4736e7fad73f923e94a78c41a554e4",
+      "licenseMetadata": "mit",
+      "finding": "Publisher card marks its own RVQ model MIT; config is 668-dimensional and bundle has no compatible masked/residual text generator.",
+      "reviewedFiles": [
+        {
+          "path": "config.json",
+          "url": "https://huggingface.co/Signvrse/signvrse-momask-rvqvae/raw/06395b416a4736e7fad73f923e94a78c41a554e4/config.json",
+          "sha256": "f1fa63d8513a1abc34b6f112efe5330fdb4fdcb06e906e7950bbd9663a0accd8"
+        },
+        {
+          "path": "README.md",
+          "url": "https://huggingface.co/Signvrse/signvrse-momask-rvqvae/raw/06395b416a4736e7fad73f923e94a78c41a554e4/README.md",
+          "sha256": "4fb23bceb77aa1c191888a8f5084b10768730e0119df25113f38a3bb4e44b2b0"
+        }
+      ]
+    },
+    {
+      "id": "ZeyuLing/Motius-MoMask-HumanML3D",
+      "revision": "8fd9e32894f736468fc42617d4e8152535276363",
+      "licenseMetadata": "other",
+      "finding": "Card marks license other and identifies converted upstream checkpoint origin; no new original-rightsholder grant.",
+      "reviewedFiles": [
+        {
+          "path": "README.md",
+          "url": "https://huggingface.co/ZeyuLing/Motius-MoMask-HumanML3D/raw/8fd9e32894f736468fc42617d4e8152535276363/README.md",
+          "sha256": "27b2095858d30a3555ca9d1e4e183a98858e855db3f5f9158d7bff104d8dd206"
+        }
+      ]
+    },
+    {
+      "id": "pgarces/momask-checkpoints",
+      "revision": "36cbddb91492238ce500e8633d86229f54f376b4",
+      "licenseMetadata": null,
+      "finding": "Compatible checkpoint mirror; no README or license file in this repository.",
+      "reviewedFiles": []
+    }
+  ]
+}

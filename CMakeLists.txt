@@ -142,7 +142,7 @@ elseif(UNIX)
 endif()
 install(DIRECTORY licenses/ DESTINATION licenses COMPONENT runtime)
 install(FILES README.md PROMPTING.md LICENSE install.ps1 install.sh DESTINATION . COMPONENT runtime)
-install(FILES notes/implementation.md notes/momask.md notes/momask-source-lock.json
+install(FILES notes/implementation.md notes/momask.md notes/momask-source-lock.json notes/momask-huggingface-audit.json
   notes/momask-archive-inventory.json notes/momask-configs.json notes/momask-export-results.json
   notes/momask-export-requirements.txt DESTINATION notes COMPONENT runtime)
 install(DIRECTORY examples/ DESTINATION examples COMPONENT runtime)

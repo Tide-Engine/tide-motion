@@ -86,6 +86,50 @@ card discusses deployment limitations; that discussion is not treated as a
 research-only license. Do not substitute OpenCLIP, another embedding dimension,
 or normalized CLIP embeddings without parity evidence.
 
+## Hugging Face checkpoint-license recheck (2026-10-28)
+
+At the owner's request, checked the current Hub model search, every license/card
+file in its six matching model repositories, and the author-linked Space again.
+Exact repository revisions, reviewed file URLs and SHA-256 are recorded in
+`momask-huggingface-audit.json`. No weights or motion data were downloaded.
+
+The official `MeYourHint/MoMask` Space remains at the previously inspected
+`4b0323058afeb8d4443d5b370a9e35fd9537222b`: MIT software license and a script
+fetching the separate Drive archive, with no additional checkpoint-specific terms.
+
+`geedog/momask-codes-models` at
+`75d34d1ab9d705d895ff4897c454fdc35775dfaa` contains the compatible checkpoint
+bundle and Chuan Guo's original MIT software LICENSE. This is actual colocated
+license text, stronger evidence than a bare metadata badge. However, the mirror
+does not identify an author-issued checkpoint grant or establish the uploader's
+authority to extend the software grant to those external released checkpoints.
+The existing checkpoint-scope question remains unresolved, rather than proving
+the weights are noncommercial. `camenduru/MoMask` and `pgarces/momask-checkpoints`
+provide archive/checkpoint mirrors without a card/license file; the
+`andrewatef/MoMask-test` copy retains the code-only README wording.
+
+`ZeyuLing/Motius-MoMask-HumanML3D` at
+`8fd9e32894f736468fc42617d4e8152535276363` supplies a full converted bundle, but
+its model card marks `license: other` and explicitly describes conversion from
+the original released checkpoints. It supplies no replacement author grant.
+
+`Signvrse/signvrse-momask-rvqvae` at
+`06395b416a4736e7fad73f923e94a78c41a554e4` is a different candidate: its publisher
+labels its own trained motion RVQ-VAE MIT. The inspected model card and config
+specify **668 input features**, rather than HumanML3D's 263. It provides no matching
+masked/residual text generator or compatible HumanML normalization bundle. Even
+if that publisher's grant clears its own model, this tokenizer alone cannot
+provide the requested text-to-motion/inpainting backend or be swapped into the
+original transformers' learned token space. Training a compatible generator is
+a separate data/training project, not routine native conversion.
+
+A standard author-issued MIT/Apache grant applying to the complete necessary
+checkpoint bundle can clear the licensing gate; a custom license or bespoke
+wording about every output is not intrinsically required. The current evidence
+still does not establish that scope/authority for the compatible original bundle.
+No new legal prohibition is inferred from AMASS's dataset terms. No additional
+runtime implementation or real inference is claimed by this license recheck.
+
 ## Necessary inference components and native route
 
 **SMPL, SMPL-X, DMPL, PyTorch3D, body meshes, licensed body-model pickles, the

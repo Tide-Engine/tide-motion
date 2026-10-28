@@ -65,6 +65,19 @@ pass; runtime staging includes the report, pin files and notice. Source verifica
 checks 52 hashes and refuses a deliberately modified source file. No GPU, inference
 benchmark, engine preview, PR or manual CI dispatch was used for this work.
 
+Owner-requested Hugging Face recheck: audited all six current name-matching model
+repositories' public card/license artifacts plus the unchanged author-linked
+Space. Revisions, text URLs and hashes are in notes/momask-huggingface-audit.json;
+detailed findings are in momask.md. The compatible geedog mirror carries the
+original MIT software text but supplies no original-author checkpoint-scope or
+uploader-authority evidence; the complete ZeyuLing conversion says license other.
+The MIT-labelled Signvrse publisher model is a 668-feature RVQ tokenizer without
+a compatible text generator, not a replacement for the 263-feature bundle.
+Commercial checkpoint eligibility remains unestablished; this does not assert
+categorical noncommercial status. An applicable standard author checkpoint grant
+can clear this gate; bespoke output-license wording is not inherently required.
+No weights were fetched, runtime code changed or prior inference tests repeated.
+
 ## Scope agreed with the owner
 
 Separate repository, CLI and installer. Native executables with minimal user
