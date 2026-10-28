@@ -162,6 +162,128 @@ and forward GPU profiles remain valid; no expensive inference benchmark is repea
 for these unrelated source-layout fixes. Final package and installed runtime smoke
 checks cover the combined executable before the direct non-force dev push.
 
+## Dex2HOI manual weights and private native inference (2026-10-28)
+
+Owner explicitly authorized manual user weights and private generation-checkpoint
+tests despite unresolved artifact terms, following the MoMask opt-in pattern.
+Implemented `models import-dex2hoi`, `models check dex2hoi`, and native
+`dex2hoi generate|denoise|install|check`. Import never downloads or executes Python.
+It checks a strict versioned architecture/provenance manifest and SHA-256/size pins,
+rejects unsafe flat filenames, duplicate keys, reparse/symlink files and overwrites,
+then exclusively publishes a verified staged directory. The installed CPU runtime
+uses the existing ONNX Runtime 1.31.1; no runtime dependency/revision was changed.
+
+See [dex2hoi-native.md](dex2hoi-native.md) for commands, full input expectations,
+developer conversion and limits. Source is pinned to Dex2HOI a92aca6b48b7a0c9a45a1465aa984213d3c8ceda;
+developer imported files have individual hashes in tools/dex2hoi/source-lock.json.
+New C++ host/sampler/bundle code is independently written. No upstream source,
+body-model assets, evaluation motions or model payloads enter Git/releases.
+Top-level Dex2HOI/checkpoint grants remain unverified; manual integrity checks do
+not invent execution, commercial, output or redistribution rights. The owner's
+private-test authorization permits proceeding without treating that gap as a
+technical refusal. Existing notices/licenses are preserved.
+
+Privately downloaded only HUMOTO model/mean/std/eps, not optimizers or evaluation
+assets. Original byte pins (SHA-256):
+
+- model.pt, 723196239: `06a9afee10d8416fb3e5376e1428df44e9dca47c6d3803c937dc74129a06ae9f`
+- mean.pt, 2829: `64fd4633d5517f32ae6252745a1389405a2c29a9d14d2589d124ac742735cc1b`
+- std.pt, 2824: `1577949c87a32092df58de258a983e62e06f09338b4393eaa3df71bd71aa5725`
+- eps.pt, 848: `ac13f6f441c7eed353ee965d119b8aade3d8b79f8dfbf2e41c7a224555921719`
+
+Actual strict-loaded EMA state establishes BPS (not PointNet), checkpoint-stored
+512-point basis, 429 features, 65 pose-basis bone rotations, two 18D object slots,
+eight 512-wide decoder/cross-attention layers, 1024-wide input/output MLPs and
+three-head transformer fusion. Missing args.json still leaves training metadata
+unknown. Ten history/sixty predicted frames at 30 Hz are selected upstream
+inference settings, not recovered training window lengths. Manual bundles can
+contain compatible user-converted weights; they are not limited to these hashes.
+
+Developer-only tools/dex2hoi/export.py imports the pinned BPS branch with local
+safe Torch checkpoint loads; optional plotting/unused PointNet imports are bypassed.
+CLIP comes from the already validated canonical ViT-B/32 native bundle, pinned by
+its graph/tokenizer source hashes. Invariant BPS/spatial/affine work is cached once
+per prop. Real upstream versus decomposed Torch denoiser is exactly equal on the
+fixture. Three Python ORT cases max error 2.34e-5; native C++ ORT cases max1.48e-5,
+mean6.22e-7 versus Torch. Runtime/session contracts validate tensor names, dtypes
+and every static dimension. Private bundle manifest hash is
+`f23072620733ddfd608964927c3b8a89cdd0dc4e15d867d4abc0d70df80a408e` for the
+generation run. The final private bundle adds the original MDM/PyTorch3D/CLIP
+component notices and a scope note, with identical graph/tokenizer/statistic bytes;
+manifest `51aba4a1a0fb56f56231e26a434dd03d7adbe8a1aba76049a41c2e755c930063`
+was imported into the owner's TideMotion/models/dex2hoi cache and native parity
+rerun successfully. The task's first private install was retained as a backup.
+
+Review caught an initially added root_x0 network token. Pinned HUMOTO dataset and
+collate supply obj_x0 only; inference recovers root_x0 for host decode without
+inserting the token. Export/native graph were corrected and all final parity and
+generation runs use that corrected graph. Presence of unused root-embedding
+weights does not establish the conditioning call path. Three fixture cases cover
+early/middle/final timesteps, conditional/unconditional text and a masked object.
+
+Host code converts explicit supplied rest bases to/from Blender pose deltas,
+computes rest-stripped wrist frames, fingertip/surface contact logits, normalization,
+root/object displacements, 72D initial transform features and 18D world objects.
+Actual pinned upstream tests on own synthetic rig/data: 256 initial transforms
+max1.07e-6, 256 object translations max7.15e-7 m, 32x66 bone FK position max6.56e-7 m
+and matrix max1.43e-6. Native unit tests also cover independent double equations,
+normalization round trips, contact variants and exact GT-prefix free-translation
+override. No upstream rig or dataset motion was used for these tests.
+
+Sampling is native DDIM x0/cosine500/eta0, text-only CFG2.5 default. Reduced step
+counts are explicit experimental respacing; every original timestep index is
+serialized. RNG splitmix64-open53-boxmuller-v1 is versioned; equal Torch seed
+numbers do not imply equal random tensors. This remains offline model arithmetic,
+not Tide match determinism. Native CLIP tokenizer scope is ASCII without HTML
+entities/special-token syntax; Unicode/ftfy parity is not claimed.
+
+Generation takes own exact ten-frame30Hz history, 65 explicit distinct mapped
+bones and two slots of 128 metric local surface samples plus world object poses.
+One-prop upstream conditioning duplicates both slots; exportTrack:false suppresses
+the duplicate output. Source ten body/object frames are restored exactly after
+representation decoding. Learned mapped fingers remain network outputs; unmapped
+helpers hold rest. Outputs use ordinary body and independent world object GLB
+tracks through the existing native equipment exporter and retain input/model/mesh
+hashes and sampling recipe. No contact correction or procedural replacement is
+silently applied. Degenerate/nonfinite outputs fail.
+
+Executed private quick10 and full500 learned generation using own synthetic
+SOMA77 prefix, explicit65 binding and own sword/shield boxes. Full500 completed
+in122.116s with four CPU threads and exported70frames; this is a local timing,
+not a speedup or quality benchmark. Bounded90frame skeleton capture was inspected
+using the staged engine built from unchanged367ae4da2d31913176ae1e2624e1d78a1204f03c,
+TIDE_HIDDEN=1 and held TideMotionGpuValidation mutex. Twenty-one Windows x64
+ClangCL18.1.8 Release CTests pass; optional real-network tests pass separately.
+
+Remaining limits: compatible trained rest bases/proportions need owner reference
+validation; a name map onto SOMA77 alone is not semantic retarget parity. The
+own-SOMA fixture proves native integration and finger/object channels, not good
+sword combat or first-person animation. No GRAB, longer autoregression, GPU backend,
+automatic object surface sampling, automatic fingers/grasp/collision, weapon
+semantics or learned bow strings. Source-specific128point contact sampling differs
+from the research loader's independently sampled up-to256point contacts. Existing
+equipment authoring remains the explicit offline contact/bow stage.
+
+Final integration rebases onto origin/dev9673496, preserving the concurrent DART,
+MoMask authoring and advisory-review changes. The combined Windows Release build and all21 CTests
+pass, as does optional real-checkpoint native parity. GCC13.3 WSL C++20 syntax
+checks pass for all three new implementation units with -Wall -Wextra -Wpedantic
+-Werror; four statement-layout fixes preserve all non-whitespace source bytes.
+This is not a full Linux inference/package validation. A first parallel build
+regeneration hit a shared FetchContent subbuild file lock; the subsequent stable
+configuration/build completed successfully. No dependency or model arithmetic
+changed to resolve that transient build failure.
+
+Runtime-component staging includes the new instructions and existing required
+runtime DLLs/notices, and contains no .pt/.onnx/.gguf/.safetensors payloads. Its
+packaged executable verifies the private default cache and generates another
+70frame GLB with Windows-only PATH (10step plumbing run). The normal owner tool
+installation is untouched; the private packaged test executable is retained under
+ignored .research/dex2hoi/private/package/bin. Bounded standalone engine capture
+also verifies the two independent learned object tracks/rigid meshes through the
+ordinary animation path. Character-mesh rendering and good grip quality are not
+implied by that separate prop-only capture.
+
 ## Native equipment grips, object export and bow release (2026-10-28)
 
 Owner explicitly requested implementing the remaining tool authoring work and

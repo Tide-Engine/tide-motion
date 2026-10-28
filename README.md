@@ -23,10 +23,16 @@ CPU remains its default; Windows DirectML GPU is optional. Spatial targets use
 explicit native postprocessing; these controls do not add learned Kimodo or ARDY
 conditioning inputs to the model. Kimodo remains the default.
 
-The models use canonical SOMA-30 human animations. A reusable bone-mapping file
+Experimental Dex2HOI jointly generates human and object motion with manually
+supplied native weights: `models import-dex2hoi`, then `dex2hoi generate` with an
+explicit compatible rig, ten-frame history and object geometry. A private native
+CPU run is supported; weights are not bundled or automatically downloaded.
+See [setup, input contracts and remaining rig/quality limits](notes/dex2hoi-native.md).
+
+The main authoring workflows use canonical SOMA-30 human animations. A reusable bone-mapping file
 retargets between SOMA and your humanoid rig, offline and without another model.
-Outputs are self-contained GLB files containing an animated skeleton, without a
-mesh. They drive the character mesh you already have. Automatic bone assignment,
+Body animations are self-contained GLB assets without a character mesh; equipment
+exports can embed rigid props. They drive the character mesh you already have. Automatic bone assignment,
 rigging, skinning and non-humanoid retargeting are not implemented.
 
 ## Install

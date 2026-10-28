@@ -4,6 +4,7 @@
 #include "ardy.hpp"
 #include "upgrade.hpp"
 #include "momask.hpp"
+#include "dex2hoi.hpp"
 #include "ardy_gpu.hpp"
 #include "dart.hpp"
 #include "dart_gpu.hpp"
@@ -63,6 +64,7 @@ bool kimodo_on_gpu() {
 }
 // Usage of one command; the global text lists every command and option.
 const char* command_help(std::string_view command) {
+    if(command=="dex2hoi")return motion::dex2hoi::help();
     if(command=="review")return R"(tide-motion review MANIFEST.json -o REVIEW.html
 
 Build a local, self-contained advisory review and REVIEW.html.json observations.
@@ -387,6 +389,8 @@ if Windows reports locked files. No model downloads or engine updates occur.
 tide-motion models check [all|kimodo|kimodo-v1.2|text|bricks|dart] [--models DIR]
 tide-motion models import-momask BUNDLE_DIRECTORY [--models DIR]
 tide-motion models check momask [--models DIR]
+tide-motion models import-dex2hoi BUNDLE_DIRECTORY [--models DIR]
+tide-motion models check dex2hoi [--models DIR]
 
 Downloads (resumably) and verifies the pinned model files by SHA-256.
 kimodo-v1.2 downloads pinned official safetensors/statistics and converts them
@@ -395,6 +399,9 @@ all retains v1.1 and MotionBricks.
 MoMask is manual-only: import its supported prepared ONNX bundle into DIR/momask.
 Raw .tar/.pt files are not that bundle. No MoMask weights are downloaded or bundled;
 manual import does not establish commercial rights for the supplied checkpoints.
+Dex2HOI is also manual-only. Import a prepared bundle into DIR/dex2hoi, then use
+the separate dex2hoi generate command with explicit rig/history/object inputs.
+See notes/dex2hoi-native.md for its experimental native inference contract.
 dart is an explicit opt-in: pinned DART/CLIP files are converted to native ONNX
 graphs locally. It adds no SMPL body assets, Python or hosted inference.
 
@@ -421,6 +428,8 @@ void help(std::string_view command={}) {
   tide-motion inpaint "PROMPT" --source SOMA.glb --begin F --end F -o EDIT.glb
   tide-motion extend "PROMPT" --source SOMA.glb --duration SECONDS -o LONGER.glb
   tide-motion models import-momask BUNDLE_DIRECTORY [--models DIR]
+  tide-motion models import-dex2hoi BUNDLE_DIRECTORY [--models DIR]
+  tide-motion dex2hoi generate --input OWN_HISTORY.json --prompt "PROMPT" -o CLIP.glb
   tide-motion connect FROM.glb TO.glb -o BRIDGE.glb [--tokens N|MIN..MAX] [--joined]
       [--offset X Y Z] [--from-clip NAME] [--to-clip NAME] [--threads N]
   tide-motion pose-sequence POSES.json -o CLIP.glb [--threads N]
@@ -1011,6 +1020,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     auto unknown=[](const std::string& name){return std::runtime_error("Unknown command: "+name+"; tide-motion --help lists the commands");};
     if(args[1]=="help") { if(args.size()>2&&!command_help(args[2]))throw unknown(args[2]);help(args.size()>2?args[2]:"");return 0; }
     if(args[1]=="--version") { std::cout<<"tide-motion "<<MOTION_VERSION<<"\n";return 0; }
+    if(args[1]=="dex2hoi")return motion::dex2hoi::command(args);
     if(args[1]=="review") {
         for(size_t i=2;i<args.size();++i)if(args[i]=="--help"||args[i]=="-h"){help("review");return 0;}
         return review_command(args);
@@ -1148,6 +1158,11 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         return batch(utf8path(pos[0]),models,context);
     }
     if(command=="models") {
+        if(pos.size()==2&&pos[0]=="import-dex2hoi")return motion::dex2hoi::command({args[0],"dex2hoi","install",pos[1],"--bundle",(models/"dex2hoi").string()});
+        if(pos.size()==2&&pos[1]=="dex2hoi") {
+            if(pos[0]=="check")return motion::dex2hoi::command({args[0],"dex2hoi","check","--bundle",(models/"dex2hoi").string()});
+            if(pos[0]=="install")throw std::runtime_error("Dex2HOI weights are manual-only; use tide-motion models import-dex2hoi BUNDLE_DIRECTORY");
+        }
         if(pos.size()==2&&pos[0]=="import-momask")return momask_main({args[0],"momask","install",pos[1],"--models",(models/"momask").string()});
         if(pos.size()==2&&pos[1]=="momask") {
             if(pos[0]=="check")return momask_main({args[0],"momask","check","--models",(models/"momask").string()});

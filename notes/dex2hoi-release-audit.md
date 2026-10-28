@@ -1,5 +1,10 @@
 # Dex2HOI release inventory and native host probe
 
+Follow-up: the owner subsequently authorized manual weights and private tests.
+The [native integration](dex2hoi-native.md) now downloads nothing at runtime and
+has privately validated real HUMOTO inference. This page records the earlier
+metadata-only investigation; its statements about work not yet done are historical.
+
 2026-10-28 follow-up to [the feasibility audit](dex2hoi-feasibility.md).
 Source remains pinned to
 [`a92aca6b48b7a0c9a45a1465aa984213d3c8ceda`](https://github.com/cpratikaki/Dex2HOI/tree/a92aca6b48b7a0c9a45a1465aa984213d3c8ceda).

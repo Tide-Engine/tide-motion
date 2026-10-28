@@ -1,0 +1,38 @@
+{
+  "repository": "https://github.com/cpratikaki/Dex2HOI",
+  "revision": "a92aca6b48b7a0c9a45a1465aa984213d3c8ceda",
+  "files": {
+    "model/hoi/hoi_motion_fusion.py": {
+      "size": 31389,
+      "sha256": "060b903e6825f73580dbd65282ca9486fdd09f3637b1cda463dcaa96be287a16"
+    },
+    "model/hoi/hoi_model.py": {
+      "size": 14820,
+      "sha256": "28709f5256de4a715f9f4307fa0106aa45a334b2a14442663c2039cee8e79c2d"
+    },
+    "model/object_conditioning/object_encoder_bps.py": {
+      "size": 5975,
+      "sha256": "0b89f21af4cbfa32985c2dea140d1e68d8a3aaaea1a7055997724e5b41e75f7d"
+    },
+    "model/diffusion_planner/model/mdm.py": {
+      "size": 26341,
+      "sha256": "c3e4a0378711057f4f7c26c9a0c9e189de0e58b2634889f497338e2ec9e6b94f"
+    },
+    "model/diffusion_planner/utils/misc.py": {
+      "size": 2593,
+      "sha256": "7a64bf933a8fe4ba05bcf58755d69085105820648c97b2b9429972ba4c13edf8"
+    },
+    "model/body_model_utils/geometry.py": {
+      "size": 20468,
+      "sha256": "42b3c74a0a1522a19d25f036c9b7bc2355b65d43803fb52df24d66e7df1ab8ee"
+    },
+    "model/diffusion_planner/LICENSE": {
+      "size": 1066,
+      "sha256": "2532b783ef384bdcffb6d71af662b41f8365965c943fe5d2174695717d7a90a2"
+    },
+    "model/diffusion_planner/utils/PYTORCH3D_LICENSE": {
+      "size": 1546,
+      "sha256": "70d7d45e957c5667dd9f8202dc4fd1e9208472d613737cdb104c6b793c0489e7"
+    }
+  }
+}
