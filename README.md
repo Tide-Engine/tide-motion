@@ -95,6 +95,7 @@ Save the resulting assets rather than regenerating them during game builds.
 
 | Option | Does |
 |---|---|
+| `--model v1.1\|v1.2` | Kimodo checkpoint; choose by action using [the agent/model-selection guide](PROMPTING.md#choose-the-kimodo-checkpoint-by-action), default v1.1 |
 | `--variants N` | Makes N clips (1–64) from seeds `--seed`, `--seed`+1, …, keeping the model loaded, and a contact sheet |
 | `--variants-gif` | Also a GIF of every variant playing at once |
 | `--guidance W` | How strongly the prompt steers the motion, 0–10 (default 2; see below) |
@@ -146,6 +147,14 @@ constraint errors in the recipe are measured before it, and poses after frame 0
 move with the travel removed. It refuses `--path`, whose only purpose is travel.
 
 ### Getting a good result
+
+Choose the Kimodo checkpoint explicitly for each action: start with `--model
+v1.2` for longer plain right kicks or path accuracy, `--model v1.1` for backward
+walk/turn contacts and the tested sword-worded kick. These are measured starting
+points from a limited sample; compare variants when quality matters. See
+[checkpoint selection for agents, commands and batches](PROMPTING.md#choose-the-kimodo-checkpoint-by-action)
+and the [paired results](notes/soma-rp-comparison.md). The default remains v1.1;
+there is no automatic action router or overall quality winner.
 
 [PROMPTING.md](PROMPTING.md) covers what to write and how to nudge a wrong
 result, with the measurements behind it. In short: one movement per prompt,

@@ -1,11 +1,13 @@
 # Prompting Tide Motion
 
 What to write in a `generate` prompt, and what to try when a result is wrong.
-Every claim here was measured with Tide Motion 0.5.0 on an RTX 4080 SUPER: 8
-seeds per prompt (`--variants 8`), 2.5 seconds, default settings, unless a
-table says otherwise. Results were scored by forward kinematics on the output
-GLBs: a **kick** is a foot 0.45 m above the floor, **airborne** is both feet
-0.08 m up at once, a **crouch** is the head dropping 0.5 m.
+The original prompt, duration and guidance measurements below used Kimodo SOMA-RP
+v1.1 with Tide Motion 0.5.0 on an RTX 4080 SUPER: 8 seeds per prompt
+(`--variants 8`), 2.5 seconds, default settings, unless a table says otherwise.
+Those measurements used GLB forward-kinematics proxies: a **kick** is a foot
+0.45 m above the floor, **airborne** is both feet 0.08 m up at once, a **crouch**
+is the head dropping 0.5 m. The later checkpoint comparison has its own protocol
+and proxy definitions, linked in the model-selection section below.
 
 ## The short version
 
@@ -18,6 +20,67 @@ GLBs: a **kick** is a foot 0.45 m above the floor, **airborne** is both feet
 5. Make `--variants 8` and pick from the contact sheet.
 6. Still not there: reword, then raise `--guidance` to 3–4, then pin the moment
    with a `--keyframe` or `--effector` taken from your best variant.
+
+## Choose the Kimodo checkpoint by action
+
+Choose a starting checkpoint for the motion you need, then inspect candidates.
+Agents should write `--model v1.1` or `--model v1.2` explicitly and set `model` on
+each batch generate action. The CLI keeps v1.1 as its compatibility default;
+there is no automatic action router or generally superior version.
+
+The [400-clip paired comparison](notes/soma-rp-comparison.md) used eight fresh
+seeds, 50 steps and guidance 2/2. These are practical starting points from that
+sample, not guarantees on new prompts or rigs:
+
+| Need | Try first | Evidence and limits |
+| --- | --- | --- |
+| Longer plain right kick | `v1.2` | At 5 s, the named-kick proxy passed 6/8 vs 1/8 for v1.1; at 2.5 s both passed 8/8. Still prefer short segments for one move. |
+| Sparse root-path accuracy | `v1.2` | Mean hips-waypoint error 5.31 vs 6.61 cm on the tested curved path; hips differ from the model's smooth root. |
+| Crouch transition with less foot drift | `v1.2` | Mean slide proxy 0.109 vs 0.196 cm/frame; both passed the crouch-transition proxy. |
+| Backward walking or turns where contacts matter | `v1.1` | Less slide in this sample: backward 0.182 vs 0.494, turn 0.100 vs 0.200 cm/frame. |
+| Existing sword-worded right-kick prompt | `v1.1` | Short clips passed 8/8 vs 6/8; long clips only 1/8 for either. Plain body-action wording remains preferable to props. |
+| Other actions, or conflicting priorities | `v1.1`, then compare `v1.2` | The study found no overall winner; forward walking/running and several other comparisons were close. |
+
+For example, after installing the licensed models, select each action explicitly:
+
+```sh
+tide-motion models install kimodo --accept-licenses
+tide-motion models install kimodo-v1.2 --accept-licenses
+tide-motion generate "A person kicks forward with the right leg." --model v1.2 --duration 5 --seed 101 --variants 8 -o long-kick.glb
+tide-motion generate "A person walks backwards." --model v1.1 --duration 2.5 --seed 101 --variants 8 -o backward-walk.glb
+```
+
+For a fair A/B comparison, repeat the **same** prompt, duration, seed range,
+guidance, steps, poses, path and correction settings with the other `--model` and
+a distinct output name. The two commands above illustrate different choices,
+not an A/B pair. Check that the intended action happened before comparing slide;
+a stationary failure can otherwise look cleaner. Review pose/path errors and
+abrupt changes as well as front/profile previews, and keep the chosen GLB and its
+recipe (including model identity/hash and seed). A seed alone is not enough to
+reproduce a result after changing models or other generation settings.
+
+Batch manifests select the checkpoint per action, so one job can use both:
+
+```json
+{
+  "actions": [
+    {"action": "generate", "model": "v1.2", "prompt": "A person kicks forward with the right leg.", "duration": 5, "seed": 101, "output": "long-kick.glb"},
+    {"action": "generate", "model": "v1.1", "prompt": "A person walks backwards.", "duration": 2.5, "seed": 101, "output": "backward-walk.glb"}
+  ]
+}
+```
+
+A checkpoint switch reloads Kimodo. For large jobs, group independent actions by
+model when their output dependencies permit. Both versions use the same pinned
+text encoder. `models install all` retains v1.1 + MotionBricks; v1.2 is installed
+explicitly as above and uses native conversion without user Python.
+
+The study used geometry proxies and sparse pose-sheet review, not a human panel
+or complete motion review. Timings were not isolated, so it does not identify a
+faster model. v1.2's corrected training/test splits alone do not establish better
+animation. This table compares Kimodo's smooth-root SOMA-RP checkpoints only;
+`--backend ardy` has a separate [usage guide](notes/ardy-native.md) and does not
+accept `--model`.
 
 ## What to write
 

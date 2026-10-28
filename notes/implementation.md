@@ -1457,3 +1457,25 @@ free tests pass. Runtime staging includes the new comparison note and excludes
 the developer-only renderer/tools. The 400-clip measurements retain their exact
 15c78fd generation provenance; no unchanged Kimodo inference was repeated for
 this additive test/documentation integration.
+
+## Agent usage: choose checkpoints by action (2026-10-28)
+
+Owner adopted action-specific checkpoint selection as the usage policy. AGENTS.md
+now directs agents to the measured selection guide, requires explicit --model
+(and batch model fields) for Kimodo authoring, and retains the asset plus recipe.
+PROMPTING.md adds a bounded recommendation table, native install/generate examples,
+a mixed-model batch, matched comparison procedure and grouping/reproducibility
+advice. It identifies the original 0.5.0 measurements as v1.1 so they are not
+mistaken for universal results across checkpoints. README exposes the selector
+in the generate option table and links the agent-oriented instructions.
+
+The recommendations retain their measured scope: longer plain right kicks,
+curved-path error and crouch drift favor trying v1.2; backward/turn contacts and
+the tested sword-worded kick favor v1.1. Other cases need candidate comparison.
+The guides distinguish geometry/sparse-review evidence from guaranteed quality,
+state that timings were not isolated, and keep ARDY usage separate. No automatic
+router, runtime default, model/dependency/license pin or inference change is made.
+Validation is documentation-only: local guide/report links and the example JSON
+parse, native batch preflight accepts the documented options before the
+expected empty-cache refusal, runtime staging carries updated guides/report, and
+git diff --check passes. No inference, GPU allocation or model download is needed.
