@@ -32,7 +32,7 @@ int main(int argc,char** argv) try {
             for(size_t i=0;i<c.poses.size();++i){auto d=c.poses[i].p-copy.poses[i].p;if(motion::dot(d,d)>1e-8f)throw std::runtime_error("GLB roundtrip position");}
             if(std::string(name)=="cold.glb")cold=c;
             if(std::string(name)=="warm.glb")for(size_t i=0;i<c.poses.size();++i){const auto a=cold.poses[i],b=c.poses[i];if(a.p.x!=b.p.x||a.p.y!=b.p.y||a.p.z!=b.p.z||a.q.x!=b.q.x||a.q.y!=b.q.y||a.q.z!=b.q.z||a.q.w!=b.q.w)throw std::runtime_error("same-seed warm output changed");}
-            auto last=c.frame(c.frames()-1)[0].p;report[name]={{"frames",c.frames()},{"rootTravelMetres",std::hypot(last.x-first.x,last.z-first.z)},{"maxRootStepMetres",rootstep},{"groundedSlideCmPerFrame",contacts?slide/static_cast<double>(contacts):0},{"groundedSamples",contacts}};
+            auto last=c.frame(c.frames()-1)[0].p;report[name]={{"frames",c.frames()},{"rootTravelMetres",std::hypot(last.x-first.x,last.z-first.z)},{"maxRootStepMetres",rootstep},{"groundedSlideCmPerFrame",contacts?nlohmann::json(slide/static_cast<double>(contacts)):nlohmann::json(nullptr)},{"groundedSamples",contacts}};
         }
         std::ofstream out(dir/"asset-measurements.json");out<<report.dump(2);std::cout<<report.dump(2)<<'\n';return 0;
     }

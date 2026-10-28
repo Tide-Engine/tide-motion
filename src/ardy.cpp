@@ -100,7 +100,8 @@ std::vector<float> run(Ort::Session& session,Feed feed) {
     for(auto& [name,t]:feed){names.push_back(name.c_str());if(t.i.empty())inputs.push_back(Ort::Value::CreateTensor<float>(mem,t.f.data(),t.f.size(),t.shape.data(),t.shape.size()));else inputs.push_back(Ort::Value::CreateTensor<int64_t>(mem,t.i.data(),t.i.size(),t.shape.data(),t.shape.size()));}
     const char* out="output";auto values=session.Run(Ort::RunOptions{nullptr},names.data(),inputs.data(),inputs.size(),&out,1);
     auto size=values[0].GetTensorTypeAndShapeInfo().GetElementCount();const auto* p=values[0].GetTensorData<float>();std::vector<float> result(p,p+size);
-    for(float v:result)need(std::isfinite(v),"nonfinite model output");return result;
+    for(float v:result){need(std::isfinite(v),"nonfinite model output");}
+    return result;
 }
 }
 std::vector<float> encode_ardy_history(const Clip& c) {
@@ -175,7 +176,8 @@ Clip ArdyModel::generate(const std::vector<ArdyPrompt>& prompts,const ArdyOption
     auto rootMean=m.meta.at("rootMean").get<std::vector<float>>(),rootScale=m.meta.at("rootScale").get<std::vector<float>>();
     while(done<total){
         size_t keep=std::min(hn,static_cast<size_t>(opt.history_frames/4));
-        if(keep<hn)history.erase(history.begin(),history.begin()+static_cast<ptrdiff_t>((hn-keep)*D));hn=keep;
+        if(keep<hn){history.erase(history.begin(),history.begin()+static_cast<ptrdiff_t>((hn-keep)*D));}
+        hn=keep;
         if(hn){float c=history[3]*rootScale[3]+rootMean[3],s=history[4]*rootScale[4]+rootMean[4];heading=std::atan2(s,c);}
         size_t promptIndex=0,until=prompts[0].frames;while(done>=until&&promptIndex+1<prompts.size())until+=prompts[++promptIndex].frames;
         auto embedding=m.embed(prompts[promptIndex].text);

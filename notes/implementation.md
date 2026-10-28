@@ -7,6 +7,33 @@ tooling. The earlier separate-budget and 2x-value gates were not owner requireme
 and are withdrawn. See [ardy-native.md](ardy-native.md) for current setup, pinned
 artifacts, actual bundled commercial grant, contracts, reproducible tests and limits.
 
+Integrated five-action native CPU batch: cold and warm 183-frame walk, 123-frame
+imported-history walk-to-wave with a path, 183-frame full-body/hand/path-constrained
+walk, and 1,800-frame (60 s) walk. Requested counts, finite FK, GLB save/load and
+same-seed warm repeatability pass. One ARDY session set and one text verification
+are logged for the whole batch. Wall time 63.6008 s, peak working set 9,188,741,120
+bytes. Per-action generation (includes text, excludes session loading): 22.1753 s
+cold, 6.44175 s warm, 5.44895 s history/prompt change, 6.54914 s constraints,
+20.3531 s long-form (4 steps; others 10). The runner held TideMotionGpuValidation,
+but a separate t3-3e98d7db arms-selection process ran outside it: timings are
+contended observations, not an isolated comparison or speedup claim.
+
+Uncorrected constrained clip: full-body position mean/max 1.57/4.01 cm, right-hand
+position 1.45 cm, path hips-ground error 3.27 cm. Bounded captures at 221/181/1801
+frames of history-to-wave, constrained walk and long walk succeed; front/profile
+images were inspected. Walk-to-wave visibly raises the right hand while walking.
+No gross limb inversion or binding error was seen. The strict 3 cm heel-height
+slide diagnostic had zero qualifying samples, so it reports unavailable, not
+zero sliding. Continuous contact quality is not certified. Integrated CTests
+include concurrent cleanup/HumanML work: all eight pass.
+
+Final runtime-only Windows CPU archive: 8,281,696 bytes (no weights or developer
+Python tooling). The final isolated installer test passes again. The packaged
+executable performs real ARDY inference and saves six requested frames with PATH
+restricted to Windows system directories; neither Python nor development tools
+are available to that child process. The same external pinned model bundle is
+used, and all three native sessions plus local GGUF text inference load normally.
+
 `generate --backend ardy` and matching batch fields run complete denoiser/tokenizer
 encoder/decoder graphs through existing native ORT 1.31.1 CPU, with the pinned
 native local LLM2Vec GGUF encoder. C++ owns DDIM, history/masks, origin/requantization,

@@ -76,7 +76,7 @@ Generates a SOMA-30 clip from text (30 fps).
 
       --model v1.1|v1.2      Smooth-root SOMA-RP checkpoint (default v1.1)
   -o, --output FILE.glb       New output (a FILE.glb.json recipe is written beside it)
-  --duration SECONDS          Length of the prompt before it, 0.2..10 (default 3)
+  --duration SECONDS          Prompt length: Kimodo 0.2..10, ARDY 0.2..600 (default 3)
   --then "PROMPT"             Continue with another prompt (up to 16 in total); a
                               --duration after it sets that prompt's length
   --transition FRAMES         Frames blended between prompts, 1..60 (default 5)
@@ -113,7 +113,7 @@ Generates a SOMA-30 clip from text (30 fps).
                               higher exaggerates the body and slides the feet)
   --constraint-guidance W     How strongly poses and paths steer it, 0..10
                               (default 2, the closest poses in measurements)
-  --steps N                   Diffusion steps, 1..1000 (default 50)
+  --steps N                   Kimodo 1..1000 (default 50); ARDY 1..10 (default 10)
   --device auto|gpu|cpu       Where Kimodo runs (default auto: the GPU, or the CPU
                               when it is unavailable or fails; gpu never falls back)
   --threads N                 CPU threads, 1..1024 (default: all)
@@ -477,6 +477,7 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
         if(type=="generate") {
             auto selected_backend=action.value("backend",std::string("kimodo"));
             if(selected_backend=="ardy") {
+                if(action.contains("model"))throw std::runtime_error("model selects Kimodo; omit it for backend ardy");
                 if(action.contains("steps")&&(!action["steps"].is_number_integer()||action["steps"].get<int>()<1||action["steps"].get<int>()>10))throw std::runtime_error("ARDY steps must be 1..10");
                 if(action.value("device",std::string("auto"))=="gpu")throw std::runtime_error("ARDY currently uses native ONNX CPU");
                 if(action.contains("transition"))throw std::runtime_error("ARDY does not take transition");
@@ -516,7 +517,7 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
                     for(const auto& field:item.items())if(field.key()!="prompt"&&field.key()!="duration")throw std::runtime_error("Unknown prompts field: "+field.key());
                     if(i)argv.push_back("--then");
                     argv.push_back(item.at("prompt").get<std::string>());
-                    if(item.contains("duration")) {auto text=numeric(item["duration"],"duration");number(text,0.2,600,"duration");argv.insert(argv.end(),{"--duration",text});}
+                    if(item.contains("duration")) {auto text=numeric(item["duration"],"duration");number(text,0.2,selected_backend=="ardy"?600:10,"duration");argv.insert(argv.end(),{"--duration",text});}
                 }
             } else argv.push_back(action.at("prompt").get<std::string>());
             // Pose files may be outputs of earlier actions, so only their paths are checked here.
@@ -613,7 +614,7 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
         for(const char* key:{"duration","seed","steps","tokens","threads"})if(action.contains(key)) {
             if(!action[key].is_number())throw std::runtime_error(std::string(key)+" must be numeric");
             auto text=action[key].dump();
-            if(std::string(key)=="duration")number(text,0.2,600,key);
+            if(std::string(key)=="duration")number(text,0.2,action.value("backend",std::string("kimodo"))=="ardy"?600:10,key);
             else if(std::string(key)=="tokens")integer(text,6,16,key);
             else if(std::string(key)=="steps")integer(text,1,1000,key);
             else if(std::string(key)=="threads")integer(text,1,1024,key);
@@ -894,6 +895,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         retarget_recipe={{"tool","tide-motion"},{"version",MOTION_VERSION},{"command",command},{"source",pos[0]},{"target",target_file.string()},{"toSoma",to_soma},{"clip",clip_name},{"mapping",mapping_json},{"rootScale",result.scale},{"headingDegrees",result.heading_degrees},{"discardedNonRootTranslations",result.discarded_translations},{"protectedFrames",protected_frames},{"fps",clip.fps},{"frames",clip.frames()}};
     } else if(command=="generate") {
         if(backend=="ardy") {
+            if(std::find(flags.begin(),flags.end(),"--model")!=flags.end())throw std::runtime_error("--model selects Kimodo; omit it for --backend ardy");
             if(std::find(flags.begin(),flags.end(),"--steps")==flags.end())steps=10;
             if(steps>10)throw std::runtime_error("ARDY steps must be 1..10");
             if(device=="gpu")throw std::runtime_error("ARDY currently uses native ONNX CPU; use --device cpu or auto");

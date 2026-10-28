@@ -23,6 +23,7 @@ refuses("Missing or incomplete" models check bricks --models "${WORK}/empty-mode
 refuses("Missing value" generate "A person walks" --duration)
 refuses("backend is kimodo or ardy" generate "walk" --backend unknown -o "${WORK}/new.glb")
 refuses("ARDY steps must be 1..10" generate "walk" --backend ardy --steps 11 -o "${WORK}/new.glb")
+refuses("model selects Kimodo" generate "walk" --backend ardy --model v1.2 -o "${WORK}/new.glb")
 refuses("native ONNX CPU" generate "walk" --backend ardy --device gpu -o "${WORK}/new.glb")
 refuses("multiple of four" generate "walk" --backend ardy --history-frames 7 -o "${WORK}/new.glb")
 refuses("require --backend ardy" generate "walk" --history "${source}" -o "${WORK}/new.glb")
