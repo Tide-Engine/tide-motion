@@ -9,8 +9,9 @@ changing prompts and imported SOMA history: `generate --backend ardy`. It uses
 separately converted commercial weights and the same local text encoder. See
 [ARDY setup, validation and limits](notes/ardy-native.md); conversion tooling is
 developer-only, and installed inference requires no Python or service. Windows
-x64 builds include DirectML motion-network acceleration (`--device gpu`);
-`--device auto` tries GPU then CPU. Text embedding remains on CPU.
+x64 builds include DirectML motion-network acceleration.
+Omitting `--device` uses `auto`: GPU first, then CPU fallback. Text embedding
+remains on CPU; `--device cpu` forces CPU.
 
 The models use canonical SOMA-30 human animations. A reusable bone-mapping file
 retargets between SOMA and your humanoid rig, offline and without another model.

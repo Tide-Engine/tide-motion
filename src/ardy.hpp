@@ -14,7 +14,7 @@ class ArdyModel {
     struct Impl;
     std::unique_ptr<Impl> impl_;
 public:
-    explicit ArdyModel(const fs::path& directory,unsigned threads=8,const std::string& device="cpu");
+    explicit ArdyModel(const fs::path& directory,unsigned threads=8,const std::string& device="auto");
     ~ArdyModel();
     std::string device() const;
     Clip generate(const std::vector<ArdyPrompt>&,const ArdyOptions&,

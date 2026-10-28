@@ -2317,3 +2317,22 @@ peak 983,146,496 bytes; this is an integration repeat rather than a new matched
 benchmark. Its cold walk GLB is byte-identical to the original GPU benchmark's
 asset, so the original bounded visual evidence still applies. The owner's installed
 tool/models were not modified in this ARDY thread. No additional CI was dispatched.
+
+### 2026-10-28 — ARDY defaults to the available GPU
+
+Owner clarified that GPU must be preferred without a device flag. CLI and batch
+already defaulted to auto; aligned the internal ArdyModel constructor's default
+with that contract and made the primary example omit --device. Explicit cpu still
+forces CPU, gpu remains strict, and the default auto tries DirectML then CPU.
+No model/dependency pins, inference arithmetic or installed tool/model files changed.
+
+Strengthened tests/ardy-runtime.ps1 to omit --device in native CLI generation,
+omit device in the batch generation action, and omit --device in the incomplete
+deployment fallback case. Actual recipes must report GPU for both normal cases
+and CPU without the DirectML runtime; explicit gpu must still fail there.
+Windows x64 Release with DirectML and Vulkan enabled passes all ten CTests. The
+fresh packaged executable passes those actual default-device checks on the RTX
+4080 SUPER, mixed CPU MotionBricks runtime use, license/notice presence and GLB
+frame counts, with Windows-only PATH and TIDE_HIDDEN=1. Inference held the named
+TideMotionGpuValidation mutex. Outputs remain ignored under .research/ardy.
+Existing platform, CPU text and CPU/GPU numerical-difference limits still apply.

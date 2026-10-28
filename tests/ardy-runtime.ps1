@@ -27,8 +27,8 @@ try{
     # The installed executable must not depend on Python, CUDA, a build SDK or PATH.
     $env:PATH="$env:SystemRoot/System32;$env:SystemRoot"
     $gpu=Join-Path $OutputDirectory 'gpu.glb'
-    & $Tool generate 'A person walks forward.' --backend ardy --device gpu --duration .2 --steps 1 --threads 8 --no-correction --models $Models -o $gpu 2> (Join-Path $OutputDirectory 'gpu.log')
-    if($LASTEXITCODE -ne 0){throw 'Packaged native GPU inference failed'}
+    & $Tool generate 'A person walks forward.' --backend ardy --duration .2 --steps 1 --threads 8 --no-correction --models $Models -o $gpu 2> (Join-Path $OutputDirectory 'gpu.log')
+    if($LASTEXITCODE -ne 0){throw 'Packaged default-device GPU inference failed'}
     Check-Asset $gpu gpu 6
     if((Get-Content -LiteralPath "$gpu.json" -Raw|ConvertFrom-Json).accelerator -ne 'directml'){throw 'Missing GPU provenance'}
     # Keep the two ORT versions alive in one process: GPU ARDY followed by CPU
@@ -36,11 +36,12 @@ try{
     if(Test-Path -LiteralPath (Join-Path $Models 'motionbricks.onnx')){
         $jobs=Join-Path $OutputDirectory 'mixed.json'
         @{actions=@(
-            @{action='generate';backend='ardy';device='gpu';prompt='A person walks forward.';duration=1;steps=1;threads=8;correct=$false;output='mixed-source.glb'},
+            @{action='generate';backend='ardy';prompt='A person walks forward.';duration=1;steps=1;threads=8;correct=$false;output='mixed-source.glb'},
             @{action='connect';from='mixed-source.glb';to='mixed-source.glb';threads=8;output='mixed-bridge.glb'}
         )}|ConvertTo-Json -Depth 8|Set-Content -LiteralPath $jobs -Encoding utf8
         & $Tool batch $jobs --models $Models 2> (Join-Path $OutputDirectory 'mixed.log')
         if($LASTEXITCODE -ne 0){throw 'Mixed GPU/CPU runtime inference failed'}
+        Check-Asset (Join-Path $OutputDirectory 'mixed-source.glb') gpu 30
     }
     # A private incomplete deployment tests fallback without altering the build
     # or installed runtime. Explicit gpu must fail; auto must really generate CPU.
@@ -54,8 +55,8 @@ try{
     if($LASTEXITCODE -eq 0 -or (Test-Path -LiteralPath $strict)){throw 'Explicit GPU silently fell back'}
     if((Get-Content -LiteralPath (Join-Path $OutputDirectory 'strict.log') -Raw) -notmatch 'ARDY GPU: cannot load'){throw 'Strict GPU failed for an unexpected reason'}
     $fallback=Join-Path $OutputDirectory 'fallback.glb'
-    & $copy generate 'A person walks forward.' --backend ardy --device auto --duration .2 --steps 1 --threads 8 --no-correction --models $Models -o $fallback 2> (Join-Path $OutputDirectory 'fallback.log')
+    & $copy generate 'A person walks forward.' --backend ardy --duration .2 --steps 1 --threads 8 --no-correction --models $Models -o $fallback 2> (Join-Path $OutputDirectory 'fallback.log')
     if($LASTEXITCODE -ne 0){throw 'Auto CPU fallback failed'}
     Check-Asset $fallback cpu 6
-    Write-Output 'PASS native packaged GPU, isolated runtime coexistence (when MotionBricks supplied), strict-device failure and actual auto CPU fallback'
+    Write-Output 'PASS default-device GPU in CLI/batch, isolated runtime coexistence (when MotionBricks supplied), strict-device failure and default-device CPU fallback'
 }finally{$env:PATH=$savedPath;if($held){$mx.ReleaseMutex()};$mx.Dispose()}

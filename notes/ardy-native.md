@@ -17,7 +17,7 @@ tide-motion models install text --accept-licenses
 tide-motion models import-ardy PATH/TO/CONVERTED --accept-licenses
 tide-motion models check ardy
 tide-motion generate 'A person walks forward at a relaxed pace.' --backend ardy `
-  --device gpu --duration 6.1 --steps 10 --threads 8 --no-correction -o walk.glb
+  --duration 6.1 --steps 10 --threads 8 --no-correction -o walk.glb
 tide-motion generate 'A person walks forward.' --backend ardy --duration 2 `
   --then 'A person waves with their right hand.' --duration 2.1 `
   --history walk.glb --history-frames 64 --no-correction -o continuation.glb
@@ -33,7 +33,8 @@ in Git/releases by this work. Conversion is a developer step described below.
 Generation defaults to 10 diffusion steps for ARDY (range 1..10). Windows x64
 builds include DirectML for all three motion networks: `--device gpu` requires
 successful GPU initialization/inference, `cpu` selects ORT CPU, and the default
-`auto` tries GPU then falls back to CPU. A native GPU run failure in `auto`
+`auto` tries GPU then falls back to CPU. Omitting `--device` (or batch `device`)
+selects this automatic GPU-first behavior; no GPU flag is required. A native GPU run failure in `auto`
 restarts the whole generation on CPU with the same seed; partially generated
 motion is discarded. Both paths use native CPU text embeddings. Other platforms
 currently have only the CPU path; an explicit GPU request is refused there.
