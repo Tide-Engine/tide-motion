@@ -1594,3 +1594,8 @@ output-slot fix with real inference; no ARDY quality or speedup claim is added.
 Final integration also retains origin/dev 43f146c's paired SOMA-version comparison
 suite and report. No runtime/source conflicts; append-only implementation notes
 were combined. Reconfigured/rebuilt and all eight CTests pass on that final tree.
+
+Retained 28ab94d's checkpoint-by-action guidance after the final docs-only rebase.
+The selection example and new opt-in inference runner explicitly choose v1.1,
+matching the actual measured backward-stumble runs and current AGENTS.md. The
+C++ tree is identical to the final passing eight-test build.

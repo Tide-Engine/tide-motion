@@ -723,7 +723,7 @@ the recipe also names the joint with the largest raw rotation error.
 For example:
 
 ```powershell
-tide-motion generate "A person stumbles backwards in two steps" --duration 2 --start-pose idle.glb --end-pose idle.glb@0 --end-at 0,-1 --footsteps 2 --fit-poses --attempts 8 -o stumble.glb
+tide-motion generate "A person stumbles backwards in two steps" --model v1.1 --duration 2 --start-pose idle.glb --end-pose idle.glb@0 --end-at 0,-1 --footsteps 2 --fit-poses --attempts 8 -o stumble.glb
 ```
 
 Selection reuses the native model and keeps one candidate in memory. `--attempts`

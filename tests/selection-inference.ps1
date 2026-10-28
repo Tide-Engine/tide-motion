@@ -17,7 +17,7 @@ $mutex=[Threading.Mutex]::new($false,'TideMotionGpuValidation');$locked=$false
 try {
     try {$locked=$mutex.WaitOne(0)} catch [Threading.AbandonedMutexException] {$locked=$true}
     if(!$locked){throw 'TideMotionGpuValidation is busy; retry when other validation finishes'}
-    $base=@{action='generate';prompt='A person stumbles backwards in two steps';duration=2;startPose='idle.glb';endPose='idle.glb';endAt=@(0,-1,90);device=$Device;threads=$Threads}
+    $base=@{action='generate';model='v1.1';prompt='A person stumbles backwards in two steps';duration=2;startPose='idle.glb';endPose='idle.glb';endAt=@(0,-1,90);device=$Device;threads=$Threads}
     $fit=$base.Clone();$fit.seed=2;$fit.fitPoses=$true;$fit.attempts=2;$fit.output='ranked.glb'
     $counted=$base.Clone();$counted.seed=0;$counted.footsteps=2;$counted.attempts=8;$counted.output='counted.glb'
     $exhausted=$base.Clone();$exhausted.seed=1;$exhausted.footsteps=64;$exhausted.attempts=2;$exhausted.output='never.glb'
