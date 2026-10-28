@@ -1,5 +1,38 @@
 # Native animation authoring
 
+## ARDY feasibility spike (2026-10-28)
+
+Baseline reviewed: v0.5.0 / dd4dc0b. The focused assessment and reproducible native
+probe are in [ardy-feasibility.md](ardy-feasibility.md) and notes/spikes/ardy/.
+Upstream source is pinned to nv-tlabs/ardy
+e706e27acc88070918308a10922b8f7174d0825e; exact commercial SOMA RP checkpoint
+revisions, source links, architecture/operator inventory, representation, local
+text reuse, chunk/history/constraint contracts, GLB adaptation, runtime/license
+risks and staged acceptance gates are recorded there. Both SOMA model cards permit
+commercial use, but their linked 2026 agreement differs from the bundled October
+2025 LICENSE; preserve the actual bundled terms and resolve before distribution.
+
+The optional standalone C++ probe uses the existing pinned JSON dependency and
+no Python, service, simulator or GPU. On Windows x64 ClangCL 18.1.8 Release with
+TIDE_HIDDEN=1 and warnings as errors, it validates the hash-verified KimodoRep
+denoiser container (627,156,264 bytes, 224 F32 entries, 156,781,716 elements) and
+executes its learned 148-to-1024 global-root hybrid affine projection with
+synthetic input. Output sum 0.715780863888; max absolute error versus independent
+double accumulation 4.42014425062e-7. Oversized-header, truncated-checkpoint and
+missing-argument refusals pass. Full SHA-256 and reproduction are in the assessment.
+This is native checkpoint/operator feasibility evidence only, not model inference
+or PyTorch parity. The probe is outside the CLI/build/install/release targets.
+
+Decision: conditional go for a separately budgeted parity prototype; no-go for a
+user-facing backend now. Complete denoiser/tokenizer/text parity, imported-history
+encoding, DDIM/state-loop execution, canonical rig/GLB validation, long-sequence
+quality, memory and CPU/GPU performance remain open. No ARDY generation, preview
+or GPU timing is claimed; no GPU mutex was needed for this CPU-only probe. Future
+GPU runs must hold TideMotionGpuValidation. Weights and upstream source remain
+in ignored scratch; no research-only checkpoint or evaluation motion data was
+used or committed. Kimodo v1.2, contact cleanup and MotionBricks authoring are
+untouched. Existing runtime behavior and dependencies are unchanged.
+
 ## Scope agreed with the owner
 
 Separate repository, CLI and installer. Native executables with minimal user
