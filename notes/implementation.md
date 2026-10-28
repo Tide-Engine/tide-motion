@@ -1932,3 +1932,38 @@ Gaps: no batching across pose-sequence segments (each uses the previous
 segment's generated context) or across separate pose-sequence actions. Connect
 actions that consume an earlier connect in the same run are not batched. No GPU
 provider (MotionBricks stays ORT CPU). The batch limit is fixed, not configurable.
+
+
+## Owner-requested local Windows update (2026-10-28)
+
+Updated the owner's existing %LOCALAPPDATA%/TideMotion installation from a newly
+built Windows x64 Vulkan Release package of b59b270. Reconfigured this checkout's
+build with MOTION_VULKAN=ON and the pinned installed Vulkan SDK 1.4.363.0, rebuilt,
+and passed all nine CTests with isolated TEMP/TMP and TIDE_HIDDEN=1. PE dependency
+inspection confirms the Vulkan delay-load import, preserving the previous GPU
+build capability rather than replacing it with the earlier CPU test package.
+No GPU inference, model download or benchmark was required for this maintenance.
+
+Packaged the runtime, generated its SHA-256 sidecar and used the new native
+`upgrade --archive ... --root <installed root> --force` path. Installed --version
+and help upgrade succeed. The installed executable matches the validated build's
+SHA-256 2a3b1a41da258e9974206ff5c8ebc3b109458a2bc358c0a70377afb30bcb9754.
+All four existing model files retain their paths, sizes and last-write timestamps;
+no multi-GB model checksum/inference run was repeated. User PATH is unchanged and
+already contains the installed bin directory. The package includes current
+licenses, authoring examples and documentation. The displayed version remains
+0.5.1; b59b270 identifies the local development code installed. No release was
+published, engine files modified, or user settings/models changed. Build/package/
+verification records remain ignored under .research/local-update-*.
+
+Two concurrent commits landed during the first build. The final installation was
+therefore refreshed once more from the integrated adf5567 code (including native
+MotionBricks request batching), with Vulkan still ON and the separate MoMask
+experimental build option OFF. All nine Vulkan CTests pass again. Repackaged,
+checksum-verified and installed through the same native upgrade path. Final
+installed executable SHA-256:
+750c773b515212208d2d95c3707d40f7c28d4f33bd06dc2df42f69d14e5c7c1a.
+Installed --version/help upgrade and binary identity checks pass; all four model
+file metadata records and user PATH remain unchanged. The owner's separate
+TideMotion-MoMask-Experimental installation is not touched. This documentation
+record does not change executable code or require another inference run.
