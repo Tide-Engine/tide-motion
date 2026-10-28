@@ -188,7 +188,7 @@ not imply identical random tensors. This is offline model arithmetic, not Tide
 deterministic match simulation. CPU thread count is 1..64, default four.
 
 Native CLIP currently accepts 1..4096 ASCII bytes without HTML entities or special
-token syntax, matching the existing MoMask tokenizer scope. Unicode/ftfy parity
+token syntax, matching the former MoMask tokenizer scope. Unicode/ftfy parity
 is not claimed. The denoiser supplies object x0 conditioning but no separate
 root x0 token, matching the pinned HUMOTO loader. Root x0 is retained for host
 decoding and the initial root transform remains a network condition.
@@ -215,7 +215,9 @@ python tools/dex2hoi/export.py --source C:/private/Dex2HOI `
 ```
 
 Weights must provide `model.pt`, `mean.pt`, `std.pt`, `eps.pt`. The currently
-supported CLIP source is the existing canonical ViT-B/32 MoMask native export;
+supported CLIP source is the existing canonical ViT-B/32 MoMask native export
+(the MoMask backend itself was removed on 2026-10-28; this developer converter
+still reads that previously exported bundle);
 the converter pins both its graph and tokenizer metadata hashes. It verifies
 upstream source, uses safe `weights_only=True` checkpoint loading, preserves BPS
 weights/basis, exports inline ONNX and checks real PyTorch/ORT outputs. Converted

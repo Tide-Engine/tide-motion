@@ -3,11 +3,8 @@
 #include "author.hpp"
 #include "ardy.hpp"
 #include "upgrade.hpp"
-#include "momask.hpp"
 #include "dex2hoi.hpp"
 #include "ardy_gpu.hpp"
-#include "dart.hpp"
-#include "dart_gpu.hpp"
 #include "review.hpp"
 #include <kimodo/kimodo.hpp>
 #include <nlohmann/json.hpp>
@@ -78,37 +75,12 @@ reachability judgments. No findings is not a quality pass. No assets are changed
 See notes/advisory-review.md for settings, coverage and feedback contracts.
 )";
     if(command=="equipment")return equipment_help();
-    if(command=="momask"||command=="inpaint"||command=="extend")return momask_help();
-    if(command=="dart")return R"(tide-motion dart PLAN.json -o OUT.glb [--models DIR] [--threads N]
-
-Native offline DART free-text timelines, source continuation, goals and inbetweening.
-Install explicitly with models install dart --accept-licenses. Canonical SOMA, 30 Hz.
-Version-1 plan: seed, warmupChunks, segments [{text, chunks, target?: [x,z], guidance?}].
-Any valid UTF-8 text is accepted; an empty prompt is unconditional. Goal targets are
-world metres. Policy training skills are walk/run/hop on left leg; other texts
-remain available with measured misses. Targets stop within 0.3 m or at the budget.
-Optional history/historyState or source/sourceFrame/sourceMap seed continuation;
-seedMode history or repeat supports moving history or a single pose.
-Sampler controls: guidance, sampler ddim|ddpm, timesteps (increasing 0..9), eta,
-noiseScale, zeroNoise, policyMode sample|mean|none, fixFloor and groundHeight.
-optimization enables native analytic gradients/Adam over the whole latent timeline:
-constraints [{frame,joint,position,axes?,weight?}], target/targetFrame/targetJoints,
-iterations, learningRate, unitGradient, anneal, jerkWeight, floorWeight, and scene SDF.
-Default jointSpace soma optimizes exported FK; predicted uses raw model joints.
-These are soft objectives: recipes report actual errors, not guaranteed endpoints.
-See notes/dart-backend.md for input schemas, examples and measured limitations.
-auto prefers native Windows DirectML and restarts on CPU if GPU execution fails.
-gpu is strict; cpu forces CPU. Text/model conversion stay native CPU operations.
-Consecutive forward batch actions share neural calls (batchSize 1..8, default 8).
-Optimization jobs reuse sessions and run individually; no Python runtime required.
-)";
     if(command=="generate")return R"(tide-motion generate "PROMPT" -o CLIP.glb [options]
 
 Generates a SOMA-30 clip from text (30 fps).
 
-  --backend kimodo|ardy|momask Backend (default Kimodo); MoMask weights are manual-only
-                              MoMask controls/limits: tide-motion help momask
-  --history FILE.glb          Imported SOMA context for ARDY or MoMask
+  --backend kimodo|ardy       Backend (default Kimodo)
+  --history FILE.glb          Imported SOMA context for ARDY
   --history-frames N          ARDY visible history, 4..240, multiple of four
                               ARDY uses 1..10 steps (default 10), switches --then
                               prompts on 60-frame chunk boundaries, without blending.
@@ -118,8 +90,8 @@ Generates a SOMA-30 clip from text (30 fps).
 
       --model v1.1|v1.2      Smooth-root SOMA-RP checkpoint (default v1.1)
   -o, --output FILE.glb       New output (a FILE.glb.json recipe is written beside it)
-  --duration SECONDS          Prompt length: Kimodo 0.2..10, ARDY/MoMask 0.2..600
-                              Default: Kimodo/ARDY 3, MoMask 2; see help momask
+  --duration SECONDS          Prompt length: Kimodo 0.2..10, ARDY 0.2..600
+                              (default 3)
   --then "PROMPT"             Continue with another prompt (up to 16 in total); a
                               --duration after it sets that prompt's length
   --transition FRAMES         Frames blended between prompts, 1..60 (default 5)
@@ -316,8 +288,8 @@ metres); examples/synty-polygon.json maps Synty POLYGON characters.
 )";
     if(command=="batch")return R"(tide-motion batch JOBS.json [--models DIR]
 
-Runs ordered generate, inpaint, extend, connect, pose-sequence, dart, retarget, equipment, cleanup and mirror actions, loading each model
-once.
+Runs ordered generate, connect, pose-sequence, retarget, equipment, cleanup and mirror
+actions, loading each model once.
 The whole manifest and every output path are checked before anything runs.
 Paths are relative to the manifest. README.md lists every action field.
 )";
@@ -385,10 +357,8 @@ Checksums, safe archive paths, package version and runnable executable are check
 before a transactional replacement. Close other running Tide Motion processes
 if Windows reports locked files. No model downloads or engine updates occur.
 )";
-    if(command=="models")return R"(tide-motion models install [all|kimodo|kimodo-v1.2|text|bricks|dart] --accept-licenses [--models DIR]
-tide-motion models check [all|kimodo|kimodo-v1.2|text|bricks|dart] [--models DIR]
-tide-motion models import-momask BUNDLE_DIRECTORY [--models DIR]
-tide-motion models check momask [--models DIR]
+    if(command=="models")return R"(tide-motion models install [all|kimodo|kimodo-v1.2|text|bricks] --accept-licenses [--models DIR]
+tide-motion models check [all|kimodo|kimodo-v1.2|text|bricks|ardy] [--models DIR]
 tide-motion models import-dex2hoi BUNDLE_DIRECTORY [--models DIR]
 tide-motion models check dex2hoi [--models DIR]
 
@@ -396,14 +366,9 @@ Downloads (resumably) and verifies the pinned model files by SHA-256.
 kimodo-v1.2 downloads pinned official safetensors/statistics and converts them
 to verified GGUF natively, then adds the shared text files. No Python is needed.
 all retains v1.1 and MotionBricks.
-MoMask is manual-only: import its supported prepared ONNX bundle into DIR/momask.
-Raw .tar/.pt files are not that bundle. No MoMask weights are downloaded or bundled;
-manual import does not establish commercial rights for the supplied checkpoints.
-Dex2HOI is also manual-only. Import a prepared bundle into DIR/dex2hoi, then use
+Dex2HOI is manual-only. Import a prepared bundle into DIR/dex2hoi, then use
 the separate dex2hoi generate command with explicit rig/history/object inputs.
 See notes/dex2hoi-native.md for its experimental native inference contract.
-dart is an explicit opt-in: pinned DART/CLIP files are converted to native ONNX
-graphs locally. It adds no SMPL body assets, Python or hosted inference.
 
   --accept-licenses           Accept the model licences in licenses/ (install)
   --models DIR                Model directory (default: TIDE_MOTION_MODELS or the
@@ -415,8 +380,8 @@ void help(std::string_view command={}) {
     if(const char* text=command_help(command)) {std::cout<<text;return;}
     std::cout<<R"(Tide Motion - native offline animation authoring
 
-  tide-motion models install [all|kimodo|kimodo-v1.2|text|bricks|dart] --accept-licenses [--models DIR]
-  tide-motion models check [all|kimodo|kimodo-v1.2|text|bricks|ardy|dart] [--models DIR]
+  tide-motion models install [all|kimodo|kimodo-v1.2|text|bricks] --accept-licenses [--models DIR]
+  tide-motion models check [all|kimodo|kimodo-v1.2|text|bricks|ardy] [--models DIR]
   tide-motion generate "PROMPT" -o CLIP.glb [--duration 3] [--seed 0] [--steps 50]
       [--variants N [--variants-gif]] [--guidance 2] [--constraint-guidance 2]
       [--then "PROMPT" [--duration S]]... [--transition 5]
@@ -424,16 +389,11 @@ void help(std::string_view command={}) {
       [--keyframe FRAME FILE.glb[@F]]... [--effector PARTS FRAME FILE.glb[@F]]...
       [--path X,Z[,YAW]@FRAME]... [--correction-frames 10] [--in-place]
       [--device auto|gpu|cpu] [--threads N]
-  tide-motion generate "PROMPT" --backend momask -o CLIP.glb [--duration 2] [--seed 0]
-  tide-motion inpaint "PROMPT" --source SOMA.glb --begin F --end F -o EDIT.glb
-  tide-motion extend "PROMPT" --source SOMA.glb --duration SECONDS -o LONGER.glb
-  tide-motion models import-momask BUNDLE_DIRECTORY [--models DIR]
   tide-motion models import-dex2hoi BUNDLE_DIRECTORY [--models DIR]
   tide-motion dex2hoi generate --input OWN_HISTORY.json --prompt "PROMPT" -o CLIP.glb
   tide-motion connect FROM.glb TO.glb -o BRIDGE.glb [--tokens N|MIN..MAX] [--joined]
       [--offset X Y Z] [--from-clip NAME] [--to-clip NAME] [--threads N]
   tide-motion pose-sequence POSES.json -o CLIP.glb [--threads N]
-  tide-motion dart PLAN.json -o CLIP.glb [--threads N]
   tide-motion equipment inspect|bake|preview CLIP.glb --plan EQUIPMENT.json
   tide-motion cleanup CLIP.glb --contacts PLAN.json -o CLEAN.glb [--map BONES.json]
   tide-motion mirror CLIP.glb -o MIRRORED.glb [--clip NAME]
@@ -449,12 +409,10 @@ void help(std::string_view command={}) {
   tide-motion help [COMMAND]       one command's options (also COMMAND --help)
   tide-motion --version
 
-Downloadable models are fetched once and SHA-256 verified. MoMask weights are
-manual-only; use help momask for its model import, controls and limits.
-Generation and transitions run
-locally without Python, PyTorch, Conda or a server. Models use SOMA-30; retarget
-converts mapped humanoids to/from SOMA without loading a model. GLB output
-contains animation and a skeleton, without a skinned character mesh.
+Downloadable models are fetched once and SHA-256 verified. Generation and
+transitions run locally without Python, PyTorch, Conda or a server. Models use
+SOMA-30; retarget converts mapped humanoids to/from SOMA without loading a model.
+GLB output contains animation and a skeleton, without a skinned character mesh.
 
 --models DIR overrides TIDE_MOTION_MODELS and the OS model cache.
 generate --then chains prompts; --start-pose, --end-pose, --keyframe, --effector
@@ -514,7 +472,6 @@ std::vector<size_t> protected_recipe_frames(const nlohmann::json& recipe,size_t 
     std::sort(out.begin(),out.end());out.erase(std::unique(out.begin(),out.end()),out.end());return out;
 }
 struct RunContext {
-    std::unique_ptr<MomaskContext> momask;
     std::unique_ptr<ArdyModel> ardy;unsigned ardy_threads=0;std::string ardy_device;
     std::unique_ptr<kimodo::model> kimodo;
     // strict: an explicit --device, which never falls back. gpu_failed: auto fell back
@@ -528,15 +485,7 @@ struct RunContext {
     struct PendingBridge { Clip from,to; BricksRequest options; fs::path output; };
     struct ReadyBridge { fs::path output; Bridge bridge; size_t requests=1,index=0; };
     bool bricks_prepare=false;std::vector<PendingBridge> bricks_pending;std::deque<ReadyBridge> bricks_ready;
-    std::unique_ptr<DartModel> dart;unsigned dart_threads=0;std::string dart_device;
-    struct ReadyDart {fs::path output;DartResult result;};std::deque<ReadyDart> dart_ready;
 };
-DartModel& dart_session(const fs::path& models,unsigned threads,const std::string& device,RunContext* context) {
-    if(!context->dart||context->dart_threads!=threads||context->dart_device!=device) {
-        context->dart.reset();check_models(models,"dart");context->dart=std::make_unique<DartModel>(models/"dart",threads,device);context->dart_threads=threads;context->dart_device=device;
-    }
-    return *context->dart;
-}
 BricksModel& bricks_session(const fs::path& models,unsigned threads,RunContext* context) {
     if(!context->bricks||context->bricks_threads!=threads) {
         if(!context->bricks)check_models(models,"bricks");
@@ -637,29 +586,6 @@ Vec3 triplet(const std::string& text,double limit,const char* label) {
     return {static_cast<float>(number(parts[0],-limit,limit,label)),static_cast<float>(number(parts[1],-limit,limit,label)),static_cast<float>(number(parts[2],-limit,limit,label))};
 }
 int main_impl(const std::vector<std::string>& args,RunContext* context=nullptr);
-// Public CLI uses the shared cache; the native MoMask parser consumes the
-// concrete CACHE/momask directory and owns no automatic download path.
-std::vector<std::string> momask_arguments(const std::vector<std::string>& args) {
-    bool prefix=args.size()>1&&args[1]=="momask";
-    std::string action=prefix?(args.size()>2?args[2]:"--help"):args.at(1);
-    std::vector<std::string> out{args[0],"momask",action};
-    if(action=="--help"||action=="help")return out;
-    for(size_t i=prefix?3:2;i<args.size();++i)if(args[i]=="--help"||args[i]=="-h")return {args[0],"momask","--help"};
-    fs::path root=model_directory();
-    bool backend_seen=false,models_seen=false;
-    for(size_t i=prefix?3:2;i<args.size();++i) {
-        if(args[i]=="--backend") {if(backend_seen||i+1==args.size()||args[i+1]!="momask")throw std::runtime_error("This action requires backend momask");backend_seen=true;++i;}
-        else if(args[i]=="--models") {if(models_seen||i+1==args.size())throw std::runtime_error("Missing or duplicate --models");models_seen=true;root=utf8path(args[++i]);}
-        else if(args[i]=="--help"||args[i]=="-h")return {args[0],"momask","--help"};
-        else out.push_back(args[i]=="--output"?"-o":args[i]);
-    }
-    out.insert(out.end(),{"--models",(root/"momask").string()});return out;
-}
-int run_momask(const std::vector<std::string>& args,RunContext* context,bool preflight=false,bool defer_source=false) {
-    auto routed=momask_arguments(args);
-    if(!preflight&&!context->momask)context->momask=std::make_unique<MomaskContext>();
-    return momask_main(routed,preflight?nullptr:context->momask.get(),preflight,defer_source);
-}
 struct BatchPathLess {
     bool operator()(const fs::path& a,const fs::path& b) const {
 #ifdef _WIN32
@@ -690,60 +616,7 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
         std::set<std::string> keys{"action","output"};
         std::vector<std::string> argv{"tide-motion",type};
         unsigned variants=1;bool sheet_gif=false;
-        bool momask_action=type=="inpaint"||type=="extend"||(type=="generate"&&action.value("backend",std::string("kimodo"))=="momask");
-        bool deferred_source=false;
-        if(momask_action) {
-            if(action.value("backend",std::string("momask"))!="momask")throw std::runtime_error("inpaint backend must be momask");
-            keys.insert({"backend","prompt","prompts","duration","seed","steps","guidance","residualGuidance","temperature","topkr","source","begin","end","ranges","variants","variantsGif","tide","threads","device","rig","inPlace","sampling","residualLayers","residualTemperature","residualTopkr","unconditional","history","historyFrames","chunkFrames","startPose","endPose","keyframes","effectors","path","endAt","poseMap","placement","follow","correction","correctionFrames","densePath","pathMargin","fitPoses","footsteps","attempts","loop","contactsOut","contextOverlapTokens","preserveContextResiduals","preserveRoot","editMode"});
-            if(action.contains("prompts")) {
-                if(action.contains("prompt")||action.contains("duration"))throw std::runtime_error("Use prompts or prompt/duration, not both");
-                const auto& prompts=action["prompts"];if(!prompts.is_array()||prompts.empty()||prompts.size()>16)throw std::runtime_error("MoMask prompts must contain 1..16 segments");
-                for(size_t i=0;i<prompts.size();++i){const auto& part=prompts[i];if(!part.is_object())throw std::runtime_error("MoMask prompt segment must be an object");for(const auto& item:part.items())if(item.key()!="text"&&item.key()!="prompt"&&item.key()!="duration")throw std::runtime_error("Unknown MoMask segment field");if(part.contains("text")&&part.contains("prompt"))throw std::runtime_error("Use prompt or text for a segment, not both");if(i)argv.push_back("--then");argv.push_back(part.at(part.contains("prompt")?"prompt":"text").get<std::string>());if(part.contains("duration")){if(!part["duration"].is_number())throw std::runtime_error("Segment duration must be numeric");argv.insert(argv.end(),{"--duration",part["duration"].dump()});}}
-            } else argv.push_back(action.at("prompt").get<std::string>());
-            argv.insert(argv.end(),{"--backend","momask"});
-            if(action.contains("source")) {
-                auto source=path(action["source"]);deferred_source=outputs.contains(source);
-                if(!fs::exists(source)&&!deferred_source)throw std::runtime_error("MoMask source does not exist and is not an earlier batch output");
-                argv.insert(argv.end(),{"--source",source.string()});
-            }
-            if(action.contains("history")){auto history=path(action["history"]);bool deferred=outputs.contains(history);if(!fs::exists(history)&&!deferred)throw std::runtime_error("MoMask history is not an existing file or earlier output");deferred_source|=deferred;argv.insert(argv.end(),{"--history",history.string()});}
-            if(action.contains("ranges")){const auto& ranges=action["ranges"];if(!ranges.is_array()||ranges.empty()||ranges.size()>1000)throw std::runtime_error("MoMask ranges must contain 1..1000 pairs");for(const auto& range:ranges){if(!range.is_array()||range.size()!=2||!range[0].is_number()||!range[1].is_number())throw std::runtime_error("MoMask range must be [begin,end]");argv.insert(argv.end(),{"--range",range[0].dump(),range[1].dump()});}}
-            for(auto pair:{std::pair{"guidance","--guidance"},std::pair{"residualGuidance","--residual-guidance"},std::pair{"temperature","--temperature"},std::pair{"topkr","--topkr"},std::pair{"begin","--begin"},std::pair{"end","--end"},std::pair{"residualLayers","--residual-layers"},std::pair{"residualTemperature","--residual-temperature"},std::pair{"residualTopkr","--residual-topkr"},std::pair{"historyFrames","--history-frames"},std::pair{"chunkFrames","--chunk-frames"},std::pair{"contextOverlapTokens","--context-overlap-tokens"}})if(action.contains(pair.first)) {
-                if(!action[pair.first].is_number())throw std::runtime_error(std::string(pair.first)+" must be numeric");
-                argv.insert(argv.end(),{pair.second,action[pair.first].dump()});
-            }
-            if(action.contains("variants")) {if(!action["variants"].is_number())throw std::runtime_error("variants must be numeric");variants=static_cast<unsigned>(integer(action["variants"].dump(),1,64,"variants"));argv.insert(argv.end(),{"--variants",std::to_string(variants)});}
-            if(action.value("variantsGif",false)){sheet_gif=true;argv.push_back("--variants-gif");}
-            if(action.value("inPlace",false))argv.push_back("--in-place");
-            if(action.value("unconditional",false))argv.push_back("--unconditional");
-            if(action.value("preserveContextResiduals",false))argv.push_back("--preserve-context-residuals");
-            if(action.value("preserveRoot",false))argv.push_back("--preserve-root");
-            for(auto pair:{std::pair{"device","--device"},std::pair{"rig","--rig"},std::pair{"tide","--tide"},std::pair{"sampling","--sampling"},std::pair{"editMode","--edit-mode"}})if(action.contains(pair.first))argv.insert(argv.end(),{pair.second,action[pair.first].get<std::string>()});
-            auto numeric=[](const nlohmann::json& value){if(!value.is_number())throw std::runtime_error("MoMask constraint value must be numeric");return value.dump();};
-            auto reference=[&](const nlohmann::json& value,const char* source_frame){
-                std::string text;if(value.is_string())text=value.get<std::string>();else {if(!value.is_object())throw std::runtime_error("MoMask pose is a path or file/frame object");for(const auto& field:value.items())if(field.key()!="file"&&field.key()!=source_frame&&field.key()!="frame"&&field.key()!="effectors")throw std::runtime_error("Unknown MoMask pose field");text=value.at("file").get<std::string>();if(value.contains(source_frame))text+="@"+numeric(value.at(source_frame));}
-                auto ref=pose_ref(text);auto file=path(ref.file);bool deferred=outputs.contains(file);if(!fs::exists(file)&&!deferred)throw std::runtime_error("MoMask pose file is not an earlier output or existing file");deferred_source|=deferred;return file.string()+(ref.frame?"@"+std::to_string(*ref.frame):"");
-            };
-            for(auto pair:{std::pair{"startPose","--start-pose"},std::pair{"endPose","--end-pose"}})if(action.contains(pair.first))argv.insert(argv.end(),{pair.second,reference(action[pair.first],"frame")});
-            for(const char* key:{"keyframes","effectors","path"})if(action.contains(key)&&(!action[key].is_array()||action[key].empty()))throw std::runtime_error(std::string(key)+" must be a nonempty array");
-            if(action.contains("keyframes"))for(const auto& item:action["keyframes"])argv.insert(argv.end(),{"--keyframe",numeric(item.at("frame")),reference(item,"sourceFrame")});
-            if(action.contains("effectors"))for(const auto& item:action["effectors"]){std::string parts;if(item.at("effectors").is_array()){for(const auto& part:item["effectors"]){if(!parts.empty())parts+=',';parts+=part.get<std::string>();}}else parts=item["effectors"].get<std::string>();argv.insert(argv.end(),{"--effector",parts,numeric(item.at("frame")),reference(item,"sourceFrame")});}
-            if(action.contains("path"))for(const auto& item:action["path"]){for(const auto& field:item.items())if(field.key()!="x"&&field.key()!="z"&&field.key()!="yaw"&&field.key()!="frame")throw std::runtime_error("Unknown MoMask path field");std::string point=numeric(item.at("x"))+","+numeric(item.at("z"));if(item.contains("yaw"))point+=","+numeric(item.at("yaw"));point+="@"+numeric(item.at("frame"));argv.insert(argv.end(),{"--path",point});}
-            if(action.contains("endAt")){const auto& point=action["endAt"];if(!point.is_array()||point.size()<2||point.size()>3)throw std::runtime_error("MoMask endAt is [x,z,yaw?]");std::string text;for(const auto& v:point){if(!text.empty())text+=',';text+=numeric(v);}argv.insert(argv.end(),{"--end-at",text});}
-            for(auto pair:{std::pair{"placement","--placement"},std::pair{"follow","--follow"},std::pair{"correction","--correction"}})if(action.contains(pair.first))argv.insert(argv.end(),{pair.second,action[pair.first].get<std::string>()});
-            for(auto pair:{std::pair{"correctionFrames","--correction-frames"},std::pair{"pathMargin","--path-margin"},std::pair{"footsteps","--footsteps"},std::pair{"attempts","--attempts"}})if(action.contains(pair.first))argv.insert(argv.end(),{pair.second,numeric(action[pair.first])});
-            if(action.value("densePath",false))argv.push_back("--dense-path");
-            if(action.value("fitPoses",false))argv.push_back("--fit-poses");
-            if(action.value("loop",false))argv.push_back("--loop");
-            if(action.contains("poseMap"))argv.insert(argv.end(),{"--pose-map",path(action["poseMap"]).string()});
-        } else if(type=="dart") {
-            keys.insert({"plan","threads","device","batchSize"});auto plan=path(action.at("plan"));auto p=load_dart_plan(plan,true);
-            for(const auto& input:{p.history_file,p.source_file,p.optimization?p.optimization->target_file:fs::path{}})if(!input.empty()&&!fs::exists(input)){auto parent=input;bool known=outputs.contains(parent);if(parent.extension()==".json"){parent.replace_extension();known=known||outputs.contains(parent);}if(!known)throw std::runtime_error("DART input does not exist and is not an earlier batch output: "+input.string());}
-            argv.push_back(plan.string());
-            if(action.contains("device")){auto d=action["device"].get<std::string>();if(d!="auto"&&d!="cpu"&&d!="gpu")throw std::runtime_error("DART device is auto, cpu or gpu");argv.insert(argv.end(),{"--device",d});}
-            if(action.value("device",std::string("auto"))=="gpu"&&!dart_gpu_compiled())throw std::runtime_error("DART GPU: this build has no DirectML support");
-            if(action.contains("batchSize")){if(!action["batchSize"].is_number_integer())throw std::runtime_error("batchSize must be integer");auto v=integer(action["batchSize"].dump(),1,8,"DART batchSize");argv.insert(argv.end(),{"--batch-size",std::to_string(static_cast<unsigned>(v))});}
-        } else if(type=="generate") {
+        if(type=="generate") {
             auto selected_backend=action.value("backend",std::string("kimodo"));
             if(selected_backend=="ardy") {
                 if(action.contains("model"))throw std::runtime_error("model selects Kimodo; omit it for backend ardy");
@@ -897,7 +770,7 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
             if(action.contains("clip"))argv.insert(argv.end(),{"--clip",action["clip"].get<std::string>()});
             keys.insert({"source","target","map","toSoma","clip"});
         }
-        else throw std::runtime_error("Action must be generate, inpaint, extend, connect, pose-sequence, dart, retarget, equipment, cleanup or mirror");
+        else throw std::runtime_error("Action must be generate, connect, pose-sequence, retarget, equipment, cleanup or mirror");
         for(const auto& item:action.items())if(!keys.contains(item.key()))throw std::runtime_error("Unknown action field: "+item.key());
         auto output=path(action.at("output"));
         if(output.extension()!=".glb")throw std::runtime_error("Output must be a .glb path: "+output.string());
@@ -919,7 +792,7 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
         }
         for(const auto& file:written){if(fs::exists(file)||fs::exists(file.string()+".part")||fs::exists(file.string()+".json")||!outputs.insert(file).second)throw std::runtime_error("Output must be a new, distinct path: "+file.string());if(file.extension()==".glb"&&!outputs.insert(fs::path(file.string()+".json")).second)throw std::runtime_error("Output recipe must have a distinct path: "+file.string());}
         argv.insert(argv.end(),{"-o",output.string()});
-        if(type=="generate"||type=="inpaint"||type=="extend"||type=="connect"||type=="pose-sequence"||type=="dart")argv.insert(argv.end(),{"--models",models.string()});
+        if(type=="generate"||type=="connect"||type=="pose-sequence")argv.insert(argv.end(),{"--models",models.string()});
         if(action.contains("tokens")&&action["tokens"].is_array()) {
             const auto& range=action["tokens"];
             if(range.size()!=2||!range[0].is_number()||!range[1].is_number())throw std::runtime_error("tokens is an integer or [min, max]");
@@ -935,7 +808,7 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
         for(const char* key:{"duration","seed","steps","tokens","threads"})if(action.contains(key)&&!action[key].is_array()) {
             if(!action[key].is_number())throw std::runtime_error(std::string(key)+" must be numeric");
             auto text=action[key].dump();
-            if(std::string(key)=="duration")number(text,0.2,(action.value("backend",std::string("kimodo"))=="ardy"||momask_action)?600:10,key);
+            if(std::string(key)=="duration")number(text,0.2,action.value("backend",std::string("kimodo"))=="ardy"?600:10,key);
             else if(std::string(key)=="tokens")(void)parse_bricks_tokens(text);
             else if(std::string(key)=="steps")integer(text,1,1000,key);
             else if(std::string(key)=="threads")integer(text,1,1024,key);
@@ -950,7 +823,6 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
             for(const auto& value:offset) { if(!value.is_number())throw std::runtime_error("offset must be numeric");auto text=value.dump();number(text,-10000,10000,"offset");argv.push_back(text); }
         }
         for(auto pair:{std::pair{"fromClip","--from-clip"},std::pair{"toClip","--to-clip"}})if(action.contains(pair.first))argv.insert(argv.end(),{pair.second,action[pair.first].get<std::string>()});
-        if(momask_action)run_momask(argv,context,true,deferred_source);
         commands.push_back(std::move(argv));
     } catch(const std::exception& e) {throw std::runtime_error("Batch action "+std::to_string(index+1)+": "+e.what());}
     // Keep the 8 GB text model resident for repeated prompts rather than reloading
@@ -970,15 +842,6 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
     };
     size_t batched_until=0;
     for(size_t i=0;i<commands.size();++i) {
-        if(commands[i][1]=="dart"&&context->dart_ready.empty()) {
-            auto threads=option(commands[i],"--threads"),device=option(commands[i],"--device"),limit=option(commands[i],"--batch-size");
-            size_t end=i;std::vector<DartPlan> plans;size_t maximum=limit.empty()?8:static_cast<size_t>(std::stoul(limit));
-            for(;end<commands.size()&&end-i<maximum&&commands[end][1]=="dart"&&option(commands[end],"--threads")==threads&&option(commands[end],"--device")==device&&option(commands[end],"--batch-size")==limit;++end){auto p=load_dart_plan(utf8path(commands[end][2]),true);if((!p.history_file.empty()&&!fs::exists(p.history_file))||(!p.source_file.empty()&&!fs::exists(p.source_file))||(p.optimization&&!p.optimization->target_file.empty()&&!fs::exists(p.optimization->target_file)))break;if(p.optimization&&!plans.empty())break;plans.push_back(std::move(p));if(plans.back().optimization){++end;break;}}
-            if(plans.empty())throw std::runtime_error("DART input is not available at this batch action");
-            std::cerr<<"DART neural batch actions "<<i+1<<"-"<<end<<" ("<<plans.size()<<" independent streams)\n";
-            auto results=dart_session(models,threads.empty()?0:static_cast<unsigned>(std::stoul(threads)),device.empty()?"auto":device,context).generate(plans);
-            for(size_t k=0;k<results.size();++k)context->dart_ready.push_back({fs::absolute(utf8path(option(commands[i+k],"-o"))),std::move(results[k])});
-        }
         if(i>=batched_until&&commands[i][1]=="connect") {
             std::set<fs::path> run_outputs;const auto threads=option(commands[i],"--threads");size_t j=i;
             context->bricks_prepare=true;context->bricks_pending.clear();
@@ -1011,11 +874,6 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
 int main_impl(const std::vector<std::string>& args,RunContext* context) {
     if(args.size()>1&&args[1]=="equipment")return equipment_command(args);
     RunContext owned;if(!context)context=&owned;
-    if(args.size()>1) {
-        bool selected=false;
-        if(args[1]=="generate")for(size_t i=2;i+1<args.size();++i)if(args[i]=="--backend"&&args[i+1]=="momask")selected=true;
-        if(selected||args[1]=="inpaint"||args[1]=="extend"||args[1]=="momask")return run_momask(args,context);
-    }
     if(args.size()<2||args[1]=="--help"||args[1]=="-h") { help();return 0; }
     auto unknown=[](const std::string& name){return std::runtime_error("Unknown command: "+name+"; tide-motion --help lists the commands");};
     if(args[1]=="help") { if(args.size()>2&&!command_help(args[2]))throw unknown(args[2]);help(args.size()>2?args[2]:"");return 0; }
@@ -1034,7 +892,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     for(size_t i=2;i<args.size();++i)if(args[i]=="--help"||args[i]=="-h") {help(command);return 0;}
     fs::path models,output,capture,gif,target_file,map_file,character_file,texture_file,contacts_file;bool mannequin=false;
     PreviewProp prop;std::vector<PreviewProp> props;PreviewCamera camera;fs::path setup_file,save_setup;
-    if(command=="generate"||command=="connect"||command=="pose-sequence"||command=="models"||command=="batch"||command=="dart")models=model_directory();
+    if(command=="generate"||command=="connect"||command=="pose-sequence"||command=="models"||command=="batch")models=model_directory();
     double duration=3;uint64_t seed=0;unsigned steps=50,transition=5;int frames=0;
     BricksRequest bricks_request;std::string tokens_text;fs::path contacts_out;float contact_threshold=0.5f;
     bool accept=false,joined=false,skeleton=false,to_soma=false,correct=true,dense_path=false;Vec3 offset{};
@@ -1094,7 +952,6 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         else if(a=="--model") {model_version=value();if(model_version!="v1.1"&&model_version!="v1.2")throw std::runtime_error("--model is v1.1 or v1.2 (smooth-root SOMA-RP)");}
         else if(a=="--device") {device=value();if(device!="auto"&&device!="gpu"&&device!="cpu")throw std::runtime_error("--device is auto, gpu or cpu");}
         else if(a=="--threads")threads=static_cast<unsigned>(integer(value(),1,1024,"threads"));
-        else if(a=="--batch-size")(void)integer(value(),1,8,"DART batch size");
         else if(a=="--steps")steps=static_cast<unsigned>(integer(value(),1,1000,"steps"));
         else if(a=="--seed")seed=static_cast<uint64_t>(integer(value(),0,4294967295.0,"seed"));
         else if(a=="--frames")frames=static_cast<int>(integer(value(),1,18000,"frames"));
@@ -1150,7 +1007,6 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
     else if(command=="cleanup")allowed={"-o","--output","--contacts","--map","--clip"};
     else if(command=="models")allowed={"--models","--accept-licenses"};
     else if(command=="pose-sequence")allowed={"-o","--output","--models","--threads","--contacts-out","--contact-threshold"};
-    else if(command=="dart")allowed={"-o","--output","--models","--threads","--device","--batch-size"};
     else if(command=="batch")allowed={"--models"};
     for(const auto& flag:flags)if(!allowed.contains(flag))throw std::runtime_error(command+" does not take "+flag);
     if(command=="batch") {
@@ -1163,11 +1019,6 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
             if(pos[0]=="check")return motion::dex2hoi::command({args[0],"dex2hoi","check","--bundle",(models/"dex2hoi").string()});
             if(pos[0]=="install")throw std::runtime_error("Dex2HOI weights are manual-only; use tide-motion models import-dex2hoi BUNDLE_DIRECTORY");
         }
-        if(pos.size()==2&&pos[0]=="import-momask")return momask_main({args[0],"momask","install",pos[1],"--models",(models/"momask").string()});
-        if(pos.size()==2&&pos[1]=="momask") {
-            if(pos[0]=="check")return momask_main({args[0],"momask","check","--models",(models/"momask").string()});
-            if(pos[0]=="install")throw std::runtime_error("MoMask weights are manual-only; use tide-motion models import-momask BUNDLE_DIRECTORY");
-        }
         if(pos.size()==2&&pos[0]=="import-ardy") {
             if(!accept)throw std::runtime_error("Read licenses/NVIDIA-ARDY-MODEL.txt and META-LLAMA-3.txt, then pass --accept-licenses");
             auto source=utf8path(pos[1]);check_ardy_models(source);
@@ -1178,12 +1029,12 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
             for(const char* name:{"denoiser.onnx","encoder.onnx","decoder.onnx","manifest.json","LICENSE","NOTICE"})fs::copy_file(source/name,destination/name);
             check_ardy_models(destination);std::cout<<"ARDY models imported into "<<destination.string()<<"\n";return 0;
         }
-        if(pos.empty()||pos.size()>2||(pos[0]!="install"&&pos[0]!="check"))throw std::runtime_error("Use models install/check [all|kimodo|kimodo-v1.2|text|bricks|ardy|dart], or models import-ardy DIR --accept-licenses");
+        if(pos.empty()||pos.size()>2||(pos[0]!="install"&&pos[0]!="check"))throw std::runtime_error("Use models install/check [all|kimodo|kimodo-v1.2|text|bricks|ardy], or models import-ardy DIR --accept-licenses");
         std::string selection=pos.size()==2?pos[1]:"all";
         if(pos[0]=="check"&&selection=="ardy")check_ardy_models(models/"ardy");
         else if(pos[0]=="check")check_models(models,selection);
         else {
-            if(!accept)throw std::runtime_error(selection=="dart"?"Read licenses/DART-SOURCE.txt and OPENAI-CLIP.txt, then pass --accept-licenses to download DART models":"Read licenses/NVIDIA-KIMODO-MODEL.txt, NVIDIA-OPEN-MODEL.txt and META-LLAMA-3.txt, then pass --accept-licenses to download models");
+            if(!accept)throw std::runtime_error("Read licenses/NVIDIA-KIMODO-MODEL.txt, NVIDIA-OPEN-MODEL.txt and META-LLAMA-3.txt, then pass --accept-licenses to download models");
             setup_models(models,selection);
         }
         return 0;
@@ -1296,22 +1147,6 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         recipe["predictedFootContacts"]["plan"]=contacts_out.string();
         std::cout<<"Saved "<<contacts_out.string()<<" ("<<planted.size()<<" predicted contacts)\n";
     };
-    if(command=="dart") {
-        if(pos.size()!=1)throw std::runtime_error("dart takes one JSON plan");
-        auto plan=load_dart_plan(utf8path(pos[0]));
-        if(device=="gpu"&&!dart_gpu_compiled())throw std::runtime_error("DART GPU: this build has no DirectML support");
-        DartResult result;
-        if(!context->dart_ready.empty()){auto ready=std::move(context->dart_ready.front());context->dart_ready.pop_front();if(ready.output!=fs::absolute(output))throw std::runtime_error("DART batch output order mismatch");result=std::move(ready.result);}
-        else result=dart_session(models,threads,device,context).generate(plan);
-        result.clip.name=output.stem().string();save_glb(result.clip,output);
-        nlohmann::json recipe={{"tool","tide-motion"},{"version",MOTION_VERSION},{"command","dart"},{"authoring",plan.recipe},{"threads",threads?threads:4},{"device",result.metrics.at("device")},{"accelerator",result.metrics.at("device")=="gpu"?"directml":"cpu"},{"fps",30},{"frames",result.clip.frames()},{"metrics",result.metrics},{"dartState",result.history},{"dartInitialState",result.initial_history},
-            {"sourceRevision","bb67ae1ed6ce051080468bf15bc6e54a6c3f8417"},{"weightsSha256","6c186ea7807efe7cef02e639726bb94040f1c44fb8beef0621c667440d7b7877"},{"sampler",{{"prediction","x0"},{"schedule","cosine10"},{"method",plan.sampler},{"timesteps",plan.timesteps},{"eta",plan.eta},{"guidance",plan.guidance},{"noiseScale",plan.noise_scale},{"zeroNoise",plan.zero_noise},{"policyMode",plan.policy_mode},{"fixFloor",plan.fix_floor},{"groundHeight",plan.ground_height},{"seedMode",plan.seed_mode}}},
-            {"randomGenerator","std::mt19937 + std::normal_distribution<float>; compiler-dependent normal transform"},
-            {"checkpoints",{{"denoiser","e6c550641deaaccb6313f3529a4ca6602eb00d675dcff3aa47217825b5a43615"},{"decoder","b818cc8704ad9b408c745cac48943c99bf5402ffca521b25ffaf6639a5d5d276"},{"policy","81af5cda56e519afadb7bdf74ba82322cc79f903c1cbea151b05fdc71f460a0e"},{"text","40d365715913c9da98579312b702a82c18be219cc2a73407c4526f58eba950af"},{"normalizer","cb442539380d15a5763b799ba063d9b0b6574a751a03ae0c86d4a6f24bff5bd4"}}}};
-        recipe["inputs"]=nlohmann::json::array();for(const auto& input:{plan.history_file,plan.source_file,plan.source_map_file,plan.optimization?plan.optimization->target_file:fs::path{},plan.optimization?plan.optimization->target_map_file:fs::path{},plan.optimization&&plan.optimization->scene?plan.optimization->scene->file:fs::path{}})if(!input.empty())recipe["inputs"].push_back({{"path",input.string()},{"bytes",fs::file_size(input)},{"sha256",sha256_file(input)}});
-        std::ofstream metadata(output.string()+".json");metadata<<recipe.dump(2)<<"\n";metadata.close();if(!metadata)throw std::runtime_error("Animation saved but could not write DART recipe");
-        std::cout<<"Saved "<<output.string()<<" ("<<result.clip.frames()<<" frames)\n";return 0;
-    }
     if(command=="pose-sequence") {
         if(pos.size()!=1)throw std::runtime_error("pose-sequence takes one JSON recipe");
         auto plan=load_pose_sequence(utf8path(pos[0]));

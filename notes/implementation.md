@@ -1,5 +1,23 @@
 # Native animation authoring
 
+## DART and MoMask removed (2026-10-28)
+
+The owner compared every backend on the same moves (walk-up-and-strike among
+them) and judged DART weak and MoMask unsteady ("DART feels like a bad one,
+momask is drunk ... i think we can get most from MotionBricks and Kimodo
+models"), then asked for an opinionated tool around the backends that stay.
+Removed: the `dart` command and its batch action, `generate --backend momask`,
+`inpaint` and `extend` (MoMask-only), `models install/check dart`,
+`models check momask`, `models import-momask`, the optional `tide-momask`
+launcher, their sources (DART graphs/GPU/optimizer, CLIP text, MoMask, HumanML),
+tests, examples, developer export tools, notes and licence notices (DART,
+MoMask source, the Python/Unicode tables used only by DART's CLIP tokenizer).
+The motion-core library no longer compiles DirectML code; ARDY keeps its own.
+Kept: Kimodo (v1.1, v1.2), MotionBricks (`connect`, `pose-sequence`), ARDY,
+Dex2HOI (still undecided; `OPENAI-CLIP.txt` stays for its CLIP graph) and every
+tool. Model files already in a user's cache are left alone; the entries below
+describe the removed backends as they were.
+
 ## ARM row-rotation contract tolerance (2026-10-28)
 
 Build and release run40733029160 passed Windows/Linux x64 but failed the

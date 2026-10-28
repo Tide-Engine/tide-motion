@@ -13,16 +13,6 @@ x64 builds include DirectML motion-network acceleration.
 Omitting `--device` uses `auto`: GPU first, then CPU fallback. Text embedding
 remains on CPU; `--device cpu` forces CPU.
 
-MoMask is another opt-in native backend with text generation, prompt sequences,
-source-context continuation (`extend`), range inpainting, pose/path/effector tools,
-candidate selection and loops. Supply its prepared ONNX weights manually; they
-are neither bundled nor automatically downloaded, and their commercial license
-scope remains unresolved. See [setup](notes/momask-local.md) and the
-[tested controls, examples and measured limits](notes/momask-capabilities.md).
-CPU remains its default; Windows DirectML GPU is optional. Spatial targets use
-explicit native postprocessing; these controls do not add learned Kimodo or ARDY
-conditioning inputs to the model. Kimodo remains the default.
-
 Experimental Dex2HOI jointly generates human and object motion with manually
 supplied native weights: `models import-dex2hoi`, then `dex2hoi generate` with an
 explicit compatible rig, ten-frame history and object geometry. A private native
@@ -98,21 +88,6 @@ there too). Other platforms' packages are CPU-only for now.
 `--models DIR` or `TIDE_MOTION_MODELS` selects the model cache. Otherwise it is
 `%LOCALAPPDATA%/TideMotion/models` on Windows, and
 `$XDG_CACHE_HOME/tide-motion/models` or `~/.cache/tide-motion/models` on Unix.
-
-For a separately obtained, supported MoMask **prepared ONNX bundle**:
-
-```sh
-tide-motion models import-momask /path/to/prepared-bundle
-tide-motion models check momask
-tide-motion generate "A person walks forward." --backend momask --duration 3 --seed 7 -o momask-walk.glb
-tide-motion inpaint "A person waves with the right hand." --source momask-walk.glb --begin 18 --end 66 --seed 3 -o momask-wave.glb
-```
-
-Import verifies the pinned manifest and every file before staging under
-`CACHE/momask`. Raw upstream `.tar`/`.pt` checkpoints require developer conversion
-first; installed inference needs no Python. `models install all` does not include
-MoMask. Manual import does not grant checkpoint rights. Edit ranges use the
-source's 30 Hz frames and preserve outside poses; see the linked limits before use.
 
 ## Generate
 
@@ -728,68 +703,6 @@ platform succeeds does the workflow publish all archives, SHA-256 sidecars and
 both installers together. A failed build publishes nothing; a publish retry can
 resume a draft but cannot overwrite an already published release. The Windows
 release is built with Vulkan; the others use CPU inference.
-
-## DART text, continuation and motion control (opt-in)
-
-`dart` runs the released DART locomotion policy, diffusion model and motion decoder
-natively on Windows DirectML GPU (default `--device auto`) or CPU (`--device cpu`).
-`--device gpu` requires GPU execution; auto falls back to CPU. CLIP stays native CPU.
-It exports canonical SOMA-30 GLBs for
-the existing preview and mapped humanoid retargeting commands. Defaults and the
-`models install all` selection stay unchanged.
-
-```powershell
-tide-motion models install dart --accept-licenses
-tide-motion dart examples/dart-goals.json -o goals.glb
-tide-motion dart examples/dart-continuation.json -o continuation.glb --threads 4
-```
-
-A plan contains `version: 1`, optional `seed` (default 1), `warmupChunks` (1..32,
-default 8), and 1..64 `segments`. Each segment has `text`, `chunks` (1..512) and
-an optional `target: [x,z]` in absolute world metres. Free UTF-8 prompts and empty
-unconditional prompts are supported. The released actor was trained for **walk,
-run, hop on left leg**; other prompts remain available with explicit skill metadata.
-Use `history` from an earlier GLB recipe or `source` with optional explicit mapping
-to continue existing motion; `seedMode` supports moving history or a single pose.
-Native gradient optimization adds soft pose inbetweening, arbitrary frame/joint
-targets, jerk/floor penalties and owner-supplied joint/SDF scene objectives.
-Sampler, guidance, timestep, noise, actor mean/sample and floor settings are exposed.
-See [the complete controls/schema](notes/dart-controls.md),
-[free-text example](examples/dart-text.json) and
-[inbetweening template](examples/dart-inbetween.json).
-
-Each primitive adds eight frames at 30 Hz. Without a target, `chunks` is its
-exact count. With a target, it is the maximum budget: the controller advances
-to the next segment within 0.3 m horizontal pelvis error or at budget exhaustion.
-The recipe reports reached/missed targets and measured errors; this is learned
-goal control, not exact endpoint correction. The output includes two initial
-history frames and is capped below 18,000 frames. Plans and paths remain local.
-Batch actions use `{"action":"dart","plan":"plan.json","output":"clip.glb","threads":4}`;
-plans resolve relative to the batch manifest and all are preflighted before
-any inference. One session set and cached free-text embeddings are reused. Optimization jobs run
-individually with session reuse; dependent outputs split forward batch groups.
-Consecutive DART actions share real policy/decoder calls and both guidance branches
-across up to eight independent streams; action `batchSize` (1..8) limits grouping.
-Set `device` per action. Run `models install dart --accept-licenses` again after
-upgrading to construct the additional batch graphs from the cached checkpoints.
-On the tested RTX 4080 SUPER, 24 actions took 3.60 s with GPU groups of eight,
-versus 27.75 s with single-stream CPU groups; all four CPU/GPU/group-size cases
-reached 48/48 tested waypoints. These are local observations, not hardware guarantees.
-
-Initialization uses the model's mean features followed by native generated walk
-warmup. The predicted-joint path derives its pelvis offset from the released
-normalizer and constructs a fixed reference skeleton from generated output;
-it requires no SMPL-X mesh, shape model, sample motion or user Python. Native
-installation verifies the official checkpoint bytes and constructs the pinned
-ONNX graphs/float tensors locally. About 880 MB of model/cache disk space is
-needed. Code/model pins and the licensing scope are in
-[notes/dart-backend.md](notes/dart-backend.md).
-
-Windows CPU validation reached 48/48 tested waypoints across eight seeds and
-passed native/PyTorch tensor comparisons. Foot sliding remains substantial in
-some outputs, hopping can choose the wrong support leg, and sharp action changes
-can show velocity changes. Inspect generated clips before use; this does not
-guarantee contacts or physical feasibility. It is offline asset authoring.
 
 ## Licenses
 

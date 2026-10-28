@@ -1,5 +1,4 @@
 #include "motion.hpp"
-#include "dart_graphs.hpp"
 #include <picosha2.h>
 #include <array>
 #include <bit>
@@ -21,26 +20,6 @@ namespace {
 struct ModelFile { const char* group; const char* file; uint64_t bytes; const char* hash; const char* url; };
 constexpr ModelFile v12_model={"kimodo-v1.2","kimodo-v1.2.gguf",1133166784ULL,"9c24c5ee9b6b3683947ab2796727ffb2fbd69b2ebc7683214809013687d87a19",nullptr};
 constexpr ModelFile files[]={
-    {"dart","dart/denoiser.pt",82342402,"e6c550641deaaccb6313f3529a4ca6602eb00d675dcff3aa47217825b5a43615","https://drive.google.com/uc?export=download&id=1eIKqohAcIkQHtu3W5IirMiMCfm9Iv4vB"},
-    {"dart","dart/vae.pt",49577410,"b818cc8704ad9b408c745cac48943c99bf5402ffca521b25ffaf6639a5d5d276","https://drive.google.com/uc?export=download&id=1s_KsP7CqCd5s8Y2NQ4qQv6xw_jeAEFbx"},
-    {"dart","dart/policy.pt",15339391,"81af5cda56e519afadb7bdf74ba82322cc79f903c1cbea151b05fdc71f460a0e","https://drive.google.com/uc?export=download&id=1q9Vahpx8Ix9QtyoR55ZHPmAld1oFUH52"},
-    {"dart","dart/clip.pt",353976522,"40d365715913c9da98579312b702a82c18be219cc2a73407c4526f58eba950af","https://openaipublic.azureedge.net/clip/models/40d365715913c9da98579312b702a82c18be219cc2a73407c4526f58eba950af/ViT-B-32.pt"},
-    {"dart","dart/stats.pkl",2917,"cb442539380d15a5763b799ba063d9b0b6574a751a03ae0c86d4a6f24bff5bd4","https://drive.google.com/uc?export=download&id=1pz8H_0U0daO_-bvvzaG--zNkqDG91dIl"},
-    {"dart","dart/bpe_simple_vocab_16e6.txt.gz",1356917,"924691ac288e54409236115652ad4aa250f48203de50a9e4722a6ecd48d6804a","https://raw.githubusercontent.com/openai/CLIP/d05afc436d78f1c48dc0dbf8e5980a9d471f35f6/clip/bpe_simple_vocab_16e6.txt.gz"},
-    {"dart","dart/dart-weights.bin",372168788,"6c186ea7807efe7cef02e639726bb94040f1c44fb8beef0621c667440d7b7877",nullptr},
-    {"dart","dart/denoiser.onnx",245023,"7ccf2e3f881f6380bf78c0fdd2e888a61a5db4f0a78db963a7c1acea176d748a",nullptr},
-    {"dart","dart/decoder.onnx",161074,"866e25acfe54984e84a1426bf8545353b858bb6e97d874b7bbd7c6669c77d579",nullptr},
-    {"dart","dart/policy.onnx",11842,"35383487387d695d1550bb5db0d18469546ab656fc9eb953b0f83530d661cd39",nullptr},
-    {"dart","dart/text.onnx",663015,"5d5ce3c84769ccbd724a43c26b24ccd08046d75c7edc7c6e561bf82866cdce79",nullptr},
-    {"dart","dart/denoiser-batch.onnx",278098,"cddda8f84f991df73cd779bb92b7d3a739f69acfece69b22c8e1f7652f1be06a",nullptr},
-    {"dart","dart/decoder-batch.onnx",178146,"2bc1faaf482be8e92598c84ba365e6183254b8e317db23a6b0f35f95e96d62ec",nullptr},
-    {"dart","dart/policy-batch.onnx",12010,"a051450cfb9fcdc9243ea96c4c83671bf5d452ccf1381a602caa84f564d5959f",nullptr},
-    {"dart","dart/decoder-grad-batch.onnx",893607,"7449ad812b90d391eeda6b144f572ffed53b3b0f792920a69745efb8a231bdc7",nullptr},
-    {"dart","dart/denoiser-grad-batch.onnx",1750094,"894c87142e9a8de6aa99a8af1b822aec3b9d026ae5618a35afa46c2f56468f2a",nullptr},
-    {"dart","dart/transition-batch.onnx",50455,"5cb07b9cfdd096d2c3074500968fdf9c6c80aa5f95707e9e3c171bdcbc0f4ad0",nullptr},
-    {"dart","dart/transition-grad-batch.onnx",173828,"5f0ec1022215cab1f4e2d1f43937c5fb17c598c30341ea76e6a751a6c64f23cd",nullptr},
-    {"dart","dart/soma-points-batch.onnx",224127,"9e47e3e9a3e5db360a9f16c0ddb590e40eb23d6f04498d2508a692ba6f095b2b",nullptr},
-    {"dart","dart/soma-points-grad-batch.onnx",578020,"040f144e0e3158177cfe07a0e3485527451f3f3d41779d8013f3a15cddc421fc",nullptr},
     v12_model,
     {"kimodo","kimodo.gguf",1133166784ULL,"3bf1229f4c1eff1d28f5196a854113da2df9a11a5e21c60694630903bf948ee4",
      "https://huggingface.co/LocalAI-io/Kimodo-SOMA-RP-v1.1-GGML/resolve/65f8b8ab34ee7524161cc87b20ae4cb4f5d3a12d/models/kimodo-soma-rp-v1.1-f32.gguf"},
@@ -63,11 +42,10 @@ constexpr ModelFile v12_sources[]={
     {"kimodo-v1.2",".soma-v1.2/stats/motion/local_root/std.npy",160ULL,"5f57b41f51ced7832cffa81702f6e04d8694e16475c184baec6c8be0e98c8dba","https://huggingface.co/nvidia/Kimodo-SOMA-RP-v1.2/resolve/0e3c89024d896064b6851201373f7834784a386b/stats/motion/local_root/std.npy"},
 };
 void prepare_v12(const fs::path& root);
-void prepare_dart(const fs::path& root);
 void selection_valid(const std::string& selection) {
-    if(selection!="all"&&selection!="kimodo"&&selection!="bricks"&&selection!="kimodo-v1.2"&&selection!="text"&&selection!="dart")throw std::runtime_error("Model selection must be all, kimodo, kimodo-v1.2, text, bricks or dart");
+    if(selection!="all"&&selection!="kimodo"&&selection!="bricks"&&selection!="kimodo-v1.2"&&selection!="text")throw std::runtime_error("Model selection must be all, kimodo, kimodo-v1.2, text or bricks");
 }
-bool selected(const ModelFile& f,const std::string& s) { return (s=="all"&&std::string(f.group)!="kimodo-v1.2"&&std::string(f.group)!="dart")||s==f.group||((s=="kimodo"||s=="kimodo-v1.2"||s=="text")&&std::string(f.group)=="kimodo-text"); }
+bool selected(const ModelFile& f,const std::string& s) { return (s=="all"&&std::string(f.group)!="kimodo-v1.2")||s==f.group||((s=="kimodo"||s=="kimodo-v1.2"||s=="text")&&std::string(f.group)=="kimodo-text"); }
 void verify(const fs::path& path,const ModelFile& f) {
     if(!fs::exists(path)||fs::file_size(path)!=f.bytes)throw std::runtime_error("Missing or incomplete model '"+path.string()+"'; run tide-motion models install "+std::string(std::string(f.group)=="kimodo-text"?"kimodo":f.group));
     if(sha256_file(path)!=f.hash)throw std::runtime_error("Model checksum mismatch: "+path.string()+"; remove this file and reinstall models");
@@ -111,7 +89,7 @@ namespace {
 void install_file(const fs::path& root,const ModelFile& f) {
         auto path=root/f.file;fs::create_directories(path.parent_path());
         if(fs::exists(path)) { verify(path,f);std::cerr<<"Verified "<<path.string()<<"\n";return; }
-        if(!f.url) {if(std::string(f.group)=="dart")prepare_dart(root);else prepare_v12(root);verify(path,f);return;}
+        if(!f.url) {prepare_v12(root);verify(path,f);return;}
         auto temp=path;temp+=".part";
         // A full interrupted download can be verified and committed without another request.
         if(!fs::exists(temp)||fs::file_size(temp)!=f.bytes) {
@@ -125,42 +103,6 @@ void install_file(const fs::path& root,const ModelFile& f) {
             if(code)throw std::runtime_error("Model download failed; run the same install command to resume");
         }
         verify(temp,f);fs::rename(temp,path);
-}
-// Fixed checkpoint byte slices are read only after complete size/hash checks.
-// The native graphs reference a separately verified F32 tensor file.
-void prepare_dart(const fs::path& root) {
-    if constexpr(std::endian::native!=std::endian::little)throw std::runtime_error("DART conversion requires little endian");
-    for(const auto& f:files)if(std::string(f.group)=="dart"&&f.url)verify(root/f.file,f);
-    auto publish=[&](const fs::path& path) {
-        auto part=path;part+=".part";
-        for(const auto& f:files)if(root/f.file==path){verify(part,f);fs::rename(part,path);return;}
-        throw std::runtime_error("Unknown DART conversion output");
-    };
-    auto weights=root/"dart/dart-weights.bin";
-    if(!fs::exists(weights)) {
-        auto part=weights;part+=".part";std::ofstream out(part,std::ios::binary|std::ios::trunc);
-        for(const auto& slice:dart_tensor_slices()) {
-            std::ifstream in(root/"dart"/slice.file,std::ios::binary);in.seekg(static_cast<std::streamoff>(slice.source));
-            if(static_cast<uint64_t>(out.tellp())!=slice.destination)throw std::runtime_error("Invalid DART tensor table");
-            if(slice.half)for(uint64_t i=0;i<slice.bytes/4;++i) {
-                uint16_t h=0;in.read(reinterpret_cast<char*>(&h),2);unsigned e=(h>>10)&31,mant=h&1023;
-                float v=e?std::ldexp(1+static_cast<float>(mant)/1024,static_cast<int>(e)-15):std::ldexp(static_cast<float>(mant),-24);
-                if(h&32768)v=-v;
-                out.write(reinterpret_cast<char*>(&v),4);
-            } else {
-                std::vector<char> buffer(static_cast<size_t>(slice.bytes));in.read(buffer.data(),static_cast<std::streamsize>(buffer.size()));out.write(buffer.data(),static_cast<std::streamsize>(buffer.size()));
-            }
-            if(!in||!out)throw std::runtime_error("DART tensor conversion I/O failed");
-        }
-        out.close();if(!out)throw std::runtime_error("DART conversion write failed");publish(weights);
-    }
-    auto graph=[&](const char* file,const std::string& bytes) {
-        auto path=root/"dart"/file;if(fs::exists(path))return;
-        auto part=path;part+=".part";std::ofstream out(part,std::ios::binary|std::ios::trunc);
-        out.write(bytes.data(),static_cast<std::streamsize>(bytes.size()));
-        out.close();if(!out)throw std::runtime_error("DART graph write failed");publish(path);
-    };
-    for(const char* name:{"denoiser.onnx","decoder.onnx","policy.onnx","text.onnx","denoiser-batch.onnx","decoder-batch.onnx","policy-batch.onnx","decoder-grad-batch.onnx","denoiser-grad-batch.onnx","transition-batch.onnx","transition-grad-batch.onnx","soma-points-batch.onnx","soma-points-grad-batch.onnx"})graph(name,dart_graph_schema(name));
 }
 void prepare_v12(const fs::path& root) {
     for(const auto& source:v12_sources)install_file(root,source);
