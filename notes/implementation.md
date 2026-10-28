@@ -1829,3 +1829,48 @@ until --force is requested. ARM64/macOS execution remains a release-matrix check
 not a local claim. No release tag/publication or real owner-install modification
 was performed; bootstrapping older installed binaries remains a first manual
 installation of a future published package containing the command.
+## Batched MotionBricks connects (2026-10-28)
+
+Owner request: add batching. Upstream docs/onnx_inference.md (same pin
+54fc563aeaaf819a753d72cc9fdc6713989cdd43): every input takes N independent
+requests, concatenated along axis 0. Each request is trimmed, corrected and
+placed separately. BricksModel::generate(span<Request>) encodes each request,
+concatenates the seven inputs, runs one session call, then decodes and
+endpoint-corrects each [64,366] slice with its own alignment and guides. The
+single-request API now goes through it with N=1. Limit 32 per run
+(bricks_batch_limit). No model, ORT or dependency revision changed.
+
+Batch integration reuses the normal connect path unchanged. On reaching a connect,
+batch() runs the following consecutive connects in a prepare mode. That does all
+argument parsing, path, preflight, metadata and clip validation, then records
+(from, offset target, options, output) without inference. The run stops at a
+non-connect, a different --threads, the limit, an action whose from/to is an
+output of an earlier action in the run, or an action whose preparation fails
+(it then runs normally later and reports its own error). Runs of two or more
+requests use one session call. The normal executions then take their bridges in
+order and check the output path. Joins, pins, contacts and recipes are as before,
+plus motionbricksBatch {requests, index}. A failed batched run writes none of its
+outputs; earlier outputs are kept. stderr reports the actions grouped into each
+run and the model time per call ("MotionBricks inference: S s").
+
+Validation, Windows x64 ClangCL 18 Release: all CTests pass (nine after rebasing
+onto the native upgrade work; the runner below was repeated there), including a
+new CLI contract that two connects form one run (reported as "Batch actions 1-2"
+when models are missing). Opt-in tests/bricks-batch-inference.ps1, holding
+TideMotionGpuValidation, used user-generated Kimodo idle/walk clips. It ran 32
+varied independent connects: offsets, poses 1..4, fixed and ranged tokens, and
+joined or bridge-only output. It compares them with the same 32 run one per run in
+one process (separated by mirrors). Results:
+- one ONNX session and one 32-request call;
+- identical chosen tokens;
+- maximum local difference 1.86e-6 m and 6.9e-4 rad (CPU kernel blocking).
+A dependent chain (third action reads the first's output) split into runs 1-2 and
+3-4 as designed. Model time for 32 connects: 0.570 s batched against 0.994 s one
+per run at 8 threads; 1.730 s against 2.096 s at 1 thread. Wall time
+3.78 s against 4.33 s, dominated by session load and GLB I/O. These are single
+runs on this machine, not a benchmark.
+
+Gaps: no batching across pose-sequence segments (each uses the previous
+segment's generated context) or across separate pose-sequence actions. Connect
+actions that consume an earlier connect in the same run are not batched. No GPU
+provider (MotionBricks stays ORT CPU). The batch limit is fixed, not configurable.

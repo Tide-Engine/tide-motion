@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <deque>
 #include <fstream>
 #include <iostream>
 #include <limits>
@@ -409,7 +410,19 @@ struct RunContext {
     std::string kimodo_device;unsigned kimodo_threads=0;
     std::optional<std::string> backend_env,threads_env;
     std::unique_ptr<BricksModel> bricks;unsigned bricks_threads=0;
+    // Batch connect runs: prepare records each request without inference; the
+    // following normal execution of the same actions takes its bridge in order.
+    struct PendingBridge { Clip from,to; BricksRequest options; fs::path output; };
+    struct ReadyBridge { fs::path output; Bridge bridge; size_t requests=1,index=0; };
+    bool bricks_prepare=false;std::vector<PendingBridge> bricks_pending;std::deque<ReadyBridge> bricks_ready;
 };
+BricksModel& bricks_session(const fs::path& models,unsigned threads,RunContext* context) {
+    if(!context->bricks||context->bricks_threads!=threads) {
+        if(!context->bricks)check_models(models,"bricks");
+        context->bricks=std::make_unique<BricksModel>(models/"motionbricks.onnx",threads);context->bricks_threads=threads;
+    }
+    return *context->bricks;
+}
 struct Guidance { float text=2,constraint=2; };
 void load_kimodo(const fs::path& models,RunContext* context) {
     std::cerr<<"Loading Kimodo SOMA and text encoder (native GGML)...\n";
@@ -705,7 +718,37 @@ int batch(const fs::path& manifest,const fs::path& models,RunContext* context) {
         setenv("KIMODO_TEXT_LAYER_CHUNK","32",0);
 #endif
     }
+    // Consecutive connects share one MotionBricks run (up to bricks_batch_limit) when
+    // they use the same threads and none reads an output of an earlier one in the run.
+    auto option=[](const std::vector<std::string>& argv,const char* name) {
+        for(size_t k=0;k+1<argv.size();++k)if(argv[k]==name)return argv[k+1];
+        return std::string{};
+    };
+    size_t batched_until=0;
     for(size_t i=0;i<commands.size();++i) {
+        if(i>=batched_until&&commands[i][1]=="connect") {
+            std::set<fs::path> run_outputs;const auto threads=option(commands[i],"--threads");size_t j=i;
+            context->bricks_prepare=true;context->bricks_pending.clear();
+            for(;j<commands.size()&&j-i<bricks_batch_limit&&commands[j][1]=="connect"&&option(commands[j],"--threads")==threads;++j) {
+                if(run_outputs.contains(fs::absolute(commands[j][2]))||run_outputs.contains(fs::absolute(commands[j][3])))break;
+                // A failing action runs normally later, after the earlier outputs exist.
+                try {main_impl(commands[j],context);}catch(const std::exception&){break;}
+                run_outputs.insert(fs::absolute(option(commands[j],"-o")));
+            }
+            context->bricks_prepare=false;
+            if(context->bricks_pending.size()>1) {
+                std::vector<BricksModel::Request> requests;
+                for(const auto& p:context->bricks_pending)requests.push_back({&p.from,&p.to,p.options});
+                unsigned t=threads.empty()?0u:static_cast<unsigned>(std::stoul(threads));
+                std::cerr<<"Batch actions "<<i+1<<"-"<<j<<": one MotionBricks run\n";
+                try {
+                    auto bridges=bricks_session(models,t,context).generate(requests);
+                    for(size_t k=0;k<bridges.size();++k)context->bricks_ready.push_back({context->bricks_pending[k].output,std::move(bridges[k]),bridges.size(),k});
+                } catch(const std::exception& e) {throw std::runtime_error("Batch actions "+std::to_string(i+1)+"-"+std::to_string(j)+" failed: "+e.what()+"; completed outputs have been kept");}
+                batched_until=j;
+            }
+            context->bricks_pending.clear();
+        }
         std::cerr<<"Batch action "<<i+1<<"/"<<commands.size()<<"\n";
         try {int code=main_impl(commands[i],context);if(code)return code;}
         catch(const std::exception& e){throw std::runtime_error("Batch action "+std::to_string(i+1)+" failed: "+e.what()+"; completed outputs have been kept");}
@@ -935,7 +978,7 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         if(!metadata)throw std::runtime_error("Animation saved but could not write its recipe");
         std::cout<<"Saved "<<output.string()<<" ("<<made.frames()<<" frames)\n";return 0;
     }
-    Clip clip;Bridge bridge;size_t contact_offset=0;
+    Clip clip;Bridge bridge;size_t contact_offset=0,batch_requests=1,batch_index=0;
     nlohmann::json retarget_recipe,generate_recipe,mirror_recipe;
     std::vector<size_t> connect_pins;
     // Store generation settings alongside the asset; no need to rerun inference at build time.
@@ -1226,17 +1269,20 @@ int main_impl(const std::vector<std::string>& args,RunContext* context) {
         auto source_pins=protected_recipe_frames(source_metadata(utf8path(pos[0])),a.frames());
         auto target_pins=protected_recipe_frames(source_metadata(utf8path(pos[1])),b.frames());
         for(size_t f=0;f<b.frames();++f)b.frame(f)[0].p=b.frame(f)[0].p+offset;
-        if(!context->bricks||context->bricks_threads!=threads) {
-            if(!context->bricks)check_models(models,"bricks");
-            context->bricks=std::make_unique<BricksModel>(models/"motionbricks.onnx",threads);context->bricks_threads=threads;
-        }
-        bridge=context->bricks->generate(a,b,bricks_request);clip=bridge.clip;
+        if(context->bricks_prepare) {context->bricks_pending.push_back({std::move(a),std::move(b),bricks_request,fs::absolute(output)});return 0;}
+        if(!context->bricks_ready.empty()) {
+            auto ready=std::move(context->bricks_ready.front());context->bricks_ready.pop_front();
+            if(ready.output!=fs::absolute(output))throw std::runtime_error("Internal error: batched bridge out of order");
+            bridge=std::move(ready.bridge);batch_requests=ready.requests;batch_index=ready.index;
+        } else bridge=bricks_session(models,threads,context).generate(a,b,bricks_request);
+        clip=bridge.clip;
         connect_pins=connected_protected_frames(a.frames(),clip.frames(),b.frames(),source_pins,target_pins,joined);
         if(joined) {clip=join(a,clip,b);contact_offset=a.frames()-1;}
     }
     auto recipe=recipe_for(clip,seed);
     if(command=="connect") {
         recipe["threads"]=threads;recipe["protectedFrames"]=connect_pins;
+        recipe["motionbricksBatch"]={{"requests",batch_requests},{"index",batch_index}};
         recipe["allowedTokens"]={bricks_request.min_tokens,bricks_request.max_tokens};
         recipe["chosenTokens"]=bridge.tokens;recipe["targetPoses"]=bricks_request.target_poses;
         recipe["bridgeFrames"]={contact_offset,contact_offset+bridge.clip.frames()-1};

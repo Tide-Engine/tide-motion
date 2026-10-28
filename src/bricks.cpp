@@ -4,6 +4,7 @@
 #include "motion.hpp"
 #include <onnxruntime_cxx_api.h>
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
@@ -172,34 +173,58 @@ Clip BricksModel::generate(const Clip& a,const Clip& b,int tokens) {
     return generate(a,b,bricks_tokens(tokens)).clip;
 }
 Bridge BricksModel::generate(const Clip& a,const Clip& b,const BricksRequest& request) {
-    require_soma(a); require_soma(b);
-    if(a.frames()<4||b.frames()<4)throw std::runtime_error("Each clip must contain at least four frames");
-    std::array<std::vector<Transform>,8> guides;
-    // Unused target slots repeat the last given pose (upstream pad_token_poses_kernel).
-    for(size_t f=0;f<4;++f) {
-        guides[f]=sample(a,a.duration()-static_cast<float>(3-f)/30);
-        guides[f+4]=sample(b,static_cast<float>(std::min<int>(static_cast<int>(f),request.target_poses-1))/30);
+    const Request one{&a,&b,request};
+    return std::move(generate(std::span<const Request>(&one,1)).front());
+}
+std::vector<Bridge> BricksModel::generate(std::span<const Request> requests) {
+    if(requests.empty()||requests.size()>bricks_batch_limit)throw std::runtime_error("MotionBricks batches hold 1.."+std::to_string(bricks_batch_limit)+" requests");
+    const size_t n=requests.size();
+    std::vector<BricksInputs> encoded;encoded.reserve(n);
+    std::vector<std::array<std::vector<Transform>,8>> guides(n);
+    for(size_t r=0;r<n;++r) {
+        const Clip& a=*requests[r].from;const Clip& b=*requests[r].to;
+        require_soma(a); require_soma(b);
+        if(a.frames()<4||b.frames()<4)throw std::runtime_error("Each clip must contain at least four frames");
+        // Unused target slots repeat the last given pose (upstream pad_token_poses_kernel).
+        for(size_t f=0;f<4;++f) {
+            guides[r][f]=sample(a,a.duration()-static_cast<float>(3-f)/30);
+            guides[r][f+4]=sample(b,static_cast<float>(std::min<int>(static_cast<int>(f),requests[r].options.target_poses-1))/30);
+        }
+        encoded.push_back(encode_bricks(a,guides[r],requests[r].options));
     }
-    auto in=encode_bricks(a,guides,request);
+    // Requests are concatenated along axis 0, as upstream's ONNX batching guide does.
+    std::vector<float> root,local_root,pose;std::vector<int32_t> has_root,has_local_root,has_pose,allowed;
+    for(const auto& in:encoded) {
+        root.insert(root.end(),in.root.begin(),in.root.end());local_root.insert(local_root.end(),in.local_root.begin(),in.local_root.end());
+        pose.insert(pose.end(),in.pose.begin(),in.pose.end());
+        has_root.insert(has_root.end(),in.has_root.begin(),in.has_root.end());has_local_root.insert(has_local_root.end(),in.has_local_root.begin(),in.has_local_root.end());
+        has_pose.insert(has_pose.end(),in.has_pose.begin(),in.has_pose.end());allowed.insert(allowed.end(),in.allowed.begin(),in.allowed.end());
+    }
+    const int64_t batch=static_cast<int64_t>(n);
     auto memory=Ort::MemoryInfo::CreateCpu(OrtArenaAllocator,OrtMemTypeDefault);
     std::vector<Ort::Value> inputs;
-    std::array<int64_t,3> root_shape{1,8,5},local_shape{1,8,4},pose_shape{1,8,267};
-    std::array<int64_t,2> mask_shape{1,8},allowed_shape{1,11};
-    inputs.push_back(Ort::Value::CreateTensor<float>(memory,in.root.data(),in.root.size(),root_shape.data(),3));
-    inputs.push_back(Ort::Value::CreateTensor<float>(memory,in.local_root.data(),in.local_root.size(),local_shape.data(),3));
-    inputs.push_back(Ort::Value::CreateTensor<float>(memory,in.pose.data(),in.pose.size(),pose_shape.data(),3));
-    for(auto* mask:{&in.has_root,&in.has_local_root,&in.has_pose})inputs.push_back(Ort::Value::CreateTensor<int32_t>(memory,mask->data(),mask->size(),mask_shape.data(),2));
-    inputs.push_back(Ort::Value::CreateTensor<int32_t>(memory,in.allowed.data(),in.allowed.size(),allowed_shape.data(),2));
+    std::array<int64_t,3> root_shape{batch,8,5},local_shape{batch,8,4},pose_shape{batch,8,267};
+    std::array<int64_t,2> mask_shape{batch,8},allowed_shape{batch,11};
+    inputs.push_back(Ort::Value::CreateTensor<float>(memory,root.data(),root.size(),root_shape.data(),3));
+    inputs.push_back(Ort::Value::CreateTensor<float>(memory,local_root.data(),local_root.size(),local_shape.data(),3));
+    inputs.push_back(Ort::Value::CreateTensor<float>(memory,pose.data(),pose.size(),pose_shape.data(),3));
+    for(auto* mask:{&has_root,&has_local_root,&has_pose})inputs.push_back(Ort::Value::CreateTensor<int32_t>(memory,mask->data(),mask->size(),mask_shape.data(),2));
+    inputs.push_back(Ort::Value::CreateTensor<int32_t>(memory,allowed.data(),allowed.size(),allowed_shape.data(),2));
     const char* names[]={"global_root_values","local_root_values","local_poses","has_global_root_values","has_local_root_values","has_local_poses","allowed_pred_num_tokens"};
     const char* outputs[]={"pred_global_motions","pred_num_tokens"};
-    std::cerr<<"Generating transition...\n";
+    std::cerr<<(n==1?std::string("Generating transition...\n"):"Generating "+std::to_string(n)+" transitions in one batch...\n");
+    auto started=std::chrono::steady_clock::now();
     auto result=impl_->session.Run(Ort::RunOptions{nullptr},names,inputs.data(),inputs.size(),outputs,2);
-    if(result.size()!=2||result[0].GetTensorTypeAndShapeInfo().GetShape()!=std::vector<int64_t>{1,64,366}||result[1].GetTensorTypeAndShapeInfo().GetShape()!=std::vector<int64_t>{1})throw std::runtime_error("Unexpected MotionBricks output contract");
-    int tokens=result[1].GetTensorData<int32_t>()[0];
-    std::span<const float> features{result[0].GetTensorData<float>(),64*366};
-    Bridge out;out.tokens=tokens;
-    out.clip=decode_bricks(a,in,features,tokens,guides[3],guides[4],&out.correction);
-    out.contacts=decode_bricks_contacts(features,tokens);
+    std::cerr<<"MotionBricks inference: "<<std::chrono::duration<double>(std::chrono::steady_clock::now()-started).count()<<" s\n";
+    if(result.size()!=2||result[0].GetTensorTypeAndShapeInfo().GetShape()!=std::vector<int64_t>{batch,64,366}||result[1].GetTensorTypeAndShapeInfo().GetShape()!=std::vector<int64_t>{batch})throw std::runtime_error("Unexpected MotionBricks output contract");
+    std::vector<Bridge> out(n);
+    for(size_t r=0;r<n;++r) {
+        int tokens=result[1].GetTensorData<int32_t>()[r];
+        std::span<const float> features{result[0].GetTensorData<float>()+r*64*366,64*366};
+        out[r].tokens=tokens;
+        out[r].clip=decode_bricks(*requests[r].from,encoded[r],features,tokens,guides[r][3],guides[r][4],&out[r].correction);
+        out[r].contacts=decode_bricks_contacts(features,tokens);
+    }
     return out;
 }
 Clip connect(const Clip& a,const Clip& b,const fs::path& model,int tokens) {

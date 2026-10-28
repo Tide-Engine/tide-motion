@@ -293,6 +293,16 @@ int main(int argc,char** argv) try {
         }
         return 0;
     }
+    if(argc==4&&std::string(argv[1])=="--compare") {
+        // Largest local translation (m) and rotation (rad) difference between two clips.
+        auto a=load_glb(argv[2]),b=load_glb(argv[3]);
+        check(a.frames()==b.frames()&&a.joints.size()==b.joints.size(),"Compared clips have the same shape");
+        float p=0,q=0;
+        for(size_t f=0;f<a.frames();++f)for(size_t j=0;j<a.joints.size();++j) {
+            auto d=a.frame(f)[j].p-b.frame(f)[j].p;p=std::max(p,std::sqrt(dot(d,d)));q=std::max(q,angle(a.frame(f)[j].q,b.frame(f)[j].q));
+        }
+        std::cout<<"frames "<<a.frames()<<" maxPosition "<<p<<" maxRotation "<<q<<"\n";return 0;
+    }
     if(argc==3&&std::string(argv[1])=="--end-speed") {
         // Hips ground speed over the last three intervals and the frame count.
         auto clip=load_glb(argv[2]);check(clip.frames()>=4,"End speed needs four frames");

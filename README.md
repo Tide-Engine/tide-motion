@@ -288,6 +288,16 @@ Transitions and pose sequences made before this release sent MotionBricks rotati
 in the wrong joint frames, producing tucked legs and large hidden seam corrections.
 Regenerate them.
 
+**Batching.** In `batch`, consecutive `connect` actions with the same `threads`
+run as one MotionBricks request batch (up to 32). The run ends early at an action
+that reads an earlier output from that same run. Results match one-at-a-time
+generation (measured within 2 µm / 0.0007 rad). Outputs, recipes and errors are
+per action, and recipes record `motionbricksBatch` {requests, index}. If a batched
+run fails, none of its outputs are written; outputs from earlier actions are kept.
+On CPU the gain is modest: 32 connects took 0.57 s of model time batched against
+0.99 s one at a time at 8 threads. Pose-sequence segments depend on each other
+and stay sequential.
+
 MotionBricks inputs must use the canonical SOMA names, hierarchy and proportions, with no
 scale tracks, matrix nodes or animated extra nodes. LINEAR and STEP GLB tracks
 are supported; bake cubic tracks before import. A GLB with several animations

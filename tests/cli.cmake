@@ -160,6 +160,8 @@ file(WRITE "${WORK}/bricks-plan-clash.json" "{\"actions\":[{\"action\":\"connect
 refuses("distinct path: .*plan.json" batch "${WORK}/bricks-plan-clash.json" --models "${empty}")
 file(WRITE "${WORK}/bricks-ok.json" "{\"actions\":[{\"action\":\"connect\",\"from\":\"with spaces and 'quotes'/source.glb\",\"to\":\"with spaces and 'quotes'/source.glb\",\"tokens\":[6,12],\"targetPoses\":2,\"contactsOut\":\"ok-plan.json\",\"contactThreshold\":0.6,\"output\":\"ok.glb\"}]}")
 refuses("Missing or incomplete" batch "${WORK}/bricks-ok.json" --models "${empty}")
+file(WRITE "${WORK}/bricks-run.json" "{\"actions\":[{\"action\":\"connect\",\"from\":\"with spaces and 'quotes'/source.glb\",\"to\":\"with spaces and 'quotes'/source.glb\",\"output\":\"run1.glb\"},{\"action\":\"connect\",\"from\":\"with spaces and 'quotes'/source.glb\",\"to\":\"with spaces and 'quotes'/source.glb\",\"tokens\":[6,9],\"output\":\"run2.glb\"}]}")
+refuses("Batch actions 1-2 failed: .*Missing or incomplete" batch "${WORK}/bricks-run.json" --models "${empty}")
 file(WRITE "${WORK}/early.json" "{\"schema\":\"tide-motion-pose-sequence-1\",\"start\":{\"file\":\"with spaces and 'quotes'/source.glb\",\"position\":[0,1,0],\"yaw\":0},\"targets\":[{\"file\":\"with spaces and 'quotes'/source.glb\",\"position\":[1,1,0],\"yaw\":90,\"tokens\":[8,12],\"poses\":2,\"early\":6}]}")
 refuses("final target cannot transition early" pose-sequence "${WORK}/early.json" -o "${WORK}/early.glb" --models "${empty}")
 

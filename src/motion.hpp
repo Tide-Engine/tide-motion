@@ -155,7 +155,13 @@ public:
     ~BricksModel();
     Clip generate(const Clip&, const Clip&, int tokens=0);
     Bridge generate(const Clip&, const Clip&, const BricksRequest&);
+    // Independent requests in one ONNX run along the batch axis (upstream N); results
+    // keep request order. Each request is encoded, trimmed and corrected separately.
+    struct Request { const Clip* from; const Clip* to; BricksRequest options; };
+    std::vector<Bridge> generate(std::span<const Request>);
 };
+// Largest number of requests Tide sends in one MotionBricks run.
+inline constexpr size_t bricks_batch_limit=32;
 Clip join(const Clip&, const Clip& bridge, const Clip&);
 // Maps inherited pins through the same endpoint omission as join(); always pins bridge ends.
 std::vector<size_t> connected_protected_frames(size_t source_frames,size_t bridge_frames,size_t target_frames,
