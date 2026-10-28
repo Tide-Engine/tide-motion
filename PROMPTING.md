@@ -79,8 +79,7 @@ The study used geometry proxies and sparse pose-sheet review, not a human panel
 or complete motion review. Timings were not isolated, so it does not identify a
 faster model. v1.2's corrected training/test splits alone do not establish better
 animation. This table compares Kimodo's smooth-root SOMA-RP checkpoints only;
-`--backend ardy` has a separate [usage guide](notes/ardy-native.md) and does not
-accept `--model`.
+Kimodo is the only text-to-motion backend; MotionBricks makes transitions.
 
 ## What to write
 

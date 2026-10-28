@@ -24,7 +24,7 @@ walk/turn foot contacts or the tested sword-worded kick. These are measured
 starting points: compare matched prompts, durations, seeds and constraints when
 quality matters, inspect the motion, and retain the chosen asset and recipe.
 v1.1 remains the compatibility default; do not infer quality from version order
-or claim automatic action routing. This guidance does not rank the ARDY backend.
+or claim automatic action routing.
 
 Use dev, validate locally, commit and push directly. No pull requests or additional
 CI dispatches unless requested. Do not publish model files in Git.

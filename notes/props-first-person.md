@@ -52,7 +52,7 @@ or evaluation motion data. No model or dependency pins changed in this work.
 
 Evidence: src/main.cpp preview parsing/validation; src/platform.cpp body_scene;
 src/motion.hpp constraints/PreviewOptions; src/soma77.cpp; src/gltf.cpp;
-notes/ardy-native.md, notes/dart-backend.md (removed with DART on 2026-10-28)
+notes/ardy-native.md and notes/dart-backend.md (removed with ARDY and DART on 2026-10-28)
 and PROMPTING.md.
 
 | Limitation | Source | Consequence and improvement |

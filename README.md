@@ -4,15 +4,6 @@ Native, offline animation authoring using Kimodo for text-to-motion and
 MotionBricks for transitions between clips. It is a separate tool and repository;
 Tide is an optional preview renderer. No Tide CLI or engine changes are required.
 
-An optional native ARDY backend supports autoregressive long-form generation,
-changing prompts and imported SOMA history: `generate --backend ardy`. It uses
-separately converted commercial weights and the same local text encoder. See
-[ARDY setup, validation and limits](notes/ardy-native.md); conversion tooling is
-developer-only, and installed inference requires no Python or service. Windows
-x64 builds include DirectML motion-network acceleration.
-Omitting `--device` uses `auto`: GPU first, then CPU fallback. Text embedding
-remains on CPU; `--device cpu` forces CPU.
-
 The main authoring workflows use canonical SOMA-30 human animations. A reusable bone-mapping file
 retargets between SOMA and your humanoid rig, offline and without another model.
 Body animations are self-contained GLB assets without a character mesh; equipment
@@ -910,8 +901,8 @@ remains an ordinary GLB skeleton and animation, without mesh or skin changes.
 `--model v1.1` remains the default. Batch generate actions accept `"model": "v1.2"`.
 Recipes record the model identity, converted GGUF SHA-256 and v1.2 checkpoint
 revision. Switching versions in a batch reloads the model. Both versions share
-the existing pinned text encoder/tokenizer. ArdyRep is a different representation
-and is not accepted by this selector.
+the existing pinned text encoder/tokenizer. Other representations are not
+accepted by this selector.
 
 Install v1.2 with the native executable (no Python needed). Read
 `licenses/NVIDIA-KIMODO-MODEL.txt` and the text encoder terms first:

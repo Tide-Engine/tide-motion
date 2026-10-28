@@ -1,5 +1,23 @@
 # Native animation authoring
 
+## ARDY removed (2026-10-28)
+
+The owner tried ARDY against Kimodo and MotionBricks on the walk-up-and-strike
+and kept leaning to Kimodo ("yeah still leaning towards kimodo, not sure about
+ARDY anymore" ... "yeah remove it"). Kimodo (v1.1, v1.2) and MotionBricks are
+now the only motion models. Removed: `generate --backend/--history/--history-frames`
+and the batch `backend`, `history` and `historyFrames` fields (`--backend` came
+with ARDY and only ever chose between it and Kimodo), ARDY's 1..10 steps and
+600 s duration ranges, `models check ardy`, `models import-ardy`, its sources
+(src/ardy*, the DirectML GPU runner), tests, developer tools (tools/ardy), the
+spike under notes/spikes/ardy, notes (ardy-*.md), the Windows-only DirectML
+runtime (ONNX Runtime DirectML 1.24.4 and DirectML 1.15.4 in `bin/ardy-directml`,
+the `MOTION_ARDY_DIRECTML` option and their packaged licences) and the
+NVIDIA-ARDY licence notices. Kept, because others use them: the local text
+encoder (Kimodo's), the CPU ONNX Runtime 1.31.1 (MotionBricks) and the shared
+`prompts`, `steps`, `device` and `threads` controls. Converted models already
+in a user's cache are left alone; entries below describe ARDY as it was.
+
 ## Dex2HOI removed (2026-10-28)
 
 After the DART/MoMask removal below, the owner also dropped Dex2HOI ("Dex2HOI
@@ -7,8 +25,8 @@ seemed trash honestly, so we should just remove it"). Removed: the `dex2hoi`
 command, `models import-dex2hoi` and `models check dex2hoi`, its sources
 (runtime, bundle, motion encoding, preview), tests, developer tools
 (tools/dex2hoi), notes (dex2hoi-*.md) and `OPENAI-CLIP.txt`, which only its CLIP
-graph still needed. Nothing else used its helpers. ARDY stays for the owner to
-test, with its text encoder and tools/ardy. Bundles already in a user's cache are
+graph still needed. Nothing else used its helpers. ARDY stayed for the owner to
+test (removed in the entry above). Bundles already in a user's cache are
 left alone; entries below describe Dex2HOI as it was.
 
 ## DART and MoMask removed (2026-10-28)
