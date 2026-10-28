@@ -2,6 +2,7 @@
 #include "ardy_gpu.hpp"
 #include <cmath>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <stdexcept>
 #ifdef MOTION_ARDY_DIRECTML
@@ -42,7 +43,9 @@ struct ArdyGpu::Impl {
     }
     Impl(const fs::path& dir,unsigned threads) {
         using GetBase=const OrtApiBase* (ORT_API_CALL*)();
-        auto getbase=reinterpret_cast<GetBase>(GetProcAddress(ort.handle,"OrtGetApiBase"));
+        // Copy the FARPROC bits; newer clang rejects the direct cast under -Wcast-function-type-mismatch.
+        const FARPROC proc=GetProcAddress(ort.handle,"OrtGetApiBase");GetBase getbase=nullptr;
+        static_assert(sizeof(getbase)==sizeof(proc));std::memcpy(&getbase,&proc,sizeof(proc));
         if(!getbase)throw std::runtime_error("ARDY GPU: missing ORT API");
         api=getbase()->GetApi(ORT_API_VERSION);
         if(!api)throw std::runtime_error("ARDY GPU: incompatible DirectML ORT API version");
