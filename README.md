@@ -29,14 +29,14 @@ macOS may require approval in Privacy & Security for a downloaded executable.
 Windows:
 
 ```powershell
-./install.ps1 -Archive ./tide-motion-0.5.0-windows-x64.zip -AddToPath
+./install.ps1 -Archive ./tide-motion-0.5.1-windows-x64.zip -AddToPath
 ```
 
 Reopen the terminal after adding PATH. `-Root <directory>` selects another
 installation. Linux/macOS (select your platform's archive):
 
 ```sh
-sh install.sh ./tide-motion-0.5.0-linux-x64.tar.gz
+sh install.sh ./tide-motion-0.5.1-linux-x64.tar.gz
 export PATH="$HOME/.local/share/tide-motion/bin:$PATH"
 ```
 
@@ -141,53 +141,13 @@ move with the travel removed. It refuses `--path`, whose only purpose is travel.
 
 ### Getting a good result
 
-Measured on an RTX 4080 SUPER with kick prompts starting and ending in an idle
-pose (`--start-pose idle.glb --end-pose idle.glb@0`), 50 steps; a clip counts
-as a kick when a foot rises 0.45 m above the floor.
-
-- **Short, motion-only prompts.** "A person kicks forward with the right leg"
-  kicked far more often than "A person holding a sword in a fighting stance kicks
-  forward with the right leg, then returns to the stance", which never kicked at
-  4 seconds at any guidance. Describe the movement, not the character or scene.
-- **1.5–3 seconds per move.** Longer clips dilute a single action: at the
-  default guidance the short prompt kicked 18/24 times at 2.5 s and 12/24 at 4 s.
-  Chain moves with `--then` rather than stretching one prompt.
-- **Make variants and pick.** Results vary a lot by seed. `--variants 8` costs
-  about 1.5 s a clip on that GPU after loading, and the contact sheet shows which
-  ones worked.
-- **Raise `--guidance` to 3–4 when the move doesn't happen.** Higher guidance
-  follows the prompt harder but exaggerates the whole body (a boxer's guard,
-  hops, flung arms at 6), slides the feet more and strays further from pose
-  constraints:
-
-| `--guidance` | Kicks, 2.5 s | Kicks, 4 s | Foot slide (cm/frame) | Pose error mean / max (cm) |
-|---|---|---|---|---|
-| 1 | 0/8 | 0/8 | 0.15 / 0.06 | 2.0 / 4.8 |
-| 2 (default) | 18/24 | 12/24 | 0.22 / 0.15 | 2.1 / 5.3 |
-| 3 | 15/24 | 21/24 | 0.24 / 0.21 | 2.1–2.4 / 5.8–6.3 |
-| 4 | 23/24 | 23/24 | 0.29 / 0.29 | 2.3–2.8 / 6.4–7.5 |
-| 6 | 8/8 | 8/8 | 0.39 / 0.45 | 2.4–4.1 / 6.8–10.0 |
-
-  (Short prompt; foot slide is the planted foot's mean horizontal movement at
-  2.5 s / 4 s; pose error is the model's error at the start and end poses before
-  correction. The 8/8 rows used 8 seeds, the others 24.) Guidance 1 hardly moves.
-- **Leave `--constraint-guidance` at 2.** It weighs pose and path constraints
-  (and the frames that join `--then` prompts). Lower lets the motion drift from
-  them, higher makes it overshoot and also suppresses the action:
-
-| `--constraint-guidance` | Kicks, 2.5 s | Kicks, 4 s | Pose error mean / max (cm), 2.5 s | 4 s |
-|---|---|---|---|---|
-| 1 | 8/8 | 5/8 | 5.5 / 12.9 | 3.7 / 9.2 |
-| 2 (default) | 7/8 | 2/8 | 2.1 / 5.1 | 2.1 / 5.0 |
-| 3 | 7/8 | 1/8 | 2.2 / 5.2 | 2.1 / 4.7 |
-| 4 | 7/8 | 1/8 | 2.3 / 5.4 | 2.1 / 4.8 |
-| 6 | 6/8 | 0/8 | 2.9 / 6.0 | 2.4 / 5.6 |
-
-  Full-body correction makes start and end poses exact either way.
-- **Keep the correction window.** `--correction-frames 0` sets the constrained
-  frame alone: on a kick whose start and end hands were 60 degrees from the pose,
-  that frame popped 60 degrees (30 with 2 frames, 22 with 4); from 10 frames on
-  the largest steps were the kick itself.
+[PROMPTING.md](PROMPTING.md) covers what to write and how to nudge a wrong
+result, with the measurements behind it. In short: one movement per prompt,
+plainly worded, naming the side and direction; 1.5–3 seconds per move, chained
+with `--then`; ask for the change ("a standing person crouches down"), not the
+state; leave out props and characters; then `--variants 8` and pick. If the move
+still doesn't appear, reword, raise `--guidance` to 3–4, or pin its key frame
+with `--keyframe` or `--effector` taken from your best variant.
 
 ### Prompt sequences
 

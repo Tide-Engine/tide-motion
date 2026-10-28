@@ -284,16 +284,26 @@ static void variants_scene(const std::vector<Clip>& clips,const std::vector<std:
     auto first=world_pose(clips[0],clips[0].frame(0));
     float low=first.front().p.y,high=low;
     for(const auto& joint:first) {low=std::min(low,joint.p.y);high=std::max(high,joint.p.y);}
-    const float height=std::max(0.5f,high-low);
     if(low>-0.05f&&low<0.15f)low=0;
+    // Cells fit the tallest and widest poses of any clip (a clip may crouch, jump or
+    // kick out from its first frame), at least a standing body's height.
+    float top_y=high,reach=0;
+    for(const auto& c:clips)for(size_t f=0;f<c.frames();f+=2) {
+        auto pose=world_pose(c,c.frame(f));const auto centre=pose[c.motion_root].p;
+        for(const auto& joint:pose) {top_y=std::max(top_y,joint.p.y);reach=std::max(reach,std::hypot(joint.p.x-centre.x,joint.p.z-centre.z));}
+    }
+    // The body's flesh reaches about 0.15 m past its joints.
+    constexpr float flesh=0.15f;
+    const float height=std::max(0.5f,top_y-low+flesh);
     const size_t n=clips.size(),poses=animated?1:6;
     size_t columns=animated?std::min(n,static_cast<size_t>(std::ceil(std::sqrt(2.0*static_cast<double>(n)))))
         :n<=3?1:static_cast<size_t>(std::ceil(std::sqrt(static_cast<double>(n)/2)));
     columns=std::max<size_t>(1,columns);
     const size_t rows=(n+columns-1)/columns;
-    // Metres: a pose every 0.8 heights; a cell is a label strip and one row (GIF: the
-    // two views side by side) or two rows (sheet: profile above, front below).
-    const float step=0.8f*height,pad=0.35f*height,label=0.32f*height,row=1.3f*height;
+    // Metres: a pose every 0.8 heights, or wider for poses that reach out; a cell is a
+    // label strip and one row (GIF: the two views side by side) or two rows (sheet:
+    // profile above, front below).
+    const float step=std::max(0.8f*height,1.5f*reach+flesh),pad=0.35f*height,label=0.32f*height,row=1.3f*height;
     const float cell_w=static_cast<float>(animated?2:poses)*step+pad,cell_h=label+row*static_cast<float>(animated?1:2)+(animated?0.25f:0.0f)*height;
     const float view_w=static_cast<float>(columns)*cell_w,view_h=static_cast<float>(rows)*cell_h;
     *aspect=view_w/view_h;*across=columns;

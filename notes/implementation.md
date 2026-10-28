@@ -514,6 +514,28 @@ saved. Checked on a real 8-variant kick run: the one clip kickcheck scored as no
 kick (seed 5, foot 0.03 m) is plainly standing in every cell, the seven kicks
 (0.58–1.25 m) show the leg up in profile.
 
+0.5.1 (2026-10-28): cells were sized from the first clip's first frame, so a clip
+that starts crouched (a state prompt holds its state from frame 0) or jumps or
+reaches out spilled into its neighbours. Cells now fit the tallest pose of any
+clip (every second frame, plus 0.15 m for the mannequin's flesh beyond its
+joints) and space poses at least 1.5 times the widest horizontal reach from the
+root plus that margin. Checked on 8 crouch, 4 kick and 4 jump variants: no
+overlap; standing kicks look as before.
+
+## Prompting guide (0.5.1)
+
+PROMPTING.md (packaged beside README.md) records what to write and how to nudge
+a result, from measured runs on 2026-10-28: 17 prompt patterns and 4 crouch
+transitions at 8 seeds each, a duration sweep (1.5–5 s, 5 seeds), and steps
+10/25/50/100 at 8 seeds on two prompts, scored by forward kinematics (foot peak,
+both feet airborne, head drop, root travel). Findings worth keeping in mind when
+changing generation: wording style is irrelevant; side and direction words are
+obeyed ("forward" travels about 1.6 m); props weaken the action; a two-action
+prompt fails where --then succeeds; a state prompt ("crouches down") holds the
+state from frame 0, a transition needs "a standing person …" or a start pose;
+steps above 50 do not help and a seed's result depends on the step count. The
+README's measurement tables moved there.
+
 Mirror (edit.cpp mirror_soma): SOMA-30 rest offsets are symmetric about x
 (left is +x facing +z; largest asymmetry 0.24 mm at the hips) with identity rest
 rotations, so a local rotation L becomes M L M (M the x reflection, quaternion

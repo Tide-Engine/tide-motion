@@ -132,6 +132,8 @@ Variants: -o kick.glb --seed 4 --variants 3 writes kick.seed4.glb,
 kick.seed5.glb and kick.seed6.glb, each with its recipe; generate with --seed S
 and no --variants to remake one exactly. kick.variants.png shows each in a
 labelled cell: key moments in right profile (top) and facing (bottom).
+
+PROMPTING.md (beside README.md) covers what to write and how to nudge a result.
 )";
     if(command=="connect")return R"(tide-motion connect FROM.glb TO.glb -o BRIDGE.glb [options]
 
